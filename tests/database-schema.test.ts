@@ -9,10 +9,11 @@ describe("database schema definition", () => {
     const sql = await readFile(schemaPath, "utf8");
     const createTableRegex = /CREATE TABLE IF NOT EXISTS\s+(\w+)\s*\(([\s\S]*?)\);/gi;
     const tables: { name: string; body: string }[] = [];
-    let match: RegExpExecArray | null;
+    let match = createTableRegex.exec(sql);
 
-    while ((match = createTableRegex.exec(sql)) !== null) {
+    while (match !== null) {
       tables.push({ name: match[1]!, body: match[2]! });
+      match = createTableRegex.exec(sql);
     }
 
     expect(tables.map((table) => table.name).sort()).toEqual(

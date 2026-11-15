@@ -197,16 +197,18 @@ export class CodexRuntime implements AgentRuntime {
       const { value, done } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
-      let index;
-      while ((index = buffer.indexOf("\n")) >= 0) {
+      let index = buffer.indexOf("\n");
+      while (index >= 0) {
         const line = buffer.slice(0, index).trim();
         buffer = buffer.slice(index + 1);
-        if (!line) continue;
-        try {
-          this.handle(JSON.parse(line) as RpcMessage);
-        } catch {
-          /* malformed output is represented by process failure */
+        if (line) {
+          try {
+            this.handle(JSON.parse(line) as RpcMessage);
+          } catch {
+            /* malformed output is represented by process failure */
+          }
         }
+        index = buffer.indexOf("\n");
       }
     }
     const error = new Error("Codex app-server exited");
