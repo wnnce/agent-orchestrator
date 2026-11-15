@@ -1,0 +1,73 @@
+projects:
+  - project:
+      enabled: true
+      id: example-project
+      displayName: Example Project
+      description: Multi-repo microservice project with isolated Git worktrees and agent configuration.
+      tags: [backend, microservices]
+    routing:
+      projectId: example-project
+      displayName: Example Project
+      summary: Multi-repo microservice with backend service and API schemas.
+      repositories: [my-org/backend-service, my-org/api-proto]
+      keywords: [backend, service, proto, api]
+      routingHints: [Use this project for backend service and protobuf schema changes.]
+
+    # Agent & MCP Server Configuration
+    agent:
+      model: gpt-5-codex
+      reasoningEffort: high
+      mcpServers:
+        - name: db-explorer
+          command: mcp-server-postgres
+          args: ["--connection-string", "env:DATABASE_URL"]
+          required: false
+        - name: docs-search
+          url: https://mcp.internal.example.com/docs
+          auth: env:INTERNAL_MCP_TOKEN
+
+    # Multi-Repository Workspace Configuration
+    # Bases are pre-warmed via git fetch on startup. Sessions get isolated git worktrees.
+    repositories:
+      - id: service
+        url: git@github.com:my-org/backend-service.git
+        baseBranch: main
+        isPrimary: true
+        auth:
+          type: ssh-key
+          keyPath: /secrets/keys/backend-service.id_ed25519
+      - id: proto
+        url: https://github.com/my-org/api-proto.git
+        baseBranch: master
+        isPrimary: false
+        auth:
+          type: token
+          tokenEnv: GITHUB_TOKEN
+
+    # Prompt Configuration (loaded from external Markdown files)
+    promptsDir: ./prompts/example-project
+    prompts:
+      system: ./prompts/example-project/system.md
+      fix: ./prompts/example-project/fix.md
+      analyze: ./prompts/example-project/analyze.md
+      rules: ./prompts/example-project/rules.md
+
+    triggers:
+      - id: hourly-summary
+        implementationKey: prompt
+        schedule: "@every 1h"
+        intervalMs: 3600000
+        config:
+          prompt: Summarize recent project activity.
+
+    # Outbound notifications (inherits global notifications from config.yaml, can override by name)
+    # notifications:
+    #   - name: feishu # Overrides the global feishu notification endpoint for this project
+    #     type: feishu
+    #     url: https://open.feishu.cn/open-apis/bot/v2/hook/custom-project-hook
+    #     enabled: true
+    #   - name: telegram # Overrides global telegram endpoint for this project
+    #     type: telegram
+    #     botToken: "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ"
+    #     chatId: "@my_project_channel"
+    #     enabled: true

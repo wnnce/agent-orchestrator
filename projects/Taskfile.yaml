@@ -1,0 +1,107 @@
+version: '3'
+
+tasks:
+  default:
+    desc: "Inspect lifecycle script readiness for all managed projects"
+    cmds:
+      - task: list
+
+  list:
+    desc: "List managed projects and their scripts/init.sh and scripts/sync.sh status"
+    silent: true
+    cmds:
+      - |
+        echo -e "\033[1;34m=== Managed Projects & Lifecycle Scripts Status ===\033[0m\n"
+        printf "%-20s  %-14s  %-14s\n" "Project ID" "init.sh" "sync.sh"
+        echo "--------------------------------------------------------"
+        for d in */; do
+          [ -d "$d" ] || continue
+          name="${d%/}"
+          if [ -f "$name/project.yaml" ]; then
+            init_status="\033[0;31m✖ Missing\033[0m"
+            sync_status="\033[0;31m✖ Missing\033[0m"
+            [ -f "$name/scripts/init.sh" ] && init_status="\033[0;32m✔ Ready\033[0m"
+            [ -f "$name/scripts/sync.sh" ] && sync_status="\033[0;32m✔ Ready\033[0m"
+            printf "%-20s  %-26b  %-26b\n" "$name" "$init_status" "$sync_status"
+          fi
+        done
+        echo ""
+
+  init:
+    desc: "Initialize project(s): task init (all) or task init -- <project_id>"
+    cmds:
+      - task: _exec
+        vars:
+          ACTION: "init"
+          TARGET: '{{.PROJ | default .CLI_ARGS}}'
+
+  sync:
+    desc: "Synchronize/upgrade project(s): task sync (all) or task sync -- <project_id>"
+    cmds:
+      - task: _exec
+        vars:
+          ACTION: "sync"
+          TARGET: '{{.PROJ | default .CLI_ARGS}}'
+
+  _exec:
+    internal: true
+    silent: true
+    cmds:
+      - |
+        bash -eo pipefail << 'EOF'
+        ACTION="{{.ACTION}}"
+        TARGET="{{.TARGET}}"
+
+        run_project() {
+          local proj="$1"
+          local script="$proj/scripts/${ACTION}.sh"
+          [ -d "$proj" ] || return 0
+
+          echo -e "\033[0;34m▶ [$proj]\033[0m Executing ${ACTION} ..."
+          if [ ! -f "$script" ]; then
+            echo -e "\033[1;33m  ⚠ Skipped: scripts/${ACTION}.sh not found\033[0m\n"
+            return 0
+          fi
+
+          chmod +x "$script"
+          (
+            cd "$proj"
+            if [ -f .env ]; then
+              set -a
+              # shellcheck disable=SC1091
+              source .env
+              set +a
+            fi
+            ./scripts/"${ACTION}".sh
+          )
+          echo -e "\033[0;32m✔ [$proj]\033[0m ${ACTION} completed\n"
+        }
+
+        if [ -n "$TARGET" ]; then
+          if [ ! -d "$TARGET" ] || [ ! -f "$TARGET/project.yaml" ]; then
+            echo -e "\033[0;31m✖ Error: Valid project '$TARGET' not found (requires project.yaml)\033[0m" >&2
+            exit 1
+          fi
+          run_project "$TARGET"
+        else
+          echo -e "\033[1;34m========================================\033[0m"
+          echo -e "\033[1;34m Batch executing action: ${ACTION} (all projects)\033[0m"
+          echo -e "\033[1;34m========================================\033[0m\n"
+
+          found=0
+          for d in */; do
+            [ -d "$d" ] || continue
+            name="${d%/}"
+            if [ -f "$name/project.yaml" ]; then
+              run_project "$name"
+              found=$((found + 1))
+            fi
+          done
+
+          if [ "$found" -eq 0 ]; then
+            echo -e "\033[1;33mNo valid projects containing project.yaml found\033[0m"
+          else
+            echo -e "\033[1;32m✔ All ${found} project(s) ${ACTION} completed!\033[0m"
+          fi
+        fi
+        EOF

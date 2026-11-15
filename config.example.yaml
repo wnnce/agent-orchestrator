@@ -1,0 +1,70 @@
+# ==========================================
+# Agent Orchestrator Service Configuration
+# ==========================================
+
+# 1. HTTP server network settings
+server:
+  host: 0.0.0.0
+  port: 7070
+
+# 2. Logging output level
+logging:
+  level: info # debug | info | warn | error
+
+# 3. Storage and paths (relative paths resolve from this YAML file's directory)
+storage:
+  dataDir: .data
+  projectsDir: projects
+  # artifactDir: .data/artifacts # Optional, defaults to <dataDir>/artifacts
+  # databaseUrl: postgres://orchestrator:orchestrator@localhost:5432/orchestrator # Optional, leave blank for in-memory store
+  databaseUrl: ""
+
+# 4. Gateway authentication (leave blank for development, set to require Bearer auth)
+auth:
+  token: ""
+
+# 5. Multi-project router (leave blank to use fast local keyword routing)
+router:
+  model: ""
+  apiKey: ""
+  baseUrl: https://api.openai.com/v1
+
+# 6. Default agent runtime settings
+runtimes:
+  codex:
+    apiKey: ""
+    baseUrl: ""
+    # mcpServers: [] # Global servers inherited by projects
+
+# 7. External integration channels
+channels:
+  feishu:
+    enabled: false
+    verificationToken: "" # Inbound event webhook verification token
+    appId: "" # Outbound Bot App ID
+    appSecret: "" # Outbound Bot App Secret
+    apiBaseUrl: https://open.feishu.cn
+  wecom:
+    enabled: false
+    botId: "" # WeCom intelligent bot BotID (API mode from admin console)
+    secret: "" # WeCom intelligent bot Secret
+    # wsUrl: wss://openws.work.weixin.qq.com # Optional WebSocket gateway URL, defaults to official gateway
+
+# 8. Outbound notifications (global notification endpoints inherited by all projects)
+# Projects inherit all global channels by default; project channels with the same name override global ones.
+notifications: []
+#  - name: feishu
+#    type: feishu
+#    url: https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+#    secret: "" # Optional Feishu custom bot signature secret
+#    enabled: true
+#  - name: wecom
+#    type: wecom
+#    url: https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+#    enabled: true
+#  - name: telegram
+#    type: telegram
+#    botToken: "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ"
+#    chatId: "-1001234567890" # Channel @username, group ID, or personal chat ID
+#    # url: "https://api.telegram.org" # Optional custom proxy URL
+#    enabled: true

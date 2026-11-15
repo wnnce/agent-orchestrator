@@ -1,0 +1,23 @@
+node_modules
+bun.lockb
+dist
+web/dist
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+.data
+coverage
+/config.yaml
+
+docs/memory
+docs/memory/*
+
+# Ignore all user projects under projects/ except example and shared meta files
+projects/*
+!projects/example/
+!projects/AGENTS.md
+!projects/Taskfile.yaml
+!projects/*.example.*

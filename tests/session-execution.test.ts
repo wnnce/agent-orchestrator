@@ -1,0 +1,234 @@
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import path from "node:path";
+import { ProjectRuntime } from "../src/project/runtime.ts";
+import { FakeRuntime, type RuntimeContext } from "../src/runtime/runtime.ts";
+import { MemoryStore } from "../src/persistence/store.ts";
+import { WorkspaceManager } from "../src/workspace/workspace.ts";
+import { ArtifactStore } from "../src/artifacts/store.ts";
+import { Logger } from "../src/observability/logger.ts";
+import type { ProjectConfig } from "../src/domain/types.ts";
+
+class ControlledRuntime extends FakeRuntime {
+  starts: Array<{ context: RuntimeContext; session: string; id: string; input: string }> = [];
+  released: string[] = [];
+  early = false;
+  acknowledgeInterrupt = true;
+  failStart = false;
+  private waiters: Array<() => void> = [];
+  override async startTurn(context: RuntimeContext, session: string, id: string, input: string) {
+    if (this.failStart) {
+      this.failStart = false;
+      throw new Error("start failed");
+    }
+    const runtimeId = `runtime-${id}`;
+    this.starts.push({ context, session, id: runtimeId, input });
+    for (const notify of this.waiters.splice(0)) notify();
+    if (this.early)
+      await context.onEvent({
+        type: "turn.completed",
+        sessionId: session,
+        turnId: runtimeId,
+        payload: {},
+      });
+    return { id: runtimeId };
+  }
+  async started(count: number) {
+    while (this.starts.length < count)
+      await new Promise<void>((resolve) => this.waiters.push(resolve));
+  }
+  async finish(index: number, status: "completed" | "failed" | "interrupted" = "completed") {
+    const start = this.starts[index]!;
+    await start.context.onEvent({
+      type: `turn.${status}` as "turn.completed" | "turn.failed" | "turn.interrupted",
+      sessionId: start.session,
+      turnId: start.id,
+      payload: {},
+    });
+  }
+  override async interruptTurn(context: RuntimeContext, session: string, id: string) {
+    if (this.acknowledgeInterrupt)
+      await context.onEvent({
+        type: "turn.interrupted",
+        sessionId: session,
+        turnId: id,
+        payload: {},
+      });
+  }
+  override async releaseSession(_context: RuntimeContext, id: string) {
+    this.released.push(id);
+  }
+}
+
+describe("session execution and control", () => {
+  let root: string;
+  let store: MemoryStore;
+  let agent: ControlledRuntime;
+  let runtime: ProjectRuntime;
+  let sessionId: string;
+  beforeEach(async () => {
+    root = await mkdtemp("/tmp/session-execution-");
+    store = new MemoryStore();
+    agent = new ControlledRuntime();
+    const project: ProjectConfig = {
+      id: "execution",
+      displayName: "Execution",
+      description: "test",
+      routing: { projectId: "execution" },
+      repositories: [{ id: "main", url: "", baseBranch: "main" }],
+      runtime: { type: "fake", idleTimeoutMs: 1000, archiveTimeoutMs: 2000 },
+    };
+    runtime = new ProjectRuntime(
+      project,
+      store,
+      agent,
+      new WorkspaceManager(path.join(root, "workspaces")),
+      new ArtifactStore(path.join(root, "artifacts"), store),
+      undefined,
+      new Logger({ sink: () => {} }),
+      undefined,
+      undefined,
+      { controlTimeoutMs: 30, queueLimit: 2 },
+    );
+    sessionId = (await runtime.createSession()).sessionId;
+  });
+  afterEach(async () => {
+    await runtime.stop();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("does not start the next turn before the previous terminal event", async () => {
+    const first = await runtime.turn(sessionId, "first");
+    await agent.started(1);
+    const second = await runtime.turn(sessionId, "second");
+    expect(agent.starts).toHaveLength(1);
+    expect((await store.getTurn(second.id))?.status).toBe("queued");
+    await agent.finish(0);
+    await agent.started(2);
+    expect((await store.getTurn(first.id))?.status).toBe("completed");
+    await agent.finish(1);
+    await runtime.waitForIdle(sessionId);
+    expect((await store.getTurn(second.id))?.status).toBe("completed");
+  });
+  test("correlates a terminal event arriving before startTurn returns", async () => {
+    agent.early = true;
+    const turn = await runtime.turn(sessionId, "instant");
+    await runtime.waitForIdle(sessionId);
+    expect((await store.getTurn(turn.id))?.status).toBe("completed");
+    expect((await runtime.events(sessionId)).find((e) => e.type === "turn.completed")?.turnId).toBe(
+      turn.id,
+    );
+  });
+  test("cancel bypasses queued work and the next normal turn can continue", async () => {
+    const first = await runtime.turn(sessionId, "long");
+    await agent.started(1);
+    const second = await runtime.turn(sessionId, "next");
+    await runtime.interrupt(sessionId);
+    await agent.started(2);
+    expect((await store.getTurn(first.id))?.status).toBe("interrupted");
+    await agent.finish(1);
+    await runtime.waitForIdle(sessionId);
+    expect((await store.getTurn(second.id))?.status).toBe("completed");
+  });
+  test("turn completion retains the notification event and project metadata", async () => {
+    runtime.project.notifyOnTurnCompleted = true;
+    runtime.project.notifications = [{ type: "log", name: "completion" }];
+    const turn = await runtime.turn(sessionId, "finish with notification");
+    await agent.started(1);
+    await agent.finish(0);
+    await runtime.waitForIdle(sessionId);
+    const queued = (await runtime.events(sessionId)).find(
+      (event) => event.type === "notification.queued",
+    );
+    expect(queued?.turnId).toBe(turn.id);
+    const deliveries = await store.listNotificationDeliveries();
+    expect(deliveries).toHaveLength(1);
+    expect(deliveries[0]?.message.metadata).toEqual({
+      projectId: "execution",
+      sessionId,
+      turnId: turn.id,
+    });
+  });
+  test("canceling a queued turn does not cancel the active turn", async () => {
+    const first = await runtime.turn(sessionId, "long");
+    await agent.started(1);
+    const second = await runtime.turn(sessionId, "queued");
+    await runtime.interrupt(sessionId, second.id);
+    expect((await store.getTurn(second.id))?.status).toBe("interrupted");
+    expect((await store.getTurn(first.id))?.status).toBe("in_progress");
+    await agent.finish(0);
+    await runtime.waitForIdle(sessionId);
+    expect(agent.starts).toHaveLength(1);
+  });
+  test("close cancels the queue and releases resources only after interrupt confirmation", async () => {
+    await runtime.turn(sessionId, "long");
+    await agent.started(1);
+    await runtime.turn(sessionId, "queued");
+    await runtime.cleanupSession(sessionId);
+    expect(agent.starts).toHaveLength(1);
+    expect(agent.released).toHaveLength(1);
+    expect(await store.getSession(sessionId)).toBeNull();
+  });
+  test("a close timeout retains the session and workspace", async () => {
+    agent.acknowledgeInterrupt = false;
+    await runtime.turn(sessionId, "long");
+    await agent.started(1);
+    await expect(runtime.cleanupSession(sessionId)).rejects.toThrow("timed out");
+    expect((await store.getSession(sessionId))?.status).toBe("closing");
+    expect(agent.released).toHaveLength(0);
+    await expect(runtime.turn(sessionId, "late")).rejects.toThrow("closing");
+    await agent.finish(0, "interrupted");
+    await runtime.waitForIdle(sessionId);
+    await runtime.cleanupSession(sessionId);
+  });
+  test("runtime disconnect completes the active turn as failed", async () => {
+    const turn = await runtime.turn(sessionId, "long");
+    await agent.started(1);
+    const current = agent.starts[0]!;
+    await current.context.onEvent({
+      type: "runtime.disconnected",
+      sessionId: current.session,
+      payload: {},
+    });
+    await runtime.waitForIdle(sessionId);
+    expect((await store.getTurn(turn.id))?.status).toBe("failed");
+  });
+  test("failed startup does not stall the next turn", async () => {
+    agent.failStart = true;
+    const first = await runtime.turn(sessionId, "fail");
+    const second = await runtime.turn(sessionId, "next");
+    await agent.started(1);
+    await agent.finish(0);
+    await runtime.waitForIdle(sessionId);
+    expect((await store.getTurn(first.id))?.status).toBe("failed");
+    expect((await store.getTurn(second.id))?.status).toBe("completed");
+  });
+  test("suspending one session releases its thread without stopping the project", async () => {
+    const entity = runtime.sessionManager.get(sessionId)!;
+    entity.touch(new Date(Date.now() - 1500).toISOString());
+    await runtime.sessionManager.save(sessionId);
+    await runtime.checkLifecycles();
+    expect(entity.status).toBe("suspended");
+    expect(agent.released).toHaveLength(1);
+    const turn = await runtime.turn(sessionId, "resume");
+    await agent.started(1);
+    await agent.finish(0);
+    await runtime.waitForIdle(sessionId);
+    expect(entity.status).toBe("active");
+    expect((await store.getTurn(turn.id))?.status).toBe("completed");
+  });
+  test("active work cannot be archived and completing work refreshes idle time", async () => {
+    await runtime.turn(sessionId, "long");
+    await agent.started(1);
+    const entity = runtime.sessionManager.get(sessionId)!;
+    entity.touch(new Date(Date.now() - 10000).toISOString());
+    await runtime.sessionManager.save(sessionId);
+    await runtime.checkLifecycles();
+    expect(entity.status).toBe("active");
+    await agent.finish(0);
+    await runtime.waitForIdle(sessionId);
+    await runtime.checkLifecycles();
+    expect(entity.status).toBe("active");
+    expect(Date.now() - Date.parse(entity.lastActiveAt)).toBeLessThan(1000);
+  });
+});

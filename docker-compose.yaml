@@ -1,0 +1,27 @@
+services:
+  agent-runtime-base:
+    image: agent-orchestrator-runtime-base:local
+    build:
+      context: infra/agent-runtime-base
+    profiles:
+      - build
+  agent-orchestrator:
+    image: agent-orchestrator:local
+    build:
+      context: .
+      args:
+        AGENT_RUNTIME_BASE: agent-orchestrator-runtime-base:local
+    depends_on:
+      - postgres
+    ports:
+      - "7070:7070"
+    volumes:
+      - orchestrator-data:/data
+      - type: bind
+        source: ./config.yaml
+        target: /app/config.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+volumes:
+  orchestrator-data:

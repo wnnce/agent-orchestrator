@@ -1,0 +1,36 @@
+{
+  "name": "agent-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/main.ts",
+    "start": "bun run dist/main.js",
+    "build": "bun build src/main.ts --target bun --outdir dist --external pg",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "check": "bun run typecheck && bun test",
+    "generate:codex": "codex app-server generate-ts --out src/runtime/codex/generated",
+    "format": "prettier --write src tests",
+    "formatCheck": "prettier --check src tests"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.76.0",
+    "@openai/codex": "0.167.0",
+    "@openai/codex-sdk": "0.167.0",
+    "@wecom/aibot-node-sdk": "^1.0.7",
+    "cron-parser": "^5.10.4",
+    "croner": "^11.0.0",
+    "hono": "^4.13.17",
+    "pg": "^8.16.3",
+    "yaml": "^2.8.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.3",
+    "@types/node": "^24.10.0",
+    "@types/pg": "^8.15.6",
+    "prettier": "^3.9.10",
+    "typescript": "^5.9.3"
+  }
+}

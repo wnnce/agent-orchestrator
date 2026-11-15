@@ -1,0 +1,319 @@
+@import "tailwindcss";
+@source "../node_modules/streamdown/dist/*.js";
+
+/* =====================================================================
+   Studio Design Tokens: Vercel / Geist Modern Flat Design System
+   ===================================================================== */
+
+:root {
+  /* Layout Dimensions */
+  --activity-bar-width: 48px;
+  --header-height: 48px;
+  --sidebar-width: 260px;
+  --inspector-width: 360px;
+
+  /* Spacing Scale */
+  --space-2xs: 0.125rem; /* 2px */
+  --space-xs: 0.25rem;   /* 4px */
+  --space-sm: 0.5rem;    /* 8px */
+  --space-md: 0.75rem;   /* 12px */
+  --space-base: 1rem;    /* 16px */
+  --space-lg: 1.25rem;   /* 20px */
+  --space-xl: 1.5rem;    /* 24px */
+  --space-2xl: 2rem;     /* 32px */
+
+  /* Typography Scale */
+  --font-size-2xs: 0.6875rem; /* 11px */
+  --font-size-xs: 0.75rem;    /* 12px */
+  --font-size-sm: 0.8125rem;  /* 13px */
+  --font-size-base: 0.875rem; /* 14px */
+  --font-size-md: 1rem;       /* 16px */
+  --font-size-lg: 1.125rem;   /* 18px */
+  --font-size-xl: 1.25rem;    /* 20px */
+  --font-size-2xl: 1.5rem;    /* 24px */
+
+  /* Vercel Crisp Radii (Sharp, Precise, Minimal) */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-full: 9999px;
+
+  /* Shadows (Flat / Zero Elevation) */
+  --shadow-sm: none;
+  --shadow-md: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 4px 12px 0 rgba(0, 0, 0, 0.08);
+
+  /* Light Theme (Vercel Pristine White) */
+  --bg-canvas: #ffffff;
+  --bg-surface: #fafafa;
+  --bg-surface-elevated: #f5f5f5;
+  --bg-surface-hover: #eaeaea;
+  --bg-subtle: #fcfcfc;
+  --bg-card: #ffffff;
+  --bg-header: #ffffff;
+  --bg-sidebar: #fafafa;
+  --bg-activity-bar: #ffffff;
+  --bg-inspector: #ffffff;
+  --bg-input: #ffffff;
+  --bg-code: #f5f5f5;
+  --bg-table-header: #fafafa;
+  --bg-table-row-hover: #f5f5f5;
+
+  --border-default: #eaeaea;
+  --border-subtle: #f0f0f0;
+  --border-strong: #d4d4d4;
+  --border-focus: #000000;
+
+  --text-primary: #171717;
+  --text-secondary: #666666;
+  --text-muted: #888888;
+  --text-inverted: #ffffff;
+  --text-code: #171717;
+
+  /* Vercel Stark Accent */
+  --primary: #000000;
+  --primary-hover: #222222;
+  --primary-subtle: rgba(0, 0, 0, 0.05);
+  --primary-border: rgba(0, 0, 0, 0.15);
+  --primary-text: #000000;
+
+  --thinking-bg: #f5f5f5;
+  --thinking-border: #e5e5e5;
+  --thinking-text: #555555;
+
+  --status-success-bg: rgba(0, 112, 243, 0.08);
+  --status-success-text: #0070f3;
+  --status-success-border: rgba(0, 112, 243, 0.2);
+
+  --status-error-bg: rgba(238, 0, 0, 0.08);
+  --status-error-text: #ee0000;
+  --status-error-border: rgba(238, 0, 0, 0.2);
+
+  --status-warning-bg: rgba(245, 166, 35, 0.08);
+  --status-warning-text: #f5a623;
+  --status-warning-border: rgba(245, 166, 35, 0.2);
+
+  --status-info-bg: rgba(0, 112, 243, 0.08);
+  --status-info-text: #0070f3;
+  --status-info-border: rgba(0, 112, 243, 0.2);
+
+  --status-pending-bg: rgba(121, 40, 202, 0.08);
+  --status-pending-text: #7928ca;
+  --status-pending-border: rgba(121, 40, 202, 0.2);
+
+  --status-neutral-bg: #f5f5f5;
+  --status-neutral-text: #666666;
+  --status-neutral-border: #e5e5e5;
+
+  --scrollbar-thumb: #d4d4d4;
+  --scrollbar-thumb-hover: #a3a3a3;
+}
+
+/* =====================================================================
+   Dark Theme (Vercel True Black - Precision Engineering)
+   ===================================================================== */
+.dark,
+[data-theme="dark"] {
+  --bg-canvas: #000000;
+  --bg-surface: #0a0a0a;
+  --bg-surface-elevated: #111111;
+  --bg-surface-hover: #1a1a1a;
+  --bg-subtle: #050505;
+  --bg-card: #000000;
+  --bg-header: #000000;
+  --bg-sidebar: #050505;
+  --bg-activity-bar: #000000;
+  --bg-inspector: #000000;
+  --bg-input: #0a0a0a;
+  --bg-code: #0a0a0a;
+  --bg-table-header: #0a0a0a;
+  --bg-table-row-hover: #111111;
+
+  --border-default: #222222;
+  --border-subtle: #171717;
+  --border-strong: #333333;
+  --border-focus: #ffffff;
+
+  --text-primary: #ededed;
+  --text-secondary: #a1a1a1;
+  --text-muted: #707070;
+  --text-inverted: #000000;
+  --text-code: #f5f5f5;
+
+  /* Vercel Stark Inverted Monochrome */
+  --primary: #ffffff;
+  --primary-hover: #cccccc;
+  --primary-subtle: rgba(255, 255, 255, 0.08);
+  --primary-border: rgba(255, 255, 255, 0.2);
+  --primary-text: #ffffff;
+
+  --thinking-bg: #0a0a0a;
+  --thinking-border: #222222;
+  --thinking-text: #888888;
+
+  --status-success-bg: rgba(0, 255, 136, 0.08);
+  --status-success-text: #00ff88;
+  --status-success-border: rgba(0, 255, 136, 0.2);
+
+  --status-error-bg: rgba(255, 51, 51, 0.08);
+  --status-error-text: #ff3333;
+  --status-error-border: rgba(255, 51, 51, 0.2);
+
+  --status-warning-bg: rgba(245, 166, 35, 0.08);
+  --status-warning-text: #f5a623;
+  --status-warning-border: rgba(245, 166, 35, 0.2);
+
+  --status-info-bg: rgba(0, 112, 243, 0.08);
+  --status-info-text: #0070f3;
+  --status-info-border: rgba(0, 112, 243, 0.2);
+
+  --status-pending-bg: rgba(187, 85, 255, 0.08);
+  --status-pending-text: #bb55ff;
+  --status-pending-border: rgba(187, 85, 255, 0.2);
+
+  --status-neutral-bg: #111111;
+  --status-neutral-text: #888888;
+  --status-neutral-border: #222222;
+
+  --scrollbar-thumb: #333333;
+  --scrollbar-thumb-hover: #444444;
+}
+
+/* =====================================================================
+   Base Styles & Typography
+   ===================================================================== */
+body {
+  background-color: var(--bg-canvas);
+  color: var(--text-primary);
+  font-size: var(--font-size-base);
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+  letter-spacing: -0.012em;
+}
+
+::selection {
+  background-color: var(--primary);
+  color: var(--text-inverted);
+}
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: var(--radius-xs);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+/* =====================================================================
+   Speed-Highlight Tokens (Vercel Flat Aesthetic)
+   ===================================================================== */
+.shj-numbers {
+  display: none;
+}
+
+.shj-syn-cmnt {
+  color: #71717a;
+  font-style: italic;
+}
+
+.shj-syn-kwd,
+.shj-syn-err,
+.shj-syn-deleted {
+  color: #ff7b72;
+}
+
+.shj-syn-num,
+.shj-syn-class {
+  color: #ffa657;
+}
+
+.shj-syn-str,
+.shj-syn-insert {
+  color: #a5d6ff;
+}
+
+.shj-syn-bool {
+  color: #79c0ff;
+}
+
+.shj-syn-type,
+.shj-syn-oper,
+.shj-syn-var {
+  color: #79c0ff;
+}
+
+.shj-syn-func,
+.shj-syn-section {
+  color: #d2a8ff;
+}
+
+/* Light Mode Syntax Highlighting Overrides */
+html:not(.dark) .shj-syn-cmnt { color: #64748b; }
+html:not(.dark) .shj-syn-kwd,
+html:not(.dark) .shj-syn-err { color: #cf222e; }
+html:not(.dark) .shj-syn-num,
+html:not(.dark) .shj-syn-class { color: #d46b08; }
+html:not(.dark) .shj-syn-str { color: #0a3069; }
+html:not(.dark) .shj-syn-bool,
+html:not(.dark) .shj-syn-type,
+html:not(.dark) .shj-syn-oper { color: #0969da; }
+html:not(.dark) .shj-syn-func { color: #8250df; }
+
+/* =====================================================================
+   Mermaid Diagrams & Flowcharts Readability Enhancements
+   ===================================================================== */
+.mermaid-diagram-viewer svg {
+  --_text: var(--text-primary) !important;
+  --_text-sec: var(--text-primary) !important;
+  --_text-muted: var(--text-primary) !important;
+}
+
+.mermaid-diagram-viewer svg text {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+  letter-spacing: -0.01em;
+}
+
+/* Sequence diagram message event labels */
+.mermaid-diagram-viewer svg .message text {
+  fill: var(--text-primary) !important;
+  font-weight: 500 !important;
+}
+
+/* Flowchart edge labels (e.g. A -->|Event| B) */
+.mermaid-diagram-viewer svg .edge-label text {
+  fill: var(--text-primary) !important;
+  font-weight: 500 !important;
+}
+
+/* Actors & Participants */
+.mermaid-diagram-viewer svg .actor text {
+  fill: var(--text-primary) !important;
+  font-weight: 600 !important;
+}
+
+/* Flowchart and State nodes */
+.mermaid-diagram-viewer svg .node text {
+  fill: var(--text-primary) !important;
+  font-weight: 500 !important;
+}
+
+/* Blocks and subgraphs */
+.mermaid-diagram-viewer svg .block text,
+.mermaid-diagram-viewer svg .group text {
+  fill: var(--text-primary) !important;
+}
+
+

@@ -1,0 +1,40 @@
+project:
+  enabled: false
+  id: example
+  displayName: Example Service
+  description: Example service repository and agent orchestrator demonstration.
+  tags: [example, demo, template]
+
+routing:
+  projectId: example
+  displayName: Example Service
+  summary: Example project template for orchestrator tasks, skills, and configurations.
+  repositories: [example-service]
+  keywords: [example, demo, template]
+  routingHints:
+    - Example project template for demonstration purposes (disabled by default).
+
+committer:
+  name: orchestrator-bot
+  email: bot@example.com
+
+auth:
+  type: token
+  token: "{env:GITHUB_TOKEN}"
+
+# Agent & Model Configuration
+agent:
+  model: deepseek-v4-pro
+  reasoningEffort: high
+  mcpServers:
+    - name: github
+      url: https://api.githubcopilot.com/mcp
+      http_headers:
+        Authorization: "Bearer {env:GITHUB_TOKEN}"
+
+# Multi-Repository Workspace Configuration
+repositories:
+  - id: example-service
+    url: git@github.com:example/example-service.git
+    baseBranch: main
+    isPrimary: true

@@ -1,0 +1,33 @@
+version: '3'
+
+includes:
+  projects:
+    taskfile: ./projects/Taskfile.yaml
+    dir: ./projects
+
+tasks:
+  default:
+    desc: "Inspect lifecycle script readiness for all managed projects"
+    cmds:
+      - task: list
+
+  list:
+    desc: "List managed projects and their scripts/init.sh and scripts/sync.sh status"
+    cmds:
+      - task: projects:list
+
+  init:
+    desc: "Initialize project(s): task init (all) or task init -- <project_id>"
+    cmds:
+      - task: projects:init
+        vars:
+          CLI_ARGS: '{{.CLI_ARGS}}'
+          PROJ: '{{.PROJ}}'
+
+  sync:
+    desc: "Synchronize/upgrade project(s): task sync (all) or task sync -- <project_id>"
+    cmds:
+      - task: projects:sync
+        vars:
+          CLI_ARGS: '{{.CLI_ARGS}}'
+          PROJ: '{{.PROJ}}'
