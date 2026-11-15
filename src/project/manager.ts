@@ -134,7 +134,9 @@ export class ProjectManager {
     const artifacts = new ArtifactStore(this.config.artifactDir, this.store);
 
     const actionRegistry = new ActionRegistry(this.logger, this.store);
-    actionRegistry.registerAll(defaultActionRegistry.list());
+    if (project.id !== GLOBAL_PROJECT_ID) {
+      actionRegistry.registerAll(defaultActionRegistry.list());
+    }
 
     let runtime: AgentRuntime;
     if (effective.runtime?.type === "codex")
