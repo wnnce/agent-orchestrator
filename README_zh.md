@@ -90,11 +90,13 @@ flowchart TD
 ## 核心特性
 
 ### 1. 多项目与多代码仓隔离（Multi-Project & Multi-Repo）
+
 - 每个受管项目在 `projects/<project-id>/project.yaml` 中声明代码仓、Git 提交人身份、认证凭证与专有 Prompt。
 - 基础仓库克隆与同步具备防击穿合并机制（Single-Flight），避免多个会话并发请求时重复拉取。
 - 每个会话通过 `ensureSessionWorkspaces` 自动分配专用的 Git Worktree，会话清理时自动释放。
 
 ### 2. 标准化 Agent 运行时与领域事件协议
+
 - 抽象统一的 Agent 运行时接口，当前包含经过高覆盖测试的 OpenAI Codex App Server 适配器，同时保留 Pi 等自定义 Agent 的扩展能力。
 - 将各 Agent 专有协议规范化为标准的领域事件体系：
   - `agent.message.delta` 与 `agent.message.completed`
@@ -105,11 +107,13 @@ flowchart TD
 - 细粒度过滤瞬态流式事件（`TRANSIENT_EVENT_TYPES`），保证 SSE 实时可消费的同时不污染数据库持久化存储。
 
 ### 3. 企业通讯平台无缝接入
+
 - **飞书（Lark）**：支持 WebSocket 长连接模式（无需公网固定 IP 与域名穿透）及标准 Webhook 回调；响应内容自动挂载到互动卡片中流式更新（`FeishuCardStreamer`）。
 - **企业微信**：基于智能机器人 SDK 实现卡片流式渲染（`WecomCardStreamer`）。
 - 具备严格的外部消息 ID 幂等排重机制，确保同一条消息不重复触发 Agent 执行。
 
 ### 4. 统一 Action 体系与定时任务引擎
+
 - 提供统一的操作能力接口：`createArtifact`（工件生成）、`notify`（跨渠道通知）、`emitDomainEvent`（自定义事件派发）。
 - 审计日志自动对超大参数进行截断保护，防止日志膨胀。
 - 内置 Cron 与定时轮询触发器，联动项目的 `Taskfile.yaml` 脚本执行自动化巡检与修复任务。
@@ -120,6 +124,7 @@ flowchart TD
 ## 快速开始
 
 ### 环境依赖
+
 - [Bun](https://bun.sh)（推荐 v1.2 或更高版本）
 - Git（需 2.30+ 以支持完整 worktree 特性）
 - Docker & Docker Compose（可选，用于容器化一键部署）
@@ -161,6 +166,14 @@ runtimes:
     baseUrl: "https://api.openai.com/v1"
 ```
 
+配置 PostgreSQL 时，需要在服务启动前显式初始化新数据库：
+
+```bash
+bun run db:init
+```
+
+应用启动过程不会执行 DDL。`database/schema.sql` 是新数据库的最终结构定义，不负责升级已有数据库。
+
 ### 3. 启动本地服务
 
 ```bash
@@ -182,13 +195,14 @@ bun run dev
 ```bash
 # 1. 准备配置文件
 cp config.example.yaml config.yaml
-# 如果启用 Postgres，请将 config.yaml 中的 databaseUrl 改为容器网络地址
+# 单机内存模式保持 storage.databaseUrl 为空
 
 # 2. 构建镜像并启动服务
 docker compose up -d --build
 ```
 
 应用镜像内部已集成：
+
 - 多语言开发环境（Go, Python/uv, Node.js, Bun, Git, Task, `rg`, `jq`）
 - 专用的非 root 运行权限与目录安全限制
 - 网关已直接内嵌预编译好的 Web Studio 静态资源
@@ -199,20 +213,20 @@ docker compose up -d --build
 
 ### 网关主配置 (`config.yaml`)
 
-| 配置项 | 类型 | 默认值 | 作用说明 |
-|---|---|---|---|
-| `server.host` | `string` | `0.0.0.0` | HTTP 服务监听地址 |
-| `server.port` | `number` | `7070` | HTTP 与 SSE 监听端口 |
-| `logging.level` | `string` | `info` | 日志级别：`debug`, `info`, `warn`, `error` |
-| `storage.dataDir` | `string` | `.data` | 会话工作区与运行时的根存储路径 |
-| `storage.projectsDir`| `string` | `projects` | 项目配置目录路径 |
-| `storage.databaseUrl`| `string` | 空 | PostgreSQL 连接串，留空自动启用纯内存存储 |
-| `auth.token` | `string` | 空 | 网关 API Bearer Token，留空则免鉴权 |
-| `router.model` | `string` | 空 | 用于大模型零样本意图分流的模型名 |
-| `runtimes.codex.apiKey` | `string` | 空 | 传递给 Codex App Server 的认证密钥 |
-| `channels.feishu.enabled` | `boolean` | `false` | 是否启用飞书事件接收与互动卡片流式适配 |
-| `channels.wecom.enabled` | `boolean` | `false` | 是否启用企业微信智能机器人适配器 |
-| `notifications` | `array` | `[]` | 全局出站通知端点（Telegram、Webhooks） |
+| 配置项                    | 类型      | 默认值     | 作用说明                                   |
+| ------------------------- | --------- | ---------- | ------------------------------------------ |
+| `server.host`             | `string`  | `0.0.0.0`  | HTTP 服务监听地址                          |
+| `server.port`             | `number`  | `7070`     | HTTP 与 SSE 监听端口                       |
+| `logging.level`           | `string`  | `info`     | 日志级别：`debug`, `info`, `warn`, `error` |
+| `storage.dataDir`         | `string`  | `.data`    | 会话工作区与运行时的根存储路径             |
+| `storage.projectsDir`     | `string`  | `projects` | 项目配置目录路径                           |
+| `storage.databaseUrl`     | `string`  | 空         | PostgreSQL 连接串，留空自动启用纯内存存储  |
+| `auth.token`              | `string`  | 空         | 网关 API Bearer Token，留空则免鉴权        |
+| `router.model`            | `string`  | 空         | 用于大模型零样本意图分流的模型名           |
+| `runtimes.codex.apiKey`   | `string`  | 空         | 传递给 Codex App Server 的认证密钥         |
+| `channels.feishu.enabled` | `boolean` | `false`    | 是否启用飞书事件接收与互动卡片流式适配     |
+| `channels.wecom.enabled`  | `boolean` | `false`    | 是否启用企业微信智能机器人适配器           |
+| `notifications`           | `array`   | `[]`       | 全局出站通知端点（Telegram、Webhooks）     |
 
 ### 项目配置 (`projects/<project-id>/project.yaml`)
 
@@ -260,6 +274,7 @@ curl -X POST http://localhost:7070/sessions \
 ```
 
 返回示例 (`201 Created`):
+
 ```json
 {
   "sessionId": "ses_7f300c1e-3a87-43cf-bc08-f41cb8371302",
@@ -286,6 +301,7 @@ curl -N -H "Accept: text/event-stream" \
 ```
 
 SSE 输出示例:
+
 ```text
 event: agent.message.delta
 data: {"sequence":1,"type":"agent.message.delta","payload":{"delta":"正在检查代码变动..."}}
@@ -319,6 +335,8 @@ data: {"sequence":3,"type":"turn.completed","payload":{"status":"completed","fin
 │   ├── task/             # 定时任务执行引擎（Cron / 轮询调度器）
 │   └── workspace/        # Git Worktree 管理与多代码仓并发同步
 ├── projects/             # 声明式项目配置与 Taskfile 脚本定义
+├── database/             # 新 PostgreSQL 数据库的最终结构定义
+├── scripts/              # 显式数据库初始化与维护命令
 ├── web/                  # Web Studio 前端应用（React 19, Vite, Tailwind CSS）
 ├── infra/                # Dockerfile 及运行时环境基础镜像配置
 ├── tests/                # Bun 自动化测试套件（30 个测试文件，273+ 测试用例）

@@ -112,7 +112,6 @@ describe("Event Stream Optimization: Delta skipping & in-memory sequence", () =>
     }
 
     store = new MemoryStore();
-    store.projects.set(project.id, project);
     eventHub = new MemoryEventHub(store);
     runtime = new ProjectRuntime(
       { ...project, repositories: [{ id: "main", url: repo, baseBranch: "main" }] },

@@ -686,7 +686,6 @@ describe("Feishu /close Command", () => {
       agent: { type: "fake" },
       repositories: [{ id: "main", url: "", baseBranch: "main", isPrimary: true }],
     };
-    store.projects.set(project.id, project);
 
     const config: any = {
       port: 7070,

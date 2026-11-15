@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import {
   ScheduledJobStatus,
   type ActionExecutionFilter,
@@ -10,7 +8,6 @@ import {
   type EventRecord,
   type InboundMessageRecord,
   type NotificationDelivery,
-  type ProjectConfig,
   type ScheduledJobRecord,
   type ScheduledJobStatusCode,
   type SessionRoute,
@@ -19,9 +16,6 @@ import {
 } from "../domain/types.ts";
 
 export interface Store {
-  migrate(): Promise<void>;
-  listProjects(): Promise<ProjectConfig[]>;
-  getProject(projectId: string): Promise<ProjectConfig | null>;
   createSession(route: SessionRoute): Promise<SessionRoute>;
   getSession(sessionId: string): Promise<SessionRoute | null>;
   listSessions(
@@ -89,7 +83,6 @@ export interface Store {
 }
 
 export class MemoryStore implements Store {
-  readonly projects = new Map<string, ProjectConfig>();
   readonly sessions = new Map<string, SessionRoute>();
   readonly turns = new Map<string, TurnRecord>();
   readonly events = new Map<string, EventRecord[]>();
@@ -99,13 +92,6 @@ export class MemoryStore implements Store {
   readonly taskExecutions: TaskExecutionRecord[] = [];
   readonly scheduledJobs = new Map<string, ScheduledJobRecord>();
   readonly actionExecutions: ActionExecutionRecord[] = [];
-  async migrate(): Promise<void> {}
-  async listProjects(): Promise<ProjectConfig[]> {
-    return [...this.projects.values()];
-  }
-  async getProject(projectId: string): Promise<ProjectConfig | null> {
-    return this.projects.get(projectId) ?? null;
-  }
   async createSession(route: SessionRoute): Promise<SessionRoute> {
     this.sessions.set(route.sessionId, route);
     return route;
@@ -365,50 +351,9 @@ export class MemoryStore implements Store {
 }
 
 export class PostgresStore implements Store {
-  constructor(
-    private readonly pool: Pool,
-    private readonly projects: ProjectConfig[],
-  ) {}
-  static fromUrl(databaseUrl: string, projects: ProjectConfig[]): PostgresStore {
-    return new PostgresStore(new Pool({ connectionString: databaseUrl, max: 10 }), projects);
-  }
-  async migrate(): Promise<void> {
-    const migrations = [
-      "001_initial.sql",
-      "002_task_and_action.sql",
-      "003_session_title.sql",
-      "004_notification_audit.sql",
-      "005_session_metadata.sql",
-      "006_action_executions.sql",
-      "007_canonical_events_migration.sql",
-    ];
-    for (const file of migrations) {
-      const filePath = path.resolve(process.cwd(), "migrations", file);
-      try {
-        await this.pool.query(await readFile(filePath, "utf8"));
-      } catch {
-        // If file is missing or not readable, skip gracefully
-      }
-    }
-    for (const project of this.projects) {
-      await this.pool.query(
-        "INSERT INTO projects(project_id, config, updated_at, deleted_at) VALUES($1, $2::jsonb, now(), 0) ON CONFLICT(project_id, deleted_at) DO UPDATE SET config = excluded.config, updated_at = now()",
-        [project.id, JSON.stringify(project)],
-      );
-    }
-  }
-  async listProjects(): Promise<ProjectConfig[]> {
-    const result = await this.pool.query(
-      "SELECT config FROM projects WHERE deleted_at = 0 ORDER BY id",
-    );
-    return result.rows.map((row) => row.config as ProjectConfig);
-  }
-  async getProject(projectId: string): Promise<ProjectConfig | null> {
-    const result = await this.pool.query(
-      "SELECT config FROM projects WHERE project_id = $1 AND deleted_at = 0",
-      [projectId],
-    );
-    return result.rows[0]?.config as ProjectConfig | null;
+  constructor(private readonly pool: Pool) {}
+  static fromUrl(databaseUrl: string): PostgresStore {
+    return new PostgresStore(new Pool({ connectionString: databaseUrl, max: 10 }));
   }
   async createSession(route: SessionRoute): Promise<SessionRoute> {
     const title = route.title ?? "新会话";

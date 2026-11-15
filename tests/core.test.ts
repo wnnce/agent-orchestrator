@@ -52,7 +52,6 @@ describe("project routing", () => {
 describe("memory store", () => {
   test("persists session routes and ordered events", async () => {
     const store = new MemoryStore();
-    await store.migrate();
     const route = newSessionRoute("alpha");
     await store.createSession(route);
     await store.appendEvent({
@@ -90,7 +89,6 @@ describe("fake project runtime", () => {
       if ((await process.exited) !== 0) throw new Error(await new Response(process.stderr).text());
     }
     store = new MemoryStore();
-    store.projects.set(project.id, project);
     runtime = new ProjectRuntime(
       { ...project, repositories: [{ id: "main", url: repo, baseBranch: "main" }] },
       store,

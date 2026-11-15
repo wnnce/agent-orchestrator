@@ -7,6 +7,7 @@
     "dev": "bun run src/main.ts",
     "start": "bun run dist/main.js",
     "build": "bun build src/main.ts --target bun --outdir dist --external pg",
+    "db:init": "bun run scripts/init-database.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "check": "bun run typecheck && bun test",

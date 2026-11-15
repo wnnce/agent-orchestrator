@@ -22,13 +22,8 @@ await prepareDirectories(config);
 const projects = await loadProjects(config.projectConfigPath);
 logger.info("project configuration loaded", { projectCount: projects.length });
 let store: Store;
-if (config.databaseUrl) store = PostgresStore.fromUrl(config.databaseUrl, projects);
-else {
-  const memory = new MemoryStore();
-  for (const project of projects) memory.projects.set(project.id, project);
-  store = memory;
-}
-await store.migrate();
+if (config.databaseUrl) store = PostgresStore.fromUrl(config.databaseUrl);
+else store = new MemoryStore();
 const sessionManager = new SessionManager(store);
 const eventHub = new MemoryEventHub(store, sessionManager);
 const projectManager = new ProjectManager(

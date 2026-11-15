@@ -90,11 +90,13 @@ flowchart TD
 ## Key Features
 
 ### 1. Multi-Project & Multi-Repo Workspaces
+
 - Each managed project defines its repositories, git committers, credentials, and custom prompts under `projects/<project-id>/project.yaml`.
 - Base repositories are automatically cloned and synchronized via single-flight locking, preventing concurrent fetch collisions.
 - Every session generates a dedicated Git worktree (`ensureSessionWorkspaces`) and prunes on teardown.
 
 ### 2. Standardized Agent Runtime & Canonical Protocol
+
 - Runtime interface decouples agent implementations. Includes first-class support for OpenAI Codex App Server JSON-RPC protocol, with extension points for Pi or custom CLI agents.
 - Normalizes proprietary agent dialects into a Discriminated Union `RuntimeEvent`:
   - `agent.message.delta` & `agent.message.completed`
@@ -104,11 +106,13 @@ flowchart TD
   - `runtime.unmapped` (safely encapsulates vendor dialects inside `metadata.raw` without root pollution)
 
 ### 3. Native Enterprise Channels
+
 - **Feishu / Lark**: WebSocket long-connection mode (`FeishuWsAdapter`) for zero-public-IP deployments, plus standard Webhook callbacks. Renders markdown responses directly into updating interactive cards (`FeishuCardStreamer`).
 - **WeChat Work (企业微信)**: Native bot SDK integration with chunked card streaming (`WecomCardStreamer`).
 - Automatic deduplication of external message IDs to guarantee turn idempotency.
 
 ### 4. Action Engine & Scheduled Tasks
+
 - Unified action capabilities: `createArtifact`, `notify`, `emitDomainEvent`.
 - Truncates oversized parameters safely in audit logs.
 - Configurable cron/interval tasks invoke project lifecycle handlers and maintenance jobs.
@@ -119,6 +123,7 @@ flowchart TD
 ## Quick Start
 
 ### Prerequisites
+
 - [Bun](https://bun.sh) (v1.2 or higher)
 - Git (v2.30+ recommended for worktree features)
 - Docker & Docker Compose (optional, for containerized run)
@@ -160,6 +165,15 @@ runtimes:
     baseUrl: "https://api.openai.com/v1"
 ```
 
+When PostgreSQL is configured, initialize a new database explicitly before starting the service:
+
+```bash
+bun run db:init
+```
+
+The application never applies DDL during startup. `database/schema.sql` is a fresh-database
+definition, not an upgrade migration for an existing database.
+
 ### 3. Run Locally
 
 ```bash
@@ -181,13 +195,14 @@ Build and run using Docker Compose:
 ```bash
 # 1. Prepare configuration
 cp config.example.yaml config.yaml
-# Ensure storage.databaseUrl points to postgres service if using PostgreSQL
+# Leave storage.databaseUrl empty for the standalone in-memory deployment
 
 # 2. Build images and start services
 docker compose up -d --build
 ```
 
 The application image incorporates:
+
 - Multi-repo developer runtime environment (Go, Python/uv, Node.js, Bun, Git, Task, `rg`, `jq`)
 - Dedicated non-root runtime permissions
 - Pre-packaged Web Studio assets served directly from the gateway
@@ -198,20 +213,20 @@ The application image incorporates:
 
 ### Gateway Service (`config.yaml`)
 
-| Field | Type | Description |
-|---|---|---|
-| `server.host` | `string` | Bind host (default: `0.0.0.0`) |
-| `server.port` | `number` | HTTP & SSE listening port (default: `7070`) |
-| `logging.level` | `string` | Log level: `debug`, `info`, `warn`, `error` |
-| `storage.dataDir` | `string` | Root directory for session workspaces and runtimes (default: `.data`) |
-| `storage.projectsDir`| `string` | Path containing project YAML declarations (default: `projects`) |
-| `storage.databaseUrl`| `string` | PostgreSQL connection URL. Empty uses In-Memory store |
-| `auth.token` | `string` | Gateway API bearer token. Empty disables authentication |
-| `router.model` | `string` | Optional model name for zero-shot LLM intent routing |
-| `runtimes.codex.apiKey` | `string` | API Key passed to Codex App Server sessions |
-| `channels.feishu.enabled` | `boolean` | Enable Feishu event receiver and interactive card streamer |
-| `channels.wecom.enabled` | `boolean` | Enable WeChat Work intelligent bot streaming adapter |
-| `notifications` | `array` | Global outbound notification endpoints (Telegram, Webhooks) |
+| Field                     | Type      | Description                                                           |
+| ------------------------- | --------- | --------------------------------------------------------------------- |
+| `server.host`             | `string`  | Bind host (default: `0.0.0.0`)                                        |
+| `server.port`             | `number`  | HTTP & SSE listening port (default: `7070`)                           |
+| `logging.level`           | `string`  | Log level: `debug`, `info`, `warn`, `error`                           |
+| `storage.dataDir`         | `string`  | Root directory for session workspaces and runtimes (default: `.data`) |
+| `storage.projectsDir`     | `string`  | Path containing project YAML declarations (default: `projects`)       |
+| `storage.databaseUrl`     | `string`  | PostgreSQL connection URL. Empty uses In-Memory store                 |
+| `auth.token`              | `string`  | Gateway API bearer token. Empty disables authentication               |
+| `router.model`            | `string`  | Optional model name for zero-shot LLM intent routing                  |
+| `runtimes.codex.apiKey`   | `string`  | API Key passed to Codex App Server sessions                           |
+| `channels.feishu.enabled` | `boolean` | Enable Feishu event receiver and interactive card streamer            |
+| `channels.wecom.enabled`  | `boolean` | Enable WeChat Work intelligent bot streaming adapter                  |
+| `notifications`           | `array`   | Global outbound notification endpoints (Telegram, Webhooks)           |
 
 ### Project Definition (`projects/<project-id>/project.yaml`)
 
@@ -259,6 +274,7 @@ curl -X POST http://localhost:7070/sessions \
 ```
 
 Response (`201 Created`):
+
 ```json
 {
   "sessionId": "ses_7f300c1e-3a87-43cf-bc08-f41cb8371302",
@@ -285,6 +301,7 @@ curl -N -H "Accept: text/event-stream" \
 ```
 
 Server-Sent Events output:
+
 ```text
 event: agent.message.delta
 data: {"sequence":1,"type":"agent.message.delta","payload":{"delta":"Analyzing error logs..."}}
@@ -318,6 +335,8 @@ data: {"sequence":3,"type":"turn.completed","payload":{"status":"completed","fin
 │   ├── task/             # Scheduled task runner (cron / interval engine)
 │   └── workspace/        # Git worktree manager & multi-repo synchronization
 ├── projects/             # Declarative project configurations and Taskfile
+├── database/             # Final PostgreSQL schema for new databases
+├── scripts/              # Explicit database initialization and maintenance commands
 ├── web/                  # Web Studio frontend (React 19, Vite, Tailwind CSS)
 ├── infra/                # Dockerfile and runtime base image recipes
 ├── tests/                # Bun automated test suite (30 test files, 273+ tests)

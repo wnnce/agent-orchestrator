@@ -1,35 +1,10 @@
--- ============================================================================
--- Migration: 001_initial.sql
--- Purpose: 项目配置、会话路由、Turn轮次、事件流水、审计与通知表
--- 架构方案 B (务实工业级设计):
---   1. 物理主键统一使用自增数字 (id BIGSERIAL PRIMARY KEY)，严禁使用字符串做物理主键
---   2. 核心实体资源表 (projects, sessions, project_triggers) 具备完整生命周期:
---      - created_at TIMESTAMPTZ NOT NULL DEFAULT now()
---      - updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
---      - deleted_at BIGINT NOT NULL DEFAULT 0 (0为未删除，删除时记录毫秒时间戳数字)
---   3. 从属流水与日志表 (turns, events, artifacts) 为只增不改 (Append-Only):
---      - 仅保留 created_at，不加 updated_at 与 deleted_at，极大降低存储开销与查询负担
---   4. 瞬时排重与投递表 (inbound_messages, trigger_intents, notification_deliveries):
---      - 物理生命周期管理，不加 deleted_at
--- ============================================================================
+-- Agent Orchestrator database schema.
+-- This file defines the final schema for a new database. It is not an upgrade migration.
 
--- 1. 项目表 (核心实体: 支持软删除与更新)
-CREATE TABLE IF NOT EXISTS projects (
-  id BIGSERIAL PRIMARY KEY,
-  project_id VARCHAR(100) NOT NULL,
-  config JSONB NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  deleted_at BIGINT NOT NULL DEFAULT 0
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_project_id
-  ON projects(project_id, deleted_at);
-
--- 2. 会话表 (核心实体: 支持软删除与更新)
 CREATE TABLE IF NOT EXISTS sessions (
   id BIGSERIAL PRIMARY KEY,
   session_id VARCHAR(100) NOT NULL,
+  title VARCHAR(255) DEFAULT '新会话',
   project_id VARCHAR(100) NOT NULL,
   repository_id VARCHAR(100),
   project_runtime_id VARCHAR(100) NOT NULL,
@@ -40,6 +15,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   external_conversation_id VARCHAR(255),
   external_thread_id VARCHAR(255),
   last_active_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  metadata JSONB DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   deleted_at BIGINT NOT NULL DEFAULT 0
@@ -54,7 +30,6 @@ CREATE INDEX IF NOT EXISTS idx_sessions_project
 CREATE INDEX IF NOT EXISTS idx_sessions_external
   ON sessions(external_channel, external_conversation_id, external_thread_id, deleted_at);
 
--- 3. 对话轮次表 (从属流水: 属于 Session 的历史对话)
 CREATE TABLE IF NOT EXISTS turns (
   id BIGSERIAL PRIMARY KEY,
   turn_id VARCHAR(100) NOT NULL,
@@ -75,7 +50,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_turns_turn_id
 CREATE INDEX IF NOT EXISTS idx_turns_session
   ON turns(session_id);
 
--- 4. 入站消息去重表 (瞬时排重)
 CREATE TABLE IF NOT EXISTS inbound_messages (
   id BIGSERIAL PRIMARY KEY,
   message_id VARCHAR(100) NOT NULL,
@@ -93,7 +67,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_inbound_messages_message_id
 CREATE INDEX IF NOT EXISTS idx_inbound_messages_conversation
   ON inbound_messages(channel, conversation_id, thread_id, received_at);
 
--- 5. 会话事件表 (纯 Append-Only 流式事件流水)
 CREATE TABLE IF NOT EXISTS events (
   id BIGSERIAL PRIMARY KEY,
   event_id VARCHAR(100) NOT NULL,
@@ -114,7 +87,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_events_event_id
 CREATE UNIQUE INDEX IF NOT EXISTS idx_events_session_sequence
   ON events(session_id, sequence);
 
--- 6. 会话产物表 (从属文件元数据)
 CREATE TABLE IF NOT EXISTS artifacts (
   id BIGSERIAL PRIMARY KEY,
   artifact_id VARCHAR(100) NOT NULL,
@@ -134,7 +106,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_artifacts_artifact_id
 CREATE INDEX IF NOT EXISTS idx_artifacts_session_created
   ON artifacts(session_id, created_at);
 
--- 7. 项目触发器配置表 (核心配置实体: 支持软删除与更新)
 CREATE TABLE IF NOT EXISTS project_triggers (
   id BIGSERIAL PRIMARY KEY,
   project_id VARCHAR(100) NOT NULL,
@@ -150,7 +121,6 @@ CREATE TABLE IF NOT EXISTS project_triggers (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_project_triggers_project_trigger
   ON project_triggers(project_id, trigger_id, deleted_at);
 
--- 8. 触发意图去重表 (瞬时排重)
 CREATE TABLE IF NOT EXISTS trigger_intents (
   id BIGSERIAL PRIMARY KEY,
   idempotency_key VARCHAR(255) NOT NULL,
@@ -160,7 +130,6 @@ CREATE TABLE IF NOT EXISTS trigger_intents (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_trigger_intents_key
   ON trigger_intents(idempotency_key);
 
--- 9. 通知投递表 (出站队列)
 CREATE TABLE IF NOT EXISTS notification_deliveries (
   id BIGSERIAL PRIMARY KEY,
   delivery_id VARCHAR(100) NOT NULL,
@@ -169,13 +138,100 @@ CREATE TABLE IF NOT EXISTS notification_deliveries (
   configs JSONB NOT NULL,
   message JSONB NOT NULL,
   status VARCHAR(50) NOT NULL,
-  error TEXT,
-  attempts INTEGER NOT NULL DEFAULT 0,
+  details JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_deliveries_delivery_id
   ON notification_deliveries(delivery_id);
 
-CREATE INDEX IF NOT EXISTS idx_notification_pending
-  ON notification_deliveries(status, created_at);
+CREATE TABLE IF NOT EXISTS task_executions (
+  id BIGSERIAL PRIMARY KEY,
+  execution_id VARCHAR(100) NOT NULL,
+  task_key VARCHAR(255) NOT NULL,
+  project_id VARCHAR(100) NOT NULL,
+  task_id VARCHAR(100) NOT NULL,
+  task_type VARCHAR(30) NOT NULL,
+  session_id VARCHAR(100),
+  turn_id VARCHAR(100),
+  status VARCHAR(30) NOT NULL,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ,
+  duration_ms BIGINT,
+  state_before JSONB,
+  state_after JSONB,
+  actions_summary JSONB DEFAULT '{}'::jsonb,
+  error_message TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_task_executions_execution_id
+  ON task_executions(execution_id);
+
+CREATE INDEX IF NOT EXISTS idx_task_executions_task_key
+  ON task_executions(task_key, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_task_executions_project
+  ON task_executions(project_id, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_task_executions_state_recovery
+  ON task_executions(task_key, id DESC)
+  WHERE status = 'success';
+
+CREATE TABLE IF NOT EXISTS scheduled_jobs (
+  id BIGSERIAL PRIMARY KEY,
+  job_id VARCHAR(100) NOT NULL,
+  project_id VARCHAR(100) NOT NULL,
+  session_id VARCHAR(100) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  delay_minutes INT NOT NULL DEFAULT 0,
+  trigger_at TIMESTAMPTZ NOT NULL,
+  status SMALLINT NOT NULL DEFAULT 1,
+  prompt TEXT NOT NULL DEFAULT '',
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  result_summary TEXT,
+  finished_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at BIGINT NOT NULL DEFAULT 0
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_scheduled_jobs_job_id
+  ON scheduled_jobs(job_id, deleted_at);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_poll
+  ON scheduled_jobs(status, trigger_at)
+  WHERE status = 1 AND deleted_at = 0;
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_session
+  ON scheduled_jobs(session_id, status)
+  WHERE deleted_at = 0;
+
+CREATE TABLE IF NOT EXISTS action_executions (
+  id BIGSERIAL PRIMARY KEY,
+  execution_id VARCHAR(100) NOT NULL,
+  project_id VARCHAR(100) NOT NULL,
+  session_id VARCHAR(100),
+  turn_id VARCHAR(100),
+  task_key VARCHAR(255),
+  caller VARCHAR(50) NOT NULL DEFAULT 'unknown',
+  action_name VARCHAR(100) NOT NULL,
+  parameters JSONB NOT NULL DEFAULT '{}'::jsonb,
+  status VARCHAR(20) NOT NULL,
+  result JSONB,
+  error_message TEXT,
+  duration_ms INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_action_executions_exec_id
+  ON action_executions(execution_id);
+
+CREATE INDEX IF NOT EXISTS idx_action_executions_session
+  ON action_executions(session_id, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_action_executions_project
+  ON action_executions(project_id, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_action_executions_name
+  ON action_executions(action_name, id DESC);

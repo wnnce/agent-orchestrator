@@ -12,7 +12,8 @@ WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./package.json
-COPY migrations ./migrations
+COPY database ./database
+COPY scripts/init-database.ts ./scripts/init-database.ts
 COPY projects ./projects
 COPY config.example.yaml ./config.example.yaml
 RUN mkdir -p /app/.data

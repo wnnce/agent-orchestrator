@@ -46,7 +46,6 @@ function createTestGateway(customConfig?: Partial<AppConfig>) {
     ...customConfig,
   };
   const store = new MemoryStore();
-  store.projects.set(sampleProject.id, sampleProject);
   const logger = new Logger();
   const projectManager = new ProjectManager([sampleProject], store, config, logger);
   const gateway = new Gateway(config, store, projectManager, logger);
