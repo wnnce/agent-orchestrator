@@ -15,6 +15,7 @@ COPY package.json ./package.json
 COPY migrations ./migrations
 COPY projects ./projects
 COPY config.example.yaml ./config.example.yaml
+RUN mkdir -p /app/.data
 RUN chown -R agent:agent /app
 USER agent
 ENV PATH="/app/node_modules/.bin:${PATH}"
