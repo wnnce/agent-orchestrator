@@ -354,7 +354,7 @@ describe("3-Tier Decision Chain Router & Global Fallback", () => {
       expect(result.project.id).toBe(GLOBAL_PROJECT_ID);
       expect(result.tier).toBe("fallback_global");
       expect(result.isGlobalFallback).toBe(true);
-      expect(result.project.runtime?.sandbox).toBe("danger-full-access");
+      expect(result.project.runtime?.sandbox).toBe("read-only");
     });
   });
 
@@ -505,7 +505,7 @@ describe("3-Tier Decision Chain Router & Global Fallback", () => {
       expect(created.routedProject).toBe(GLOBAL_PROJECT_ID);
 
       const globalRuntime = projectManager.get(GLOBAL_PROJECT_ID);
-      expect(globalRuntime.project.runtime?.sandbox).toBe("danger-full-access");
+      expect(globalRuntime.project.runtime?.sandbox).toBe("read-only");
     });
   });
 });

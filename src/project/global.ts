@@ -51,7 +51,7 @@ export function createGlobalProjectConfig(
     },
     runtime: {
       type: runtimeType,
-      sandbox: "danger-full-access",
+      sandbox: "read-only",
       approvalPolicy: "never",
     },
     repositories: [],
