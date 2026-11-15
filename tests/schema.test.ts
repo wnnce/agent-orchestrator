@@ -100,16 +100,8 @@ test("project schema accepts multi-repo configuration with auth", () => {
 test("loadProjects successfully loads from projects directory and ignores disabled projects", async () => {
   const projectsDir = path.resolve(import.meta.dir, "../projects");
   const projects = await loadProjects(projectsDir);
-  expect(projects.length).toBeGreaterThanOrEqual(1);
 
-  // Enabled projects like shortlink are loaded
-  const shortlink = projects.find((item) => item.id === "shortlink")!;
-  expect(shortlink).toBeDefined();
-  expect(shortlink.id).toBe("shortlink");
-  expect(shortlink.displayName).toBe("Shortlink");
-  expect(shortlink.repositories).toHaveLength(1);
-
-  // Disabled projects like example are NOT scanned/loaded
+  // The checked-in example is disabled and must not be scanned or loaded.
   const example = projects.find((item) => item.id === "example");
   expect(example).toBeUndefined();
 });

@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { mkdir, mkdtemp, writeFile, chmod, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile, chmod, rm, realpath } from "node:fs/promises";
 import path from "node:path";
 import { CodexRuntime } from "../src/runtime/codex.ts";
 import type { RuntimeEvent } from "../src/runtime/runtime.ts";
@@ -125,7 +125,7 @@ createInterface({ input: process.stdin }).on("line", line => {
     expect(generated.mcp_servers["project-tools"].url).toBe("https://tools.example.com/mcp");
     expect(generated.mcp_servers.personal).toBeUndefined();
     const spawn = await Bun.file(path.join(codexHome, "spawn.json")).json();
-    expect(spawn.cwd).toBe(codexHome);
+    expect(await realpath(spawn.cwd)).toBe(await realpath(codexHome));
     expect(spawn.codexHome).toBe(codexHome);
     expect(spawn.inherited).toEqual([]);
   } finally {
