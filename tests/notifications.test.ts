@@ -9,8 +9,9 @@ import {
   TelegramNotificationProvider,
   type NotificationProvider,
   type NotificationMessage,
-} from "../src/notifications/notifications.ts";
-import { formatFeishuMarkdown, formatWeComMarkdown } from "../src/notifications/markdown.ts";
+  formatFeishuMarkdown,
+  formatWeComMarkdown,
+} from "../src/notifications/index.ts";
 import type { NotificationConfig } from "../src/domain/types.ts";
 import { MemoryStore } from "../src/persistence/store.ts";
 import { Logger } from "../src/observability/logger.ts";

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Logger } from "../observability/logger.ts";
 import type { NotificationConfig, ArtifactRecord } from "../domain/types.ts";
-import type { NotificationMessage, NotificationOptions } from "../notifications/notifications.ts";
+import type { NotificationMessage, NotificationOptions } from "../notifications/index.ts";
 import type {
   ActionContext,
   ActionScope,

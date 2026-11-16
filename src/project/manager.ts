@@ -9,7 +9,7 @@ import type { AppConfig } from "../config/config.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Logger } from "../observability/logger.ts";
-import { NotificationHub, NotificationOutbox } from "../notifications/notifications.ts";
+import { NotificationHub, NotificationOutbox } from "../notifications/index.ts";
 import { MemoryEventHub, type EventHub } from "../events/hub.ts";
 import { SkillManager, type ProjectSkill } from "./skills.ts";
 import { GLOBAL_PROJECT_ID, createGlobalProjectConfig } from "./global.ts";

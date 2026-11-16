@@ -16,7 +16,7 @@ import type { Store } from "../persistence/store.ts";
 import type { AgentRuntime, RuntimeContext, RuntimeEvent } from "../runtime/runtime.ts";
 import { WorkspaceManager } from "../workspace/workspace.ts";
 import { ArtifactStore } from "../artifacts/store.ts";
-import { NotificationHub, NotificationOutbox } from "../notifications/notifications.ts";
+import { NotificationHub, NotificationOutbox } from "../notifications/index.ts";
 import { Logger } from "../observability/logger.ts";
 import { MemoryEventHub, type EventHub } from "../events/hub.ts";
 import { SkillManager, type ProjectSkill } from "./skills.ts";

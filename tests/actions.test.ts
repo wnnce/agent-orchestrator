@@ -192,7 +192,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { ArtifactStore } from "../src/artifacts/store.ts";
-import { NotificationOutbox, NotificationHub } from "../src/notifications/notifications.ts";
+import { NotificationOutbox, NotificationHub } from "../src/notifications/index.ts";
 import { TaskEngine } from "../src/task/engine.ts";
 import { MemoryEventHub } from "../src/events/hub.ts";
 import { defaultActionRegistry } from "../src/actions/index.ts";

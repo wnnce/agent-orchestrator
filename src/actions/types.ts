@@ -5,7 +5,7 @@ import type {
   NotificationOptions,
   NotificationOutbox,
   NotificationHub,
-} from "../notifications/notifications.ts";
+} from "../notifications/index.ts";
 import type { ArtifactRecord } from "../domain/types.ts";
 import type { ArtifactStore } from "../artifacts/store.ts";
 import type { Store } from "../persistence/store.ts";
