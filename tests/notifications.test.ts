@@ -595,6 +595,45 @@ describe("FeishuNotificationProvider", () => {
     }
   });
 
+  it("strips matching leading heading from card markdown body to avoid duplicate headers", async () => {
+    const originalFetch = globalThis.fetch;
+    let requestedBody: any = null;
+
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      requestedBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ code: 0 }), { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      await provider.send(
+        {
+          title: "[Agent Orchestrator] Issue 需求待补充信息",
+          text: "Issue 需要补充信息",
+          markdown:
+            "### ⚠️ [Agent Orchestrator] Issue 需求待补充信息\n- **项目**：Agent Orchestrator\n- **状态**：`issue:needs-info`\n\n### 待确认事项\n> 请提供复现步骤",
+          level: "warning",
+        },
+        { name: "feishu", type: "feishu", url: "https://feishu.example/hook" },
+      );
+
+      expect(requestedBody.msg_type).toBe("interactive");
+      expect(requestedBody.card.header.title.content).toBe(
+        "[Agent Orchestrator] Issue 需求待补充信息",
+      );
+      expect(requestedBody.card.header.template).toBe("orange");
+
+      const content = requestedBody.card.elements[0].content;
+      // Leading duplicate title heading is stripped
+      expect(content).not.toContain("Issue 需求待补充信息");
+      // Body starts directly with the content attributes
+      expect(content.startsWith("- **项目**：Agent Orchestrator")).toBe(true);
+      // Subsequent section headings are preserved
+      expect(content).toContain("**待确认事项**");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("keeps plain text notifications on the text payload", async () => {
     const originalFetch = globalThis.fetch;
     let requestedBody: any = null;

@@ -4,21 +4,25 @@ import type { NotificationMessage, NotificationProvider } from "../types.ts";
 
 /**
  * Normalizes Markdown for Feishu interactive message cards.
- *
- * Feishu interactive cards natively support the `markdown` element (`tag: "markdown"`):
- * - Multi-line fenced code blocks with language highlighting (```lang ... ```)
- * - Inline code (`code`)
- * - Ordered (1.) and unordered (-) lists
- * - Blockquotes (>)
- * - Bold (**), italic (*), strikethrough (~~)
- * - Links ([text](url)) and horizontal rules (---)
- * - Level 1 and Level 2 headings (# and ##)
- *
- * Headings beyond H2 (###, ####, etc.) are converted to bold text (**heading**)
- * because Feishu Card Markdown only supports # and ## as native heading elements.
+ * If `title` is provided and matches the first heading, strips the duplicate heading from the body.
+ * Converts H3+ headings (###, ####, etc.) to bold text as Feishu cards only natively support H1 and H2.
  */
-export function formatFeishuMarkdown(markdown: string): string {
-  const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
+export function formatFeishuMarkdown(markdown: string, title?: string): string {
+  let content = markdown.replace(/\r\n?/g, "\n").trim();
+
+  // Strip duplicate leading heading if it matches the card title
+  if (title) {
+    const match = content.match(/^#{1,6}\s+(.+?)(?:\n|$)/);
+    if (match) {
+      const normHeading = (match[1] ?? "").replace(/[*_`~]/g, "").replace(/\s+/g, "").toLowerCase();
+      const normTitle = title.replace(/\s+/g, "").toLowerCase();
+      if (normHeading === normTitle || normHeading.includes(normTitle) || normTitle.includes(normHeading)) {
+        content = content.slice(match[0].length).trimStart();
+      }
+    }
+  }
+
+  const lines = content.split("\n");
   const normalized: string[] = [];
   let inCodeBlock = false;
 
@@ -75,7 +79,7 @@ export class FeishuNotificationProvider implements NotificationProvider {
           elements: [
             {
               tag: "markdown",
-              content: formatFeishuMarkdown(message.markdown),
+              content: formatFeishuMarkdown(message.markdown, message.title),
             },
           ],
         },
