@@ -490,6 +490,7 @@ describe("TelegramNotificationProvider", () => {
 describe("Feishu and WeCom Markdown conversion", () => {
   const commonMarkdown = [
     "## 部署结果",
+    "### 详细步骤",
     "",
     "- 第一步",
     "  - 子步骤 A",
@@ -512,52 +513,41 @@ describe("Feishu and WeCom Markdown conversion", () => {
     "```",
   ].join("\n");
 
-  it("converts Feishu Markdown into lark_md-compatible content", () => {
+  it("normalizes Feishu Markdown preserving native elements and converting H3+ headings", () => {
     const formatted = formatFeishuMarkdown(commonMarkdown);
 
-    expect(formatted).toContain("**部署结果**");
-    expect(formatted).not.toContain("## 部署结果");
-    expect(formatted).toContain("• 第一步");
-    expect(formatted).toContain("  • 子步骤 A");
-    expect(formatted).toContain("  • 子步骤 B");
-    expect(formatted).not.toContain("- 第一步");
+    // H2 is preserved natively for Feishu card markdown
+    expect(formatted).toContain("## 部署结果");
+    // H3 is converted to bold heading for clean card rendering
+    expect(formatted).toContain("**详细步骤**");
+    // Lists, quotes, bold, links, inline code, and code blocks remain native
+    expect(formatted).toContain("- 第一步");
     expect(formatted).toContain("1. 检查");
-    expect(formatted).toContain("2. 上线");
-    expect(formatted).toContain("▎ 注意安全");
+    expect(formatted).toContain("> 注意安全");
     expect(formatted).toContain("**成功**");
     expect(formatted).toContain("[文档](https://example.com/docs)");
-    expect(formatted).toContain("<font color='grey'>bun run check</font>");
-    expect(formatted).toContain("💻 代码（ts）");
-    expect(formatted).toContain("## 不是标题");
-    expect(formatted).toContain("- 不是列表");
-    expect(formatted).toContain("<font color='grey'>const ok = true;</font>");
+    expect(formatted).toContain("`bun run check`");
+    expect(formatted).toContain("```ts\n## 不是标题\n- 不是列表\nconst ok = true;\n```");
   });
 
-  it("converts WeCom lists while preserving supported Markdown syntax", () => {
+  it("formats WeCom Markdown preserving native lists, quotes, and code", () => {
     const formatted = formatWeComMarkdown(commonMarkdown);
 
     expect(formatted).toContain("## 部署结果");
-    expect(formatted).toContain("• 第一步");
-    expect(formatted).toContain("  • 子步骤 A");
-    expect(formatted).toContain("  • 子步骤 B");
-    expect(formatted).not.toContain("- 第一步");
+    expect(formatted).toContain("### 详细步骤");
+    expect(formatted).toContain("- 第一步");
     expect(formatted).toContain("1. 检查");
-    expect(formatted).toContain("2. 上线");
     expect(formatted).toContain("> 注意安全");
     expect(formatted).toContain("**成功**");
     expect(formatted).toContain("[文档](https://example.com/docs)");
     expect(formatted).toContain("行内 `bun run check`");
-    expect(formatted).toContain("💻 代码（ts）");
-    expect(formatted).toContain("`## 不是标题`");
-    expect(formatted).toContain("`- 不是列表`");
-    expect(formatted).toContain("`const ok = true;`");
   });
 
   it("prepends the WeCom title only when the body has no heading", () => {
     const withTitle = formatWeComMarkdown("- 第一项\n- 第二项", "部署通知");
     expect(withTitle.startsWith("### 部署通知\n\n")).toBe(true);
-    expect(withTitle).toContain("• 第一项");
-    expect(withTitle).toContain("• 第二项");
+    expect(withTitle).toContain("- 第一项");
+    expect(withTitle).toContain("- 第二项");
 
     const withHeading = formatWeComMarkdown("## 已有标题\n\n- 第一项", "部署通知");
     expect(withHeading.startsWith("## 已有标题")).toBe(true);
@@ -568,7 +558,7 @@ describe("Feishu and WeCom Markdown conversion", () => {
 describe("FeishuNotificationProvider", () => {
   const provider = new FeishuNotificationProvider();
 
-  it("sends converted lark_md content in the interactive card body", async () => {
+  it("sends native markdown element in the interactive card body", async () => {
     const originalFetch = globalThis.fetch;
     let requestedBody: any = null;
 
@@ -582,24 +572,24 @@ describe("FeishuNotificationProvider", () => {
         {
           title: "构建通知",
           text: "构建完成",
-          markdown: "## 结果\n\n- 成功\n- 失败\n\n`v1.0`",
+          markdown: "## 结果\n\n### 详情\n\n- 成功\n- 失败\n\n`v1.0`",
           level: "success",
         },
         { name: "feishu", type: "feishu", url: "https://feishu.example/hook" },
       );
 
       expect(requestedBody.msg_type).toBe("interactive");
+      expect(requestedBody.card.config.wide_screen_mode).toBe(true);
       expect(requestedBody.card.header.template).toBe("green");
       expect(requestedBody.card.header.title.content).toBe("构建通知");
-      expect(requestedBody.card.elements[0].text.tag).toBe("lark_md");
+      expect(requestedBody.card.elements[0].tag).toBe("markdown");
 
-      const content = requestedBody.card.elements[0].text.content;
-      expect(content).toContain("**结果**");
-      expect(content).not.toContain("## 结果");
-      expect(content).toContain("• 成功");
-      expect(content).toContain("• 失败");
-      expect(content).not.toContain("- 成功");
-      expect(content).toContain("<font color='grey'>v1.0</font>");
+      const content = requestedBody.card.elements[0].content;
+      expect(content).toContain("## 结果");
+      expect(content).toContain("**详情**");
+      expect(content).toContain("- 成功");
+      expect(content).toContain("- 失败");
+      expect(content).toContain("`v1.0`");
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -651,9 +641,8 @@ describe("WeComNotificationProvider", () => {
       expect(requestedBody.msgtype).toBe("markdown");
       const content = requestedBody.markdown.content;
       expect(content.startsWith("### 部署通知\n\n")).toBe(true);
-      expect(content).toContain("• 成功");
-      expect(content).toContain("• 失败");
-      expect(content).not.toContain("- 成功");
+      expect(content).toContain("- 成功");
+      expect(content).toContain("- 失败");
     } finally {
       globalThis.fetch = originalFetch;
     }

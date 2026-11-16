@@ -1,93 +1,39 @@
 import type { NotificationConfig } from "../../domain/types.ts";
 import type { NotificationMessage, NotificationProvider } from "../types.ts";
 
-interface CodeBlock {
-  marker: string;
-  info: string;
-  lines: string[];
-}
-
-const FENCE_OPEN_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
-const FENCE_CLOSE_RE = /^ {0,3}(`{3,}|~{3,})\s*$/;
-const UNORDERED_LIST_RE = /^(\s*)[-*+]\s+(.*)$/;
-const ORDERED_LIST_RE = /^(\s*)(\d+)[.)]\s+(.*)$/;
-
 /**
- * Converts common Markdown into the syntax supported by WeCom robot markdown messages.
- * WeCom supports headings, quotes, bold, links, and inline code, but not reliable `-` lists.
- * The title is added only when the body does not already start with a Markdown heading.
+ * Formats Markdown for WeCom robot webhooks.
+ *
+ * WeCom standard `markdown` message type natively supports:
+ * - Headings (H1 to H6: `# ` to `###### `) - requires a space after #
+ * - Bold (`**text**`)
+ * - Links (`[text](url)`)
+ * - Inline code (`code`)
+ * - Blockquotes (`> quote`)
+ * - Unordered lists (`- item`) and ordered lists (`1. item`)
+ * - Font colors (`<font color="info|comment|warning">`)
+ *
+ * If a title is provided and markdown does not already start with a heading,
+ * it prepends `### ${title}\n\n`.
+ * Enforces WeCom's 4096-byte content limit to prevent HTTP 40058 errors.
  */
 export function formatWeComMarkdown(markdown: string, title?: string): string {
-  const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
-  const output: string[] = [];
-  let block: CodeBlock | undefined;
+  let content = markdown.replace(/\r\n?/g, "\n").trim();
 
-  for (const line of lines) {
-    if (block) {
-      const close = line.match(FENCE_CLOSE_RE);
-      const fence = close?.[1];
-      if (
-        fence &&
-        fence.charAt(0) === block.marker.charAt(0) &&
-        fence.length >= block.marker.length
-      ) {
-        output.push(...formatWeComCodeBlock(block));
-        block = undefined;
-      } else {
-        block.lines.push(line);
-      }
-      continue;
-    }
-
-    const open = line.match(FENCE_OPEN_RE);
-    if (open && !(open[1]?.[0] === "`" && open[2]?.includes("`"))) {
-      block = {
-        marker: open[1] ?? "```",
-        info: open[2]?.trim() ?? "",
-        lines: [],
-      };
-      continue;
-    }
-
-    output.push(formatWeComLine(line));
+  // Prepend title if body does not start with a heading
+  if (title && !content.startsWith("#")) {
+    content = `### ${title}\n\n${content}`;
   }
 
-  if (block) output.push(...formatWeComCodeBlock(block));
-  const content = output.join("\n");
-
-  if (title && !markdown.startsWith("#")) {
-    return `### ${title}\n\n${content}`;
+  // Ensure byte limit (4096 bytes UTF-8)
+  const encoder = new TextEncoder();
+  const bytes = encoder.encode(content);
+  if (bytes.length > 4000) {
+    const decoder = new TextDecoder("utf-8");
+    content = decoder.decode(bytes.slice(0, 3950)) + "\n\n... (内容已截断)";
   }
+
   return content;
-}
-
-function formatWeComLine(line: string): string {
-  const unordered = line.match(UNORDERED_LIST_RE);
-  if (unordered) {
-    return `${unordered[1]}• ${unordered[2] ?? ""}`;
-  }
-
-  const ordered = line.match(ORDERED_LIST_RE);
-  if (ordered) {
-    return `${ordered[1]}${ordered[2]}. ${ordered[3] ?? ""}`;
-  }
-
-  return line;
-}
-
-function formatWeComCodeBlock(block: CodeBlock): string[] {
-  const label = block.info ? `💻 代码（${block.info}）` : "💻 代码";
-  if (block.lines.length === 0) return [label];
-
-  return [label, ...block.lines.map((line) => (line.length > 0 ? wrapInlineCode(line) : ""))];
-}
-
-function wrapInlineCode(text: string): string {
-  const runs = text.match(/`+/g);
-  const longest = runs ? Math.max(...runs.map((run) => run.length)) : 0;
-  const fence = "`".repeat(longest + 1);
-  const padding = text.startsWith("`") || text.endsWith("`") ? " " : "";
-  return `${fence}${padding}${text}${padding}${fence}`;
 }
 
 export class WeComNotificationProvider implements NotificationProvider {
