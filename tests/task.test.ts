@@ -560,11 +560,13 @@ Clean up project {{projectId}} with state: {{state}}
       expect(executions[0]?.taskId).toBe("cleanup-task");
       expect(executions[0]?.stateBefore).toEqual({ lastCleanedAt: 1000 });
 
-      // Verify task session was cleaned up (not lingering in store)
+      // Verify task session transitioned to closed (retained for audit, but excluded from active chat sessions)
       const execution = executions[0];
       if (!execution?.sessionId) throw new Error("Expected a task execution with a session ID");
       const sessionAfter = await store.getSession(execution.sessionId);
-      expect(sessionAfter).toBeNull();
+      expect(sessionAfter?.status).toBe("closed");
+      const userSessions = await store.listSessions(project.id);
+      expect(userSessions.some((s) => s.sessionId === execution.sessionId)).toBe(false);
 
       // Manually trigger runTask via engine dispatch
       const dispatched = await runtime.runTask("cleanup-task");

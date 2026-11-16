@@ -23,6 +23,7 @@ export interface CreateSessionInput {
   query?: string;
   submitQuery?: boolean;
   repositoryId?: string;
+  source?: string;
   external?: {
     channel: string;
     conversationId: string;
@@ -110,9 +111,11 @@ export class GatewayService {
             })
           ).project.id,
         );
+    const source = input.source ?? input.external?.channel ?? "web";
     let route = await project.createSession(
       input.repositoryId,
       explicitTitle ? { title: explicitTitle } : undefined,
+      source,
     );
     if (input.external) route = await project.bindExternal(route.sessionId, input.external);
     const turn =
@@ -442,6 +445,7 @@ export class GatewayService {
               ...(envelope.projectId ? { projectId: envelope.projectId } : {}),
               query: text,
               submitQuery: false,
+              source: envelope.conversation.channel,
               external: envelope.conversation,
             })
           ).session;

@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   runtime_session_id VARCHAR(100),
   config_revision INTEGER NOT NULL DEFAULT 1,
   status VARCHAR(50) NOT NULL,
+  source VARCHAR(50) NOT NULL DEFAULT 'unknown',
   external_channel VARCHAR(50),
   external_conversation_id VARCHAR(255),
   external_thread_id VARCHAR(255),
@@ -29,6 +30,12 @@ CREATE INDEX IF NOT EXISTS idx_sessions_project
 
 CREATE INDEX IF NOT EXISTS idx_sessions_external
   ON sessions(external_channel, external_conversation_id, external_thread_id, deleted_at);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_source
+  ON sessions(source);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_project_source
+  ON sessions(project_id, source, deleted_at);
 
 CREATE TABLE IF NOT EXISTS turns (
   id BIGSERIAL PRIMARY KEY,

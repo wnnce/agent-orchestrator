@@ -1,7 +1,14 @@
 export * from "./events.ts";
 
 export type RuntimeType = "codex" | "pi" | "fake";
-export type SessionStatus = "active" | "idle" | "suspended" | "closing" | "archived" | "failed";
+export type SessionStatus =
+  | "active"
+  | "idle"
+  | "suspended"
+  | "closing"
+  | "closed"
+  | "archived"
+  | "failed";
 export type TurnStatus = "queued" | "in_progress" | "completed" | "failed" | "interrupted";
 
 export interface GitIdentity {
@@ -170,6 +177,7 @@ export interface SessionRoute extends BaseEntity {
   runtimeSessionId: string | null;
   configRevision: number;
   status: SessionStatus;
+  source?: string;
   externalChannel?: string;
   externalConversationId?: string;
   externalThreadId?: string;

@@ -103,11 +103,16 @@ export class ProjectRuntime {
     const taskRegistry = new TaskExecutorRegistry(logger);
     const agentRunner: AgentSessionRunner = {
       createSession: async (task) => {
-        const sessionRoute = await this.createSession(undefined, {
-          taskKey: task.taskKey,
-          taskId: task.taskId,
-          taskType: "project_task",
-        });
+        const sessionRoute = await this.createSession(
+          undefined,
+          {
+            title: `Task: ${task.name}`,
+            taskKey: task.taskKey,
+            taskId: task.taskId,
+            taskType: "project_task",
+          },
+          "task",
+        );
         return { sessionId: sessionRoute.sessionId };
       },
       renderPrompt: (template, data) => this.renderTaskPrompt(template, data),
@@ -122,7 +127,7 @@ export class ProjectRuntime {
         };
       },
       cleanupSession: async (sessionId) => {
-        await this.cleanupSession(sessionId);
+        await this.cleanupSession(sessionId, { deleteFromStore: false });
       },
       getTaskState: async (taskKey) => {
         return this.taskEngine.getState(taskKey);
@@ -198,12 +203,16 @@ export class ProjectRuntime {
         );
       },
       onDispatchTask: async (dispatchParams) => {
-        const sessionRoute = await this.createSession(dispatchParams.repositoryId, {
-          title: dispatchParams.title,
-          sourceSessionId: params.sessionId,
-          ...(params.taskKey ? { sourceTaskKey: params.taskKey } : {}),
-          ...(dispatchParams.metadata ?? {}),
-        });
+        const sessionRoute = await this.createSession(
+          dispatchParams.repositoryId,
+          {
+            title: dispatchParams.title,
+            sourceSessionId: params.sessionId,
+            ...(params.taskKey ? { sourceTaskKey: params.taskKey } : {}),
+            ...(dispatchParams.metadata ?? {}),
+          },
+          "task",
+        );
         const turn = await this.turn(sessionRoute.sessionId, dispatchParams.prompt);
         return { sessionId: sessionRoute.sessionId, turnId: turn.id };
       },
@@ -287,6 +296,7 @@ export class ProjectRuntime {
   async createSession(
     repositoryId?: string,
     metadata?: Record<string, unknown>,
+    source?: string,
   ): Promise<SessionRoute> {
     if (this.project.repositories.length === 0 && this.project.id !== GLOBAL_PROJECT_ID)
       throw new Error(`project ${this.project.id} has no repository`);
@@ -304,6 +314,10 @@ export class ProjectRuntime {
     const taskKey = typeof metadata?.taskKey === "string" ? metadata.taskKey : undefined;
     const context = this.context(workspacePath, sessionId, taskKey);
     const runtimeSession = await this.runtime.startSession(context);
+    const resolvedSource =
+      source ??
+      (metadata?.taskType === "project_task" || metadata?.taskKey ? "task" : undefined) ??
+      "unknown";
     const route: SessionRoute = {
       sessionId,
       title: typeof metadata?.title === "string" && metadata.title ? metadata.title : "New Session",
@@ -313,6 +327,7 @@ export class ProjectRuntime {
       runtimeSessionId: runtimeSession.id,
       configRevision: this.project.revision ?? 1,
       status: "active",
+      source: resolvedSource,
       lastActiveAt: new Date().toISOString(),
       ...(metadata ? { metadata } : {}),
     };
@@ -339,10 +354,13 @@ export class ProjectRuntime {
     }
   }
 
-  async cleanupSession(sessionId: string): Promise<void> {
+  async cleanupSession(
+    sessionId: string,
+    options?: { deleteFromStore?: boolean },
+  ): Promise<void> {
     const previous = this.closes.get(sessionId);
     if (previous) return previous;
-    const task = this.closeSession(sessionId);
+    const task = this.closeSession(sessionId, options);
     this.closes.set(sessionId, task);
     try {
       await task;
@@ -350,7 +368,10 @@ export class ProjectRuntime {
       this.closes.delete(sessionId);
     }
   }
-  private async closeSession(sessionId: string): Promise<void> {
+  private async closeSession(
+    sessionId: string,
+    options?: { deleteFromStore?: boolean },
+  ): Promise<void> {
     let entity: SessionEntity | undefined;
     try {
       entity = await this.entity(sessionId);
@@ -387,12 +408,31 @@ export class ProjectRuntime {
     if (route) {
       await this.emit(route, "session.closed", "gateway", {});
     }
-    await this.store.deleteSession(sessionId);
+
+    if (options?.deleteFromStore === false) {
+      try {
+        if (entity) {
+          await entity.transitionTo("closed");
+          await entity.flush(this.store);
+        } else if (route) {
+          await this.store.updateSession({ ...route, status: "closed" });
+        }
+      } catch (err) {
+        this.logger.warn("failed to transition session to closed", { sessionId, error: err });
+      }
+    } else {
+      await this.store.deleteSession(sessionId);
+    }
+
     await this.sessionManager.remove(sessionId);
     this.eventQueues.delete(sessionId);
     this.runtimeEvents.delete(sessionId);
     this.sessionSequences.delete(sessionId);
-    this.logger.info("session cleaned up", { projectId: this.project.id, sessionId });
+    this.logger.info("session cleaned up", {
+      projectId: this.project.id,
+      sessionId,
+      retained: options?.deleteFromStore === false,
+    });
   }
   private async entity(id: string): Promise<SessionEntity> {
     const entity = await this.sessionManager.getOrLoad(id);
@@ -840,8 +880,12 @@ export class ProjectRuntime {
     for (const stored of await this.store.listSessions(this.project.id)) {
       const id = stored.sessionId;
       // Scheduled task sessions must terminate immediately upon completion, never suspended
-      if (stored.metadata?.taskType === "project_task" || stored.metadata?.taskKey) {
-        await this.cleanupSession(id);
+      if (
+        stored.source === "task" ||
+        stored.metadata?.taskType === "project_task" ||
+        stored.metadata?.taskKey
+      ) {
+        await this.cleanupSession(id, { deleteFromStore: false });
         continue;
       }
       if (

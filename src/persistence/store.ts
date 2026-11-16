@@ -93,8 +93,12 @@ export class MemoryStore implements Store {
   readonly scheduledJobs = new Map<string, ScheduledJobRecord>();
   readonly actionExecutions: ActionExecutionRecord[] = [];
   async createSession(route: SessionRoute): Promise<SessionRoute> {
-    this.sessions.set(route.sessionId, route);
-    return route;
+    const sessionWithSource: SessionRoute = {
+      ...route,
+      source: route.source ?? "unknown",
+    };
+    this.sessions.set(route.sessionId, sessionWithSource);
+    return sessionWithSource;
   }
   async getSession(sessionId: string): Promise<SessionRoute | null> {
     return this.sessions.get(sessionId) ?? null;
@@ -110,9 +114,9 @@ export class MemoryStore implements Store {
     if (!options?.includeTasks) {
       all = all.filter(
         (s) =>
+          s.source !== "task" &&
           s.metadata?.taskType !== "project_task" &&
-          !s.metadata?.taskKey &&
-          !this.taskExecutions.some((te) => te.sessionId === s.sessionId),
+          !s.metadata?.taskKey,
       );
     }
     return all.sort((a, b) => b.lastActiveAt.localeCompare(a.lastActiveAt));
@@ -357,9 +361,10 @@ export class PostgresStore implements Store {
   }
   async createSession(route: SessionRoute): Promise<SessionRoute> {
     const title = route.title ?? "新会话";
+    const source = route.source ?? "unknown";
     const metadataJson = JSON.stringify(route.metadata ?? {});
     await this.pool.query(
-      "INSERT INTO sessions(session_id, project_id, repository_id, project_runtime_id, runtime_session_id, config_revision, status, external_channel, external_conversation_id, external_thread_id, last_active_at, created_at, updated_at, deleted_at, title, metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now(),now(),0,$12,$13::jsonb)",
+      "INSERT INTO sessions(session_id, project_id, repository_id, project_runtime_id, runtime_session_id, config_revision, status, source, external_channel, external_conversation_id, external_thread_id, last_active_at, created_at, updated_at, deleted_at, title, metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now(),now(),0,$13,$14::jsonb)",
       [
         route.sessionId,
         route.projectId,
@@ -368,6 +373,7 @@ export class PostgresStore implements Store {
         route.runtimeSessionId,
         route.configRevision,
         route.status,
+        source,
         route.externalChannel ?? null,
         route.externalConversationId ?? null,
         route.externalThreadId ?? null,
@@ -376,7 +382,7 @@ export class PostgresStore implements Store {
         metadataJson,
       ],
     );
-    return { ...route, title };
+    return { ...route, title, source };
   }
   async getSession(sessionId: string): Promise<SessionRoute | null> {
     const result = await this.pool.query(
@@ -395,6 +401,7 @@ export class PostgresStore implements Store {
           runtimeSessionId: row.runtime_session_id,
           configRevision: row.config_revision,
           status: row.status,
+          source: row.source ?? "unknown",
           externalChannel: row.external_channel ?? undefined,
           externalConversationId: row.external_conversation_id ?? undefined,
           externalThreadId: row.external_thread_id ?? undefined,
@@ -419,11 +426,7 @@ export class PostgresStore implements Store {
     }
     if (!options?.includeTasks) {
       wheres.push(
-        "(metadata->>'taskType' IS NULL OR metadata->>'taskType' != 'project_task')",
-      );
-      wheres.push("(metadata->>'taskKey' IS NULL)");
-      wheres.push(
-        "NOT EXISTS (SELECT 1 FROM task_executions te WHERE te.session_id = sessions.session_id)",
+        "(source != 'task' AND (metadata->>'taskType' IS NULL OR metadata->>'taskType' != 'project_task') AND metadata->>'taskKey' IS NULL)",
       );
     }
     const query = `SELECT * FROM sessions WHERE ${wheres.join(" AND ")} ORDER BY last_active_at DESC`;
@@ -438,6 +441,7 @@ export class PostgresStore implements Store {
       runtimeSessionId: row.runtime_session_id,
       configRevision: row.config_revision,
       status: row.status,
+      source: row.source ?? "unknown",
       externalChannel: row.external_channel ?? undefined,
       externalConversationId: row.external_conversation_id ?? undefined,
       externalThreadId: row.external_thread_id ?? undefined,
@@ -452,7 +456,7 @@ export class PostgresStore implements Store {
   async updateSession(route: SessionRoute): Promise<void> {
     const metadataJson = JSON.stringify(route.metadata ?? {});
     await this.pool.query(
-      "UPDATE sessions SET project_id=$2, repository_id=$3, project_runtime_id=$4, runtime_session_id=$5, config_revision=$6, status=$7, last_active_at=$8, title=COALESCE(NULLIF(NULLIF($9::varchar, '新会话'), 'New Chat'), title), metadata=$10::jsonb, updated_at=now() WHERE session_id=$1 AND deleted_at = 0",
+      "UPDATE sessions SET project_id=$2, repository_id=$3, project_runtime_id=$4, runtime_session_id=$5, config_revision=$6, status=$7, last_active_at=$8, title=COALESCE(NULLIF(NULLIF($9::varchar, '新会话'), 'New Chat'), title), metadata=$10::jsonb, source=COALESCE($11, source), updated_at=now() WHERE session_id=$1 AND deleted_at = 0",
       [
         route.sessionId,
         route.projectId,
@@ -464,6 +468,7 @@ export class PostgresStore implements Store {
         route.lastActiveAt,
         route.title ?? null,
         metadataJson,
+        route.source ?? null,
       ],
     );
   }
@@ -495,6 +500,7 @@ export class PostgresStore implements Store {
           runtimeSessionId: row.runtime_session_id,
           configRevision: row.config_revision,
           status: row.status,
+          source: row.source ?? "unknown",
           externalChannel: row.external_channel ?? undefined,
           externalConversationId: row.external_conversation_id ?? undefined,
           externalThreadId: row.external_thread_id ?? undefined,

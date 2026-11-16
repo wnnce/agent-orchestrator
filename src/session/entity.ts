@@ -85,7 +85,7 @@ export class SessionEntity {
     if (from === status) return;
     if (from === "archived" && status !== "closing")
       throw new Error(`session ${this.id} is archived and read-only`);
-    if (from === "closing" && status !== "archived")
+    if (from === "closing" && status !== "archived" && status !== "closed")
       throw new Error(`session ${this.id} is closing`);
     this.route.status = status;
     this.revision++;

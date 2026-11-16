@@ -33,7 +33,8 @@ export interface SessionRoute {
   projectRuntimeId?: string;
   runtimeSessionId?: string | null;
   configRevision?: number;
-  status: "active" | "idle" | "suspended" | "closing" | "archived" | "failed";
+  status: "active" | "idle" | "suspended" | "closing" | "closed" | "archived" | "failed";
+  source?: string;
   externalChannel?: string;
   externalConversationId?: string;
   externalThreadId?: string;
