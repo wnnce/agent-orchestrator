@@ -2,15 +2,16 @@ import type { NotificationConfig } from "../../domain/types.ts";
 import type { NotificationMessage, NotificationProvider } from "../types.ts";
 
 /**
- * Formats Markdown for WeCom robot webhooks.
+ * Formats Markdown for WeCom robot webhooks using `markdown_v2`.
  *
- * WeCom standard `markdown` message type natively supports:
- * - Headings (H1 to H6: `# ` to `###### `) - requires a space after #
- * - Bold (`**text**`)
+ * WeCom `markdown_v2` natively supports:
+ * - Headings (H1 to H6: `# ` to `###### `)
+ * - Bold (`**text**`), italic (`*text*`), strikethrough (`~~text~~`)
  * - Links (`[text](url)`)
- * - Inline code (`code`)
+ * - Inline code (`code`) and multi-line fenced code blocks (```lang ... ```)
  * - Blockquotes (`> quote`)
- * - Unordered lists (`- item`) and ordered lists (`1. item`)
+ * - Unordered lists (`- item`), ordered lists (`1. item`), and task lists (`- [x] item`)
+ * - Tables (`| ... |`)
  * - Font colors (`<font color="info|comment|warning">`)
  *
  * If a title is provided and markdown does not already start with a heading,
@@ -46,8 +47,8 @@ export class WeComNotificationProvider implements NotificationProvider {
     if (message.markdown) {
       const content = formatWeComMarkdown(message.markdown, message.title);
       body = {
-        msgtype: "markdown",
-        markdown: { content },
+        msgtype: "markdown_v2",
+        markdown_v2: { content },
       };
     } else {
       body = {

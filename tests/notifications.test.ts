@@ -677,8 +677,8 @@ describe("WeComNotificationProvider", () => {
         { name: "wecom", type: "wecom", url: "https://wecom.example/hook" },
       );
 
-      expect(requestedBody.msgtype).toBe("markdown");
-      const content = requestedBody.markdown.content;
+      expect(requestedBody.msgtype).toBe("markdown_v2");
+      const content = requestedBody.markdown_v2.content;
       expect(content.startsWith("### 部署通知\n\n")).toBe(true);
       expect(content).toContain("- 成功");
       expect(content).toContain("- 失败");
