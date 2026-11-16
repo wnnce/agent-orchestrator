@@ -76,6 +76,7 @@ export const notificationConfigSchema = z
     enabled: z.boolean().optional(),
   })
   .superRefine((config, ctx) => {
+    if (config.enabled === false) return;
     if (["webhook", "feishu", "wecom"].includes(config.type) && !config.url) {
       ctx.addIssue({ code: "custom", message: "network notifications need url" });
     }

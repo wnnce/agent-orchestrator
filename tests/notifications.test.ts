@@ -13,6 +13,7 @@ import {
   formatWeComMarkdown,
 } from "../src/notifications/index.ts";
 import type { NotificationConfig } from "../src/domain/types.ts";
+import { notificationConfigSchema } from "../src/domain/schemas.ts";
 import { MemoryStore } from "../src/persistence/store.ts";
 import { Logger } from "../src/observability/logger.ts";
 import { createActionContext } from "../src/actions/context.ts";
@@ -335,8 +336,11 @@ describe("Global & Project Notifications Inheritance and Override", () => {
 
   it("allows project to disable an inherited global notification", () => {
     const projectConfigs: NotificationConfig[] = [
-      { name: "feishu-ops", type: "feishu", url: "https://feishu.example/global", enabled: false },
+      { name: "feishu-ops", type: "feishu", enabled: false },
     ];
+    const parsed = notificationConfigSchema.safeParse(projectConfigs[0]);
+    expect(parsed.success).toBe(true);
+
     const merged = mergeNotifications(globalConfigs, projectConfigs);
     expect(merged.length).toBe(2);
     const feishuCfg = merged.find((c) => c.name.toLowerCase() === "feishu-ops");
