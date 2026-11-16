@@ -312,4 +312,159 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
 
     await projectRuntime.stop();
   });
+
+  test("session lifecycle defers archive while a delayed job is pending", async () => {
+    const store = new MemoryStore();
+    const runtime = new FakeRuntime();
+    const workspaces = new WorkspaceManager(
+      path.join(tempRoot, "ws_test_jobs4"),
+      path.join(tempRoot, "bases_test_jobs4"),
+    );
+    const artifacts = new ArtifactStore(path.join(tempRoot, "art_test_jobs4"), store);
+    const projectRuntime = new ProjectRuntime(dummyProject, store, runtime, workspaces, artifacts);
+
+    const sessionRoute = await projectRuntime.createSession();
+    const sessionId = sessionRoute.sessionId;
+    const triggerAt = new Date(Date.now() + 10 * 60_000).toISOString();
+    await store.createScheduledJob({
+      jobId: "job_pending_keepalive",
+      projectId: dummyProject.id,
+      sessionId,
+      name: "pending_keepalive",
+      createdAt: new Date().toISOString(),
+      delayMinutes: 10,
+      triggerAt,
+      status: ScheduledJobStatus.PENDING,
+      prompt: "延时任务仍应唤醒会话",
+      metadata: {},
+    });
+
+    const entity = projectRuntime.sessionManager.get(sessionId)!;
+    entity.touch(new Date(Date.now() - 2 * 60 * 60_000).toISOString());
+    await projectRuntime.sessionManager.save(sessionId);
+
+    await projectRuntime.checkLifecycles();
+
+    expect((await store.getSession(sessionId))?.status).toBe("suspended");
+    expect(store.scheduledJobs.get("job_pending_keepalive")?.status).toBe(
+      ScheduledJobStatus.PENDING,
+    );
+
+    await projectRuntime.pollScheduledJobs(new Date(Date.now() + 11 * 60_000));
+    expect(store.scheduledJobs.get("job_pending_keepalive")?.status).toBe(
+      ScheduledJobStatus.COMPLETED,
+    );
+    expect((await store.getLatestTurn(sessionId))?.input).toBe("延时任务仍应唤醒会话");
+
+    await projectRuntime.stop();
+  });
+
+  test("session lifecycle archives an idle session when no delayed job is pending", async () => {
+    const store = new MemoryStore();
+    const runtime = new FakeRuntime();
+    const workspaces = new WorkspaceManager(
+      path.join(tempRoot, "ws_test_jobs5"),
+      path.join(tempRoot, "bases_test_jobs5"),
+    );
+    const artifacts = new ArtifactStore(path.join(tempRoot, "art_test_jobs5"), store);
+    const projectRuntime = new ProjectRuntime(dummyProject, store, runtime, workspaces, artifacts);
+
+    const sessionRoute = await projectRuntime.createSession();
+    const sessionId = sessionRoute.sessionId;
+    const entity = projectRuntime.sessionManager.get(sessionId)!;
+    entity.touch(new Date(Date.now() - 2 * 60 * 60_000).toISOString());
+    await projectRuntime.sessionManager.save(sessionId);
+
+    await projectRuntime.checkLifecycles();
+
+    expect((await store.getSession(sessionId))?.status).toBe("archived");
+
+    await projectRuntime.stop();
+  });
+
+  test("session lifecycle archives after the pending delayed job completes", async () => {
+    const store = new MemoryStore();
+    const runtime = new FakeRuntime();
+    const workspaces = new WorkspaceManager(
+      path.join(tempRoot, "ws_test_jobs6"),
+      path.join(tempRoot, "bases_test_jobs6"),
+    );
+    const artifacts = new ArtifactStore(path.join(tempRoot, "art_test_jobs6"), store);
+    const projectRuntime = new ProjectRuntime(dummyProject, store, runtime, workspaces, artifacts);
+
+    const sessionRoute = await projectRuntime.createSession();
+    const sessionId = sessionRoute.sessionId;
+    const staleAt = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
+    await store.createScheduledJob({
+      jobId: "job_completed_cleanup",
+      projectId: dummyProject.id,
+      sessionId,
+      name: "completed_cleanup",
+      createdAt: new Date().toISOString(),
+      delayMinutes: 10,
+      triggerAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+      status: ScheduledJobStatus.PENDING,
+      prompt: "完成后恢复正常清理",
+      metadata: {},
+    });
+
+    const entity = projectRuntime.sessionManager.get(sessionId)!;
+    entity.touch(staleAt);
+    await projectRuntime.sessionManager.save(sessionId);
+    await projectRuntime.checkLifecycles();
+    expect((await store.getSession(sessionId))?.status).toBe("suspended");
+
+    await projectRuntime.pollScheduledJobs(new Date(Date.now() + 11 * 60_000));
+    expect(store.scheduledJobs.get("job_completed_cleanup")?.status).toBe(
+      ScheduledJobStatus.COMPLETED,
+    );
+
+    entity.touch(staleAt);
+    await projectRuntime.sessionManager.save(sessionId);
+    await projectRuntime.checkLifecycles();
+    expect((await store.getSession(sessionId))?.status).toBe("archived");
+
+    await projectRuntime.stop();
+  });
+
+  test("session lifecycle archives after the pending delayed job is cancelled", async () => {
+    const store = new MemoryStore();
+    const runtime = new FakeRuntime();
+    const workspaces = new WorkspaceManager(
+      path.join(tempRoot, "ws_test_jobs7"),
+      path.join(tempRoot, "bases_test_jobs7"),
+    );
+    const artifacts = new ArtifactStore(path.join(tempRoot, "art_test_jobs7"), store);
+    const projectRuntime = new ProjectRuntime(dummyProject, store, runtime, workspaces, artifacts);
+
+    const sessionRoute = await projectRuntime.createSession();
+    const sessionId = sessionRoute.sessionId;
+    const staleAt = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
+    await store.createScheduledJob({
+      jobId: "job_cancelled_cleanup",
+      projectId: dummyProject.id,
+      sessionId,
+      name: "cancelled_cleanup",
+      createdAt: new Date().toISOString(),
+      delayMinutes: 10,
+      triggerAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+      status: ScheduledJobStatus.PENDING,
+      prompt: "取消后恢复正常清理",
+      metadata: {},
+    });
+
+    const entity = projectRuntime.sessionManager.get(sessionId)!;
+    entity.touch(staleAt);
+    await projectRuntime.sessionManager.save(sessionId);
+    await projectRuntime.checkLifecycles();
+    expect((await store.getSession(sessionId))?.status).toBe("suspended");
+
+    expect(await store.cancelScheduledJob(sessionId, "cancelled_cleanup")).toBe(true);
+    entity.touch(staleAt);
+    await projectRuntime.sessionManager.save(sessionId);
+    await projectRuntime.checkLifecycles();
+    expect((await store.getSession(sessionId))?.status).toBe("archived");
+
+    await projectRuntime.stop();
+  });
 });
