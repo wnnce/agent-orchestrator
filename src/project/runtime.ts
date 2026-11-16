@@ -856,8 +856,16 @@ export class ProjectRuntime {
         const entity = await this.entity(id);
         if (entity.status === "archived" || entity.status === "closing") continue;
         const idle = Date.now() - Date.parse(entity.lastActiveAt);
-        const archive = idle >= archiveTimeout;
-        if (!archive && !(entity.status === "active" && idle >= idleTimeout)) continue;
+        const shouldSuspend = entity.status === "active" && idle >= idleTimeout;
+        let archive = idle >= archiveTimeout;
+        if (archive && (await this.hasPendingScheduledJobs(id))) {
+          archive = false;
+          this.logger.info("session archive deferred for pending scheduled job", {
+            sessionId: id,
+            idleDurationMs: idle,
+          });
+        }
+        if (!archive && !shouldSuspend) continue;
         const route = entity.toRoute();
         if (route.runtimeSessionId)
           await this.runtime.releaseSession(
@@ -879,6 +887,16 @@ export class ProjectRuntime {
         this.maintenance.delete(id);
       }
     }
+  }
+
+  private async hasPendingScheduledJobs(sessionId: string): Promise<boolean> {
+    const jobs = await this.store.listScheduledJobs({
+      sessionId,
+      projectId: this.project.id,
+      status: ScheduledJobStatus.PENDING,
+      limit: 1,
+    });
+    return jobs.length > 0;
   }
 
   /**
