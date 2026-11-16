@@ -1,7 +1,12 @@
 import crypto from "node:crypto";
-import type { NotificationConfig, NotificationDelivery, NotificationDeliveryDetail } from "../domain/types.ts";
+import type {
+  NotificationConfig,
+  NotificationDelivery,
+  NotificationDeliveryDetail,
+} from "../domain/types.ts";
 import type { Store } from "../persistence/store.ts";
 import { Logger } from "../observability/logger.ts";
+import { formatFeishuMarkdown, formatWeComMarkdown } from "./markdown.ts";
 
 export type { NotificationDeliveryDetail } from "../domain/types.ts";
 
@@ -89,7 +94,7 @@ export class FeishuNotificationProvider implements NotificationProvider {
           elements: [
             {
               tag: "div",
-              text: { tag: "lark_md", content: message.markdown },
+              text: { tag: "lark_md", content: formatFeishuMarkdown(message.markdown) },
             },
           ],
         },
@@ -136,10 +141,7 @@ export class WeComNotificationProvider implements NotificationProvider {
 
     let body: Record<string, unknown>;
     if (message.markdown) {
-      let content = message.markdown;
-      if (message.title && !content.startsWith("#")) {
-        content = `### ${message.title}\n\n${content}`;
-      }
+      const content = formatWeComMarkdown(message.markdown, message.title);
       body = {
         msgtype: "markdown",
         markdown: { content },
@@ -300,10 +302,7 @@ export class TelegramNotificationProvider implements NotificationProvider {
   }
 
   private escapeHtml(text: string): string {
-    return text
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
+    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 
   private markdownToTelegramHtml(md: string): string {
