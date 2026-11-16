@@ -3,10 +3,14 @@ import {
   NotificationRegistry,
   NotificationHub,
   NotificationOutbox,
+  FeishuNotificationProvider,
+  WeComNotificationProvider,
+  WebhookNotificationProvider,
   TelegramNotificationProvider,
   type NotificationProvider,
   type NotificationMessage,
 } from "../src/notifications/notifications.ts";
+import { formatFeishuMarkdown, formatWeComMarkdown } from "../src/notifications/markdown.ts";
 import type { NotificationConfig } from "../src/domain/types.ts";
 import { MemoryStore } from "../src/persistence/store.ts";
 import { Logger } from "../src/observability/logger.ts";
@@ -271,9 +275,7 @@ describe("NotificationOutbox & ActionContext Integration", () => {
     const hub = new NotificationHub(new Logger({ level: "error" }), registry);
     const outbox = new NotificationOutbox(store, hub);
 
-    const configs: NotificationConfig[] = [
-      { name: "broken-hook", type: "webhook", enabled: true },
-    ];
+    const configs: NotificationConfig[] = [{ name: "broken-hook", type: "webhook", enabled: true }];
 
     await outbox.queue("p2", "s2", configs, { title: "Down", text: "Service dead" });
     await outbox.drain();
@@ -318,7 +320,12 @@ describe("Global & Project Notifications Inheritance and Override", () => {
 
   it("appends project-specific notifications", () => {
     const projectConfigs: NotificationConfig[] = [
-      { name: "project-custom", type: "webhook", url: "https://webhook.example/proj", enabled: true },
+      {
+        name: "project-custom",
+        type: "webhook",
+        url: "https://webhook.example/proj",
+        enabled: true,
+      },
     ];
     const merged = mergeNotifications(globalConfigs, projectConfigs);
     expect(merged.length).toBe(3);
@@ -384,7 +391,9 @@ describe("TelegramNotificationProvider", () => {
     globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
       requestedUrl = String(url);
       requestedBody = JSON.parse(String(init?.body));
-      return new Response(JSON.stringify({ ok: true, result: { message_id: 123 } }), { status: 200 });
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 123 } }), {
+        status: 200,
+      });
     }) as typeof fetch;
 
     try {
@@ -426,7 +435,9 @@ describe("TelegramNotificationProvider", () => {
           },
         );
       }
-      return new Response(JSON.stringify({ ok: true, result: { message_id: 456 } }), { status: 200 });
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 456 } }), {
+        status: 200,
+      });
     }) as typeof fetch;
 
     try {
@@ -472,5 +483,232 @@ describe("TelegramNotificationProvider", () => {
     const hub = new NotificationHub();
     expect(hub.registry.has("telegram")).toBe(true);
     expect(hub.registry.get("TELEGRAM")).toBeInstanceOf(TelegramNotificationProvider);
+  });
+});
+
+describe("Feishu and WeCom Markdown conversion", () => {
+  const commonMarkdown = [
+    "## 部署结果",
+    "",
+    "- 第一步",
+    "  - 子步骤 A",
+    "  - 子步骤 B",
+    "- 第二步",
+    "",
+    "1. 检查",
+    "2. 上线",
+    "",
+    "> 注意安全",
+    "",
+    "**成功** 与 [文档](https://example.com/docs)",
+    "",
+    "行内 `bun run check`",
+    "",
+    "```ts",
+    "## 不是标题",
+    "- 不是列表",
+    "const ok = true;",
+    "```",
+  ].join("\n");
+
+  it("converts Feishu Markdown into lark_md-compatible content", () => {
+    const formatted = formatFeishuMarkdown(commonMarkdown);
+
+    expect(formatted).toContain("**部署结果**");
+    expect(formatted).not.toContain("## 部署结果");
+    expect(formatted).toContain("• 第一步");
+    expect(formatted).toContain("  • 子步骤 A");
+    expect(formatted).toContain("  • 子步骤 B");
+    expect(formatted).not.toContain("- 第一步");
+    expect(formatted).toContain("1. 检查");
+    expect(formatted).toContain("2. 上线");
+    expect(formatted).toContain("▎ 注意安全");
+    expect(formatted).toContain("**成功**");
+    expect(formatted).toContain("[文档](https://example.com/docs)");
+    expect(formatted).toContain("<font color='grey'>bun run check</font>");
+    expect(formatted).toContain("💻 代码（ts）");
+    expect(formatted).toContain("## 不是标题");
+    expect(formatted).toContain("- 不是列表");
+    expect(formatted).toContain("<font color='grey'>const ok = true;</font>");
+  });
+
+  it("converts WeCom lists while preserving supported Markdown syntax", () => {
+    const formatted = formatWeComMarkdown(commonMarkdown);
+
+    expect(formatted).toContain("## 部署结果");
+    expect(formatted).toContain("• 第一步");
+    expect(formatted).toContain("  • 子步骤 A");
+    expect(formatted).toContain("  • 子步骤 B");
+    expect(formatted).not.toContain("- 第一步");
+    expect(formatted).toContain("1. 检查");
+    expect(formatted).toContain("2. 上线");
+    expect(formatted).toContain("> 注意安全");
+    expect(formatted).toContain("**成功**");
+    expect(formatted).toContain("[文档](https://example.com/docs)");
+    expect(formatted).toContain("行内 `bun run check`");
+    expect(formatted).toContain("💻 代码（ts）");
+    expect(formatted).toContain("`## 不是标题`");
+    expect(formatted).toContain("`- 不是列表`");
+    expect(formatted).toContain("`const ok = true;`");
+  });
+
+  it("prepends the WeCom title only when the body has no heading", () => {
+    const withTitle = formatWeComMarkdown("- 第一项\n- 第二项", "部署通知");
+    expect(withTitle.startsWith("### 部署通知\n\n")).toBe(true);
+    expect(withTitle).toContain("• 第一项");
+    expect(withTitle).toContain("• 第二项");
+
+    const withHeading = formatWeComMarkdown("## 已有标题\n\n- 第一项", "部署通知");
+    expect(withHeading.startsWith("## 已有标题")).toBe(true);
+    expect(withHeading).not.toContain("### 部署通知");
+  });
+});
+
+describe("FeishuNotificationProvider", () => {
+  const provider = new FeishuNotificationProvider();
+
+  it("sends converted lark_md content in the interactive card body", async () => {
+    const originalFetch = globalThis.fetch;
+    let requestedBody: any = null;
+
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      requestedBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ code: 0 }), { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      await provider.send(
+        {
+          title: "构建通知",
+          text: "构建完成",
+          markdown: "## 结果\n\n- 成功\n- 失败\n\n`v1.0`",
+          level: "success",
+        },
+        { name: "feishu", type: "feishu", url: "https://feishu.example/hook" },
+      );
+
+      expect(requestedBody.msg_type).toBe("interactive");
+      expect(requestedBody.card.header.template).toBe("green");
+      expect(requestedBody.card.header.title.content).toBe("构建通知");
+      expect(requestedBody.card.elements[0].text.tag).toBe("lark_md");
+
+      const content = requestedBody.card.elements[0].text.content;
+      expect(content).toContain("**结果**");
+      expect(content).not.toContain("## 结果");
+      expect(content).toContain("• 成功");
+      expect(content).toContain("• 失败");
+      expect(content).not.toContain("- 成功");
+      expect(content).toContain("<font color='grey'>v1.0</font>");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("keeps plain text notifications on the text payload", async () => {
+    const originalFetch = globalThis.fetch;
+    let requestedBody: any = null;
+
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      requestedBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ code: 0 }), { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      await provider.send(
+        { title: "纯文本", text: "保持原样" },
+        { name: "feishu", type: "feishu", url: "https://feishu.example/hook" },
+      );
+
+      expect(requestedBody).toEqual({
+        msg_type: "text",
+        content: { text: "纯文本\n\n保持原样" },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe("WeComNotificationProvider", () => {
+  const provider = new WeComNotificationProvider();
+
+  it("sends converted markdown with a title in the webhook body", async () => {
+    const originalFetch = globalThis.fetch;
+    let requestedBody: any = null;
+
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      requestedBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ errcode: 0 }), { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      await provider.send(
+        { title: "部署通知", text: "部署完成", markdown: "- 成功\n- 失败" },
+        { name: "wecom", type: "wecom", url: "https://wecom.example/hook" },
+      );
+
+      expect(requestedBody.msgtype).toBe("markdown");
+      const content = requestedBody.markdown.content;
+      expect(content.startsWith("### 部署通知\n\n")).toBe(true);
+      expect(content).toContain("• 成功");
+      expect(content).toContain("• 失败");
+      expect(content).not.toContain("- 成功");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("keeps plain text notifications on the text payload", async () => {
+    const originalFetch = globalThis.fetch;
+    let requestedBody: any = null;
+
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      requestedBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ errcode: 0 }), { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      await provider.send(
+        { title: "纯文本", text: "保持原样" },
+        { name: "wecom", type: "wecom", url: "https://wecom.example/hook" },
+      );
+
+      expect(requestedBody).toEqual({
+        msgtype: "text",
+        text: { content: "纯文本\n\n保持原样" },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe("WebhookNotificationProvider", () => {
+  it("forwards the original notification message unchanged", async () => {
+    const originalFetch = globalThis.fetch;
+    let requestedBody: any = null;
+    const message: NotificationMessage = {
+      title: "Webhook",
+      text: "Plain body",
+      markdown: "## 原样 Markdown\n\n- 列表",
+      level: "warning",
+    };
+
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      requestedBody = JSON.parse(String(init?.body));
+      return new Response("ok", { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      await new WebhookNotificationProvider().send(message, {
+        name: "webhook",
+        type: "webhook",
+        url: "https://webhook.example/hook",
+      });
+
+      expect(requestedBody).toEqual(message);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
