@@ -117,7 +117,7 @@ export function applyEventToAssistantMessage(msg: ChatMessage, evt: RuntimeEvent
 
       let target = itemId ? parts.find((p) => p.id === itemId && p.type === "text") : undefined;
       if (!target) {
-        target = parts.findLast((p) => p.type === "text");
+        target = parts.findLast((p) => p.type === "text" && p.status === "streaming");
       }
 
       if (target && target.type === "text") {
@@ -292,11 +292,11 @@ export function applyEventToAssistantMessage(msg: ChatMessage, evt: RuntimeEvent
       const finalText = typeof payload.finalText === "string" ? payload.finalText.trim() : "";
       if (finalText) {
         msg.content = finalText;
-        // Ensure parts array contains matching text part
-        let textPart = parts.findLast((p) => p.type === "text");
-        if (textPart && textPart.type === "text") {
-          textPart.content = finalText;
-          textPart.status = "completed";
+        // Ensure parts array contains matching text part at the trailing position
+        const lastPart = parts[parts.length - 1];
+        if (lastPart && lastPart.type === "text") {
+          lastPart.content = finalText;
+          lastPart.status = "completed";
         } else {
           parts.push({
             id: `txt_final_${evt.sequence || Date.now()}`,

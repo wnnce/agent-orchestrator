@@ -216,10 +216,11 @@ export function subscribeEvents(
   sessionId: string,
   onEvent: (event: RuntimeEvent) => void,
   onError?: (err: any) => void,
+  initialAfterSequence?: number,
 ): () => void {
   let es: EventSource | null = null;
   let closed = false;
-  let lastSequence = 0;
+  let lastSequence = initialAfterSequence ?? 0;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
   function connect() {

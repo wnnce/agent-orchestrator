@@ -39,6 +39,7 @@ function SessionConversationView({ sessionId }: { sessionId: string }) {
   const artifactDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const eventBufferRef = useRef<RuntimeEvent[]>([]);
   const throttleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSequenceRef = useRef<number>(0);
 
   // Batch flush buffered streaming events to avoid per-token React re-renders
   const flushEventBuffer = useCallback(() => {
@@ -92,20 +93,6 @@ function SessionConversationView({ sessionId }: { sessionId: string }) {
       });
   }, [sessionId]);
 
-  // Load history when session changes
-  useEffect(() => {
-    fetchArtifacts(sessionId).then(setArtifacts);
-    fetchSessionEvents(sessionId)
-      .then((history) => {
-        setEvents(history);
-        const { messages: parsed, isRunning: running } =
-          reconstructMessagesFromEvents(history);
-        setMessages(parsed);
-        setIsRunning(running);
-      })
-      .catch((err) => console.error("Failed to load session events:", err));
-  }, [sessionId]);
-
   // Determine if session is in a closed / archived / read-only terminal state
   const currentSession = sessionDetail || activeSession;
   const isClosed = Boolean(
@@ -120,6 +107,14 @@ function SessionConversationView({ sessionId }: { sessionId: string }) {
   // SSE handler
   const handleEvent = useCallback(
     (evt: RuntimeEvent) => {
+      // Discard duplicate events that were already loaded in history or processed
+      if (typeof evt.sequence === "number") {
+        if (evt.sequence <= lastSequenceRef.current) {
+          return;
+        }
+        lastSequenceRef.current = evt.sequence;
+      }
+
       setEvents((prev) => [...prev, evt]);
 
       if (evt.type === "turn.started") {
@@ -195,21 +190,66 @@ function SessionConversationView({ sessionId }: { sessionId: string }) {
     [sessionId, activeProjectId, setSessions, flushEventBuffer],
   );
 
-  // Subscribe to SSE
+  // Load history when session changes, then establish SSE subscription starting after maxSeq
   useEffect(() => {
+    let isMounted = true;
+    lastSequenceRef.current = 0;
+
     if (unsubscribeRef.current) {
       unsubscribeRef.current();
       unsubscribeRef.current = null;
     }
+    eventBufferRef.current = [];
+    if (throttleTimerRef.current) {
+      clearTimeout(throttleTimerRef.current);
+      throttleTimerRef.current = null;
+    }
 
-    unsubscribeRef.current = subscribeEvents(sessionId, handleEvent, (err) => {
-      console.warn("SSE connection state change / reconnecting:", err);
+    fetchArtifacts(sessionId).then((arts) => {
+      if (isMounted) setArtifacts(arts);
     });
 
+    fetchSessionEvents(sessionId)
+      .then((history) => {
+        if (!isMounted) return;
+        setEvents(history);
+        const { messages: parsed, isRunning: running } =
+          reconstructMessagesFromEvents(history);
+        setMessages(parsed);
+        setIsRunning(running);
+
+        // Find max sequence from historical events
+        const maxSeq = history.reduce((max, e) => Math.max(max, e.sequence ?? 0), 0);
+        lastSequenceRef.current = maxSeq;
+
+        // ONLY establish SSE connection after historical data is fetched and messages are ready
+        unsubscribeRef.current = subscribeEvents(
+          sessionId,
+          handleEvent,
+          (err) => console.warn("SSE connection state change / reconnecting:", err),
+          maxSeq,
+        );
+      })
+      .catch((err) => {
+        if (!isMounted) return;
+        console.error("Failed to load session events:", err);
+        unsubscribeRef.current = subscribeEvents(
+          sessionId,
+          handleEvent,
+          (err) => console.warn("SSE connection state change / reconnecting:", err),
+        );
+      });
+
     return () => {
+      isMounted = false;
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
         unsubscribeRef.current = null;
+      }
+      eventBufferRef.current = [];
+      if (throttleTimerRef.current) {
+        clearTimeout(throttleTimerRef.current);
+        throttleTimerRef.current = null;
       }
     };
   }, [sessionId, handleEvent]);

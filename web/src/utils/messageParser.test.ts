@@ -309,3 +309,72 @@ test("tool calls (mcp_call and tool.call) are recorded and rendered as tool part
   expect((textPart as any).content).toBe("Found 5 issues.");
   expect(textPart.status).toBe("completed");
 });
+
+test("preserves chronological ordering when assistant outputs preliminary text, followed by tools, followed by final reply", () => {
+  const events: RuntimeEvent[] = [
+    {
+      sequence: 1,
+      type: "turn.queued",
+      payload: { turnId: "turn_multi", input: "check issues" },
+    },
+    {
+      sequence: 2,
+      type: "turn.started",
+      payload: { turnId: "turn_multi" },
+    },
+    // 1. Thinking
+    {
+      sequence: 3,
+      type: "agent.reasoning.completed",
+      payload: { itemId: "reas_1", text: "I need to check the issues first." },
+    },
+    // 2. Preliminary text before tools
+    {
+      sequence: 4,
+      type: "agent.message.completed",
+      payload: { itemId: "txt_prelim", text: "I will now query the database." },
+    },
+    // 3. Tool execution
+    {
+      sequence: 5,
+      type: "command.started",
+      payload: { itemId: "cmd_1", command: "check_db.sh" },
+    },
+    {
+      sequence: 6,
+      type: "command.completed",
+      payload: { itemId: "cmd_1", command: "check_db.sh", exitCode: 0, output: "DB OK" },
+    },
+    // 4. Final formal reply
+    {
+      sequence: 7,
+      type: "agent.message.completed",
+      payload: { itemId: "txt_final", text: "Everything looks good in the database." },
+    },
+    // 5. Turn completed
+    {
+      sequence: 8,
+      type: "turn.completed",
+      payload: { turnId: "turn_multi", status: "completed", finalText: "Everything looks good in the database." },
+    },
+  ];
+
+  const { messages } = reconstructMessagesFromEvents(events);
+  expect(messages.length).toBe(2);
+
+  const asst = messages[1];
+  expect(asst.parts?.length).toBe(4);
+
+  // Chronological verification: Think -> Prelim Text -> Command -> Final Reply
+  expect(asst.parts![0].type).toBe("reasoning");
+  expect((asst.parts![0] as any).content).toBe("I need to check the issues first.");
+
+  expect(asst.parts![1].type).toBe("text");
+  expect((asst.parts![1] as any).content).toBe("I will now query the database.");
+
+  expect(asst.parts![2].type).toBe("command");
+  expect((asst.parts![2] as any).command).toBe("check_db.sh");
+
+  expect(asst.parts![3].type).toBe("text");
+  expect((asst.parts![3] as any).content).toBe("Everything looks good in the database.");
+});
