@@ -1,4 +1,11 @@
-import { mkdir, writeFile, readdir, rm, symlink, access } from "node:fs/promises";
+import {
+  mkdir,
+  writeFile,
+  readdir,
+  rm,
+  symlink,
+  access,
+} from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import type { CodexConfig } from "../config/service.ts";
@@ -29,21 +36,26 @@ interface RpcMessage {
   error?: { message?: string };
 }
 const object = (value: unknown): Record<string, any> =>
-  typeof value === "object" && value !== null ? (value as Record<string, any>) : {};
+  typeof value === "object" && value !== null
+    ? (value as Record<string, any>)
+    : {};
+
+export const CODEX_CAPABILITIES: RuntimeCapabilities = {
+  streaming: true,
+  resume: true,
+  steer: true,
+  interrupt: true,
+  compaction: true,
+  approvals: true,
+  mcp: true,
+  structuredOutput: true,
+  sandbox: true,
+};
 
 export class CodexRuntime implements AgentRuntime {
+  readonly name = "codex";
   readonly type = "codex" as const;
-  readonly capabilities: RuntimeCapabilities = {
-    streaming: true,
-    resume: true,
-    steer: true,
-    interrupt: true,
-    compaction: true,
-    approvals: true,
-    mcp: true,
-    structuredOutput: true,
-    sandbox: true,
-  };
+  readonly capabilities: RuntimeCapabilities = CODEX_CAPABILITIES;
   private process: any;
   private nextId = 0;
   private readonly pending = new Map<
@@ -66,11 +78,13 @@ export class CodexRuntime implements AgentRuntime {
     if (this.process) return;
     this.started = (async () => {
       this.stopping = false;
-      const codexHome = project.runtime?.codexHome ?? path.resolve(".data/codex", project.id);
+      const codexHome =
+        project.runtime?.codexHome ?? path.resolve(".data/codex", project.id);
       await this.ensureAuthAndConfig(codexHome, project);
       const env: Record<string, string | undefined> = { ...process.env };
       for (const key of Object.keys(env)) {
-        if (key.startsWith("CODEX_") || key.startsWith("OPENAI_")) delete env[key];
+        if (key.startsWith("CODEX_") || key.startsWith("OPENAI_"))
+          delete env[key];
       }
       env.CODEX_HOME = codexHome;
       const approvalPolicy = project.runtime?.approvalPolicy ?? "never";
@@ -101,7 +115,11 @@ export class CodexRuntime implements AgentRuntime {
       );
       void this.readLoop(this.process.stdout as ReadableStream<Uint8Array>);
       await this.request("initialize", {
-        clientInfo: { name: "agent-orchestrator", title: "Agent Orchestrator", version: "0.1.0" },
+        clientInfo: {
+          name: "agent-orchestrator",
+          title: "Agent Orchestrator",
+          version: "0.1.0",
+        },
         capabilities: {
           mcpServerOpenaiFormElicitation: true,
           experimentalApi: true,
@@ -111,9 +129,13 @@ export class CodexRuntime implements AgentRuntime {
       const skillsDir = SkillManager.getSkillsDir(project);
       if (skillsDir && existsSync(skillsDir)) {
         try {
-          await this.request("skills/extraRoots/set", { extraRoots: [skillsDir] });
+          await this.request("skills/extraRoots/set", {
+            extraRoots: [skillsDir],
+          });
         } catch (error) {
-          this.logger.debug("skills/extraRoots/set not supported or failed", { error });
+          this.logger.debug("skills/extraRoots/set not supported or failed", {
+            error,
+          });
         }
       }
     })().finally(() => {
@@ -122,9 +144,13 @@ export class CodexRuntime implements AgentRuntime {
     return this.started;
   }
 
-  private async ensureAuthAndConfig(codexHome: string, project: ProjectConfig): Promise<void> {
+  private async ensureAuthAndConfig(
+    codexHome: string,
+    project: ProjectConfig,
+  ): Promise<void> {
     const apiKey = this.config.apiKey?.trim();
-    if (!apiKey) throw new Error("codex.apiKey must be configured in the service YAML");
+    if (!apiKey)
+      throw new Error("codex.apiKey must be configured in the service YAML");
     await mkdir(codexHome, { recursive: true, mode: 0o700 });
 
     // Replace managed credentials on every start, including stale imported state.
@@ -173,20 +199,28 @@ export class CodexRuntime implements AgentRuntime {
           .join(", ");
         lines.push(`http_headers = { ${entries} }`);
       }
-      if (server.required !== undefined) lines.push(`required = ${server.required}`);
+      if (server.required !== undefined)
+        lines.push(`required = ${server.required}`);
       if (server.startupTimeoutSec !== undefined)
         lines.push(`startup_timeout_sec = ${server.startupTimeoutSec}`);
       if (server.toolTimeoutSec !== undefined)
         lines.push(`tool_timeout_sec = ${server.toolTimeoutSec}`);
-      if (server.enabledTools) lines.push(`enabled_tools = ${JSON.stringify(server.enabledTools)}`);
+      if (server.enabledTools)
+        lines.push(`enabled_tools = ${JSON.stringify(server.enabledTools)}`);
       if (server.disabledTools)
         lines.push(`disabled_tools = ${JSON.stringify(server.disabledTools)}`);
       if (server.approvalMode)
-        lines.push(`default_tools_approval_mode = ${JSON.stringify(server.approvalMode)}`);
+        lines.push(
+          `default_tools_approval_mode = ${JSON.stringify(server.approvalMode)}`,
+        );
     }
 
     await writeFile(targetConfig, `${lines.join("\n")}\n`, { mode: 0o600 });
-    await SkillManager.syncSkillsToCodex(codexHome, project, this.inheritedSkillsProject);
+    await SkillManager.syncSkillsToCodex(
+      codexHome,
+      project,
+      this.inheritedSkillsProject,
+    );
   }
 
   private async readLoop(stream: ReadableStream<Uint8Array>): Promise<void> {
@@ -228,11 +262,15 @@ export class CodexRuntime implements AgentRuntime {
   }
 
   private handle(message: RpcMessage): void {
-    if (typeof message.id === "number" && (message.result !== undefined || message.error)) {
+    if (
+      typeof message.id === "number" &&
+      (message.result !== undefined || message.error)
+    ) {
       const item = this.pending.get(message.id);
       if (!item) return;
       this.pending.delete(message.id);
-      if (message.error) item.reject(new Error(message.error.message ?? "Codex request failed"));
+      if (message.error)
+        item.reject(new Error(message.error.message ?? "Codex request failed"));
       else item.resolve(message.result);
       return;
     }
@@ -246,14 +284,18 @@ export class CodexRuntime implements AgentRuntime {
           : undefined;
     if (sessionId) {
       // Intercept native dynamic tool calls
-      if (message.method === "item/tool/call" && typeof message.id === "number") {
+      if (
+        message.method === "item/tool/call" &&
+        typeof message.id === "number"
+      ) {
         void this.handleDynamicToolCall(message.id, params, sessionId);
         return;
       }
 
       const context = this.contexts.get(sessionId);
       if (context) {
-        if (typeof message.id === "number") params.requestId = String(message.id);
+        if (typeof message.id === "number")
+          params.requestId = String(message.id);
         void context.onEvent(
           this.toEvent(
             message.id === undefined ? message.method : "approval/requested",
@@ -307,18 +349,28 @@ export class CodexRuntime implements AgentRuntime {
     await this.ensureStarted(context.project);
     return this.request(method, params);
   }
-  private toEvent(method: string, params: Record<string, any>, sessionId: string): RuntimeEvent {
+  private toEvent(
+    method: string,
+    params: Record<string, any>,
+    sessionId: string,
+  ): RuntimeEvent {
     return normalizeCodexMessage(method, params, sessionId);
   }
 
   async startSession(context: RuntimeContext): Promise<RuntimeSession> {
-    const result = object(await this.call(context, "thread/start", this.threadParams(context)));
+    const result = object(
+      await this.call(context, "thread/start", this.threadParams(context)),
+    );
     const thread = object(result.thread);
-    if (typeof thread.id !== "string") throw new Error("Codex did not return a thread ID");
+    if (typeof thread.id !== "string")
+      throw new Error("Codex did not return a thread ID");
     this.contexts.set(thread.id, context);
     return { id: thread.id, workspacePath: context.workspacePath };
   }
-  async resumeSession(context: RuntimeContext, runtimeSessionId: string): Promise<RuntimeSession> {
+  async resumeSession(
+    context: RuntimeContext,
+    runtimeSessionId: string,
+  ): Promise<RuntimeSession> {
     if (this.contexts.has(runtimeSessionId)) {
       this.contexts.set(runtimeSessionId, context);
       return { id: runtimeSessionId, workspacePath: context.workspacePath };
@@ -334,7 +386,9 @@ export class CodexRuntime implements AgentRuntime {
       return { id: runtimeSessionId, workspacePath: context.workspacePath };
     } catch (err) {
       if ((err as Error).message?.includes("no rollout found")) {
-        this.logger.warn("rollout not found for thread, starting new thread", { runtimeSessionId });
+        this.logger.warn("rollout not found for thread, starting new thread", {
+          runtimeSessionId,
+        });
         return this.startSession(context);
       }
       throw err;
@@ -378,9 +432,15 @@ export class CodexRuntime implements AgentRuntime {
     sessionId: string,
     runtimeTurnId: string,
   ): Promise<void> {
-    await this.call(context, "turn/interrupt", { threadId: sessionId, turnId: runtimeTurnId });
+    await this.call(context, "turn/interrupt", {
+      threadId: sessionId,
+      turnId: runtimeTurnId,
+    });
   }
-  async compactSession(context: RuntimeContext, sessionId: string): Promise<void> {
+  async compactSession(
+    context: RuntimeContext,
+    sessionId: string,
+  ): Promise<void> {
     await this.call(context, "thread/compact/start", { threadId: sessionId });
   }
   async respondToApproval(
@@ -391,7 +451,10 @@ export class CodexRuntime implements AgentRuntime {
     await this.ensureStarted(context.project);
     this.write({ id: Number(requestId), result });
   }
-  async releaseSession(context: RuntimeContext, sessionId: string): Promise<void> {
+  async releaseSession(
+    context: RuntimeContext,
+    sessionId: string,
+  ): Promise<void> {
     if (!this.process || !this.contexts.has(sessionId)) return;
     await this.call(context, "thread/unsubscribe", { threadId: sessionId });
     this.contexts.delete(sessionId);
@@ -417,7 +480,9 @@ export class CodexRuntime implements AgentRuntime {
         }
         return Array.isArray(res) ? res : [];
       } catch (error) {
-        this.logger.warn("failed to list skills from Codex app-server", { error });
+        this.logger.warn("failed to list skills from Codex app-server", {
+          error,
+        });
       }
     }
     if (project) {
@@ -475,11 +540,17 @@ export class CodexRuntime implements AgentRuntime {
     });
 
     const startTime = Date.now();
-    const result = await this.actionRegistry.execute(toolName, toolArgs, actionContext);
+    const result = await this.actionRegistry.execute(
+      toolName,
+      toolArgs,
+      actionContext,
+    );
     const durationMs = Math.max(0, Date.now() - startTime);
 
     // Return JSON-RPC response per Codex app-server specification
-    const textOutput = JSON.stringify(result.success ? (result.data ?? {}) : { error: result.error });
+    const textOutput = JSON.stringify(
+      result.success ? (result.data ?? {}) : { error: result.error },
+    );
     this.write({
       id: requestId,
       result: {

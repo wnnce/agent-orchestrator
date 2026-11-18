@@ -1,6 +1,9 @@
 import type { ProjectConfig, RuntimeType } from "../domain/types.ts";
 import type { ActionContext } from "../actions/types.ts";
-import type { CanonicalEventType, CanonicalEventPayloadMap } from "../domain/events.ts";
+import type {
+  CanonicalEventType,
+  CanonicalEventPayloadMap,
+} from "../domain/events.ts";
 
 export type RuntimeEvent = {
   sessionId: string;
@@ -41,11 +44,27 @@ export interface RuntimeContext {
   }) => ActionContext;
 }
 
+export const FAKE_CAPABILITIES: RuntimeCapabilities = {
+  streaming: true,
+  resume: true,
+  steer: true,
+  interrupt: true,
+  compaction: true,
+  approvals: true,
+  mcp: false,
+  structuredOutput: true,
+  sandbox: true,
+};
+
 export interface AgentRuntime {
-  readonly type: RuntimeType;
+  readonly name: string;
+  readonly type: string;
   readonly capabilities: RuntimeCapabilities;
   startSession(context: RuntimeContext): Promise<RuntimeSession>;
-  resumeSession(context: RuntimeContext, runtimeSessionId: string): Promise<RuntimeSession>;
+  resumeSession(
+    context: RuntimeContext,
+    runtimeSessionId: string,
+  ): Promise<RuntimeSession>;
   startTurn(
     context: RuntimeContext,
     sessionId: string,
@@ -58,26 +77,25 @@ export interface AgentRuntime {
     runtimeTurnId: string,
     input: string,
   ): Promise<void>;
-  interruptTurn(context: RuntimeContext, sessionId: string, runtimeTurnId: string): Promise<void>;
+  interruptTurn(
+    context: RuntimeContext,
+    sessionId: string,
+    runtimeTurnId: string,
+  ): Promise<void>;
   compactSession(context: RuntimeContext, sessionId: string): Promise<void>;
-  respondToApproval(context: RuntimeContext, requestId: string, result: unknown): Promise<void>;
+  respondToApproval(
+    context: RuntimeContext,
+    requestId: string,
+    result: unknown,
+  ): Promise<void>;
   releaseSession(context: RuntimeContext, sessionId: string): Promise<void>;
   stop(): Promise<void>;
 }
 
 export class FakeRuntime implements AgentRuntime {
+  readonly name = "fake";
   readonly type = "fake" as const;
-  readonly capabilities = {
-    streaming: true,
-    resume: true,
-    steer: true,
-    interrupt: true,
-    compaction: true,
-    approvals: true,
-    mcp: false,
-    structuredOutput: true,
-    sandbox: true,
-  } satisfies RuntimeCapabilities;
+  readonly capabilities: RuntimeCapabilities = FAKE_CAPABILITIES;
   private readonly turns = new Map<string, { id: string; canceled: boolean }>();
   async startSession(context: RuntimeContext): Promise<RuntimeSession> {
     const id = `fake_${crypto.randomUUID()}`;
@@ -88,7 +106,10 @@ export class FakeRuntime implements AgentRuntime {
     });
     return { id, workspacePath: context.workspacePath };
   }
-  async resumeSession(context: RuntimeContext, runtimeSessionId: string): Promise<RuntimeSession> {
+  async resumeSession(
+    context: RuntimeContext,
+    runtimeSessionId: string,
+  ): Promise<RuntimeSession> {
     await context.onEvent({
       type: "session.resumed",
       sessionId: runtimeSessionId,
@@ -105,7 +126,12 @@ export class FakeRuntime implements AgentRuntime {
     const runtimeTurnId = `fake_turn_${crypto.randomUUID()}`;
     const state = { id: runtimeTurnId, canceled: false };
     this.turns.set(runtimeTurnId, state);
-    await context.onEvent({ type: "turn.started", sessionId, turnId, payload: { runtimeTurnId } });
+    await context.onEvent({
+      type: "turn.started",
+      sessionId,
+      turnId,
+      payload: { runtimeTurnId },
+    });
     await context.onEvent({
       type: "agent.message.delta",
       sessionId,
@@ -148,14 +174,24 @@ export class FakeRuntime implements AgentRuntime {
     const turn = this.turns.get(runtimeTurnId);
     if (turn) turn.canceled = true;
   }
-  async compactSession(context: RuntimeContext, sessionId: string): Promise<void> {
-    await context.onEvent({ type: "compaction.completed", sessionId, payload: {} });
+  async compactSession(
+    context: RuntimeContext,
+    sessionId: string,
+  ): Promise<void> {
+    await context.onEvent({
+      type: "compaction.completed",
+      sessionId,
+      payload: {},
+    });
   }
   async respondToApproval(
     _context: RuntimeContext,
     _requestId: string,
     _result: unknown,
   ): Promise<void> {}
-  async releaseSession(_context: RuntimeContext, _sessionId: string): Promise<void> {}
+  async releaseSession(
+    _context: RuntimeContext,
+    _sessionId: string,
+  ): Promise<void> {}
   async stop(): Promise<void> {}
 }

@@ -1,6 +1,6 @@
 export * from "./events.ts";
 
-export type RuntimeType = "codex" | "pi" | "fake";
+export type RuntimeType = "codex" | "pi" | "fake" | (string & {});
 export type SessionStatus =
   | "active"
   | "idle"
@@ -9,7 +9,8 @@ export type SessionStatus =
   | "closed"
   | "archived"
   | "failed";
-export type TurnStatus = "queued" | "in_progress" | "completed" | "failed" | "interrupted";
+export type TurnStatus =
+  "queued" | "in_progress" | "completed" | "failed" | "interrupted";
 
 export interface GitIdentity {
   name?: string;
@@ -175,6 +176,7 @@ export interface SessionRoute extends BaseEntity {
   repositoryId?: string;
   projectRuntimeId: string;
   runtimeSessionId: string | null;
+  runtime?: string;
   configRevision: number;
   status: SessionStatus;
   source?: string;
@@ -254,7 +256,8 @@ export const ScheduledJobStatus = {
   ABANDONED: 4,
 } as const;
 
-export type ScheduledJobStatusCode = (typeof ScheduledJobStatus)[keyof typeof ScheduledJobStatus];
+export type ScheduledJobStatusCode =
+  (typeof ScheduledJobStatus)[keyof typeof ScheduledJobStatus];
 
 export interface ScheduledJobRecord extends BaseEntity {
   readonly jobId: string;

@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { ProjectConfig } from "../domain/types.ts";
+import type { ProjectConfig, RuntimeType } from "../domain/types.ts";
 
 export const GLOBAL_PROJECT_ID = "_global_";
 
@@ -34,18 +34,20 @@ You are a global assistant serving an analytical role:
 
 export function createGlobalProjectConfig(
   projectDir?: string,
-  runtimeType: "codex" | "fake" = "codex",
+  runtimeType: RuntimeType = "codex",
 ): ProjectConfig {
   const dir = projectDir ?? path.resolve(process.cwd(), "projects");
   return {
     id: GLOBAL_PROJECT_ID,
     displayName: "Global Workspace (Read-Only)",
-    description: "Global read-only workspace to view all projects, code, and configuration for macroscopic inquiry and cross-project analysis",
+    description:
+      "Global read-only workspace to view all projects, code, and configuration for macroscopic inquiry and cross-project analysis",
     projectDir: dir,
     routing: {
       projectId: GLOBAL_PROJECT_ID,
       displayName: "Global Workspace (Read-Only)",
-      summary: "Global read-only workspace to view all projects, code, and configuration",
+      summary:
+        "Global read-only workspace to view all projects, code, and configuration",
       keywords: [],
       repositories: [],
     },

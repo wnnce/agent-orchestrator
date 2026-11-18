@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const runtimeTypeSchema = z.enum(["codex", "pi", "fake"]);
+export const runtimeTypeSchema = z.string().min(1);
 
 export const gitIdentitySchema = z.object({
   name: z.string().min(1).optional(),
@@ -45,10 +45,16 @@ export const mcpServerConfigSchema = z
   })
   .superRefine((server, ctx) => {
     if (!server.url && !server.command) {
-      ctx.addIssue({ code: "custom", message: "MCP server needs url or command" });
+      ctx.addIssue({
+        code: "custom",
+        message: "MCP server needs url or command",
+      });
     }
     if (server.url && server.command) {
-      ctx.addIssue({ code: "custom", message: "MCP server cannot use both url and command" });
+      ctx.addIssue({
+        code: "custom",
+        message: "MCP server cannot use both url and command",
+      });
     }
   });
 
@@ -78,7 +84,10 @@ export const notificationConfigSchema = z
   .superRefine((config, ctx) => {
     if (config.enabled === false) return;
     if (["webhook", "feishu", "wecom"].includes(config.type) && !config.url) {
-      ctx.addIssue({ code: "custom", message: "network notifications need url" });
+      ctx.addIssue({
+        code: "custom",
+        message: "network notifications need url",
+      });
     }
     if (config.type === "telegram") {
       const hasToken = !!config.botToken || !!config.secret;
@@ -101,7 +110,10 @@ export const projectAgentConfigSchema = z.object({
 });
 
 export const projectMetaConfigSchema = z.object({
-  id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/).optional(),
+  id: z
+    .string()
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/)
+    .optional(),
   displayName: z.string().min(1).optional(),
   description: z.string().min(1).optional(),
   tags: z.array(z.string()).optional(),
@@ -114,16 +126,18 @@ export const projectConfigSchema = z
       if (typeof val === "object" && val !== null && !Array.isArray(val)) {
         const obj = { ...(val as Record<string, unknown>) };
         const parent = (obj.project ?? obj.meta ?? obj.metadata ?? obj.info) as
-          | Record<string, unknown>
-          | undefined;
+          Record<string, unknown> | undefined;
         if (parent && typeof parent === "object" && !Array.isArray(parent)) {
-          if (obj.id === undefined && parent.id !== undefined) obj.id = parent.id;
+          if (obj.id === undefined && parent.id !== undefined)
+            obj.id = parent.id;
           if (obj.displayName === undefined && parent.displayName !== undefined)
             obj.displayName = parent.displayName;
           if (obj.description === undefined && parent.description !== undefined)
             obj.description = parent.description;
-          if (obj.tags === undefined && parent.tags !== undefined) obj.tags = parent.tags;
-          if (obj.enabled === undefined && parent.enabled !== undefined) obj.enabled = parent.enabled;
+          if (obj.tags === undefined && parent.tags !== undefined)
+            obj.tags = parent.tags;
+          if (obj.enabled === undefined && parent.enabled !== undefined)
+            obj.enabled = parent.enabled;
         }
         if (!obj.routing && obj.id) {
           obj.routing = {
@@ -131,7 +145,11 @@ export const projectConfigSchema = z
             displayName: obj.displayName ?? obj.id,
             summary: obj.description ?? obj.displayName ?? obj.id,
           };
-        } else if (typeof obj.routing === "object" && obj.routing !== null && obj.id) {
+        } else if (
+          typeof obj.routing === "object" &&
+          obj.routing !== null &&
+          obj.id
+        ) {
           const routing = { ...(obj.routing as Record<string, unknown>) };
           if (!routing.projectId) routing.projectId = obj.id;
           obj.routing = routing;
@@ -155,8 +173,12 @@ export const projectConfigSchema = z
           type: runtimeTypeSchema,
           model: z.string().min(1).optional(),
           reasoningEffort: z.string().min(1).optional(),
-          approvalPolicy: z.enum(["never", "on-request", "on-failure", "untrusted"]).optional(),
-          sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]).optional(),
+          approvalPolicy: z
+            .enum(["never", "on-request", "on-failure", "untrusted"])
+            .optional(),
+          sandbox: z
+            .enum(["read-only", "workspace-write", "danger-full-access"])
+            .optional(),
           idleTimeoutMs: z.number().int().positive().optional(),
           archiveTimeoutMs: z.number().int().positive().optional(),
           cwdRoot: z.string().min(1).optional(),
@@ -197,4 +219,6 @@ export const projectConfigSchema = z
     }
   });
 
-export const projectFileSchema = z.object({ projects: z.array(projectConfigSchema) });
+export const projectFileSchema = z.object({
+  projects: z.array(projectConfigSchema),
+});

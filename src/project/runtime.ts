@@ -13,7 +13,11 @@ import {
 } from "../domain/types.ts";
 import { isTransientEvent } from "../domain/events.ts";
 import type { Store } from "../persistence/store.ts";
-import type { AgentRuntime, RuntimeContext, RuntimeEvent } from "../runtime/runtime.ts";
+import type {
+  AgentRuntime,
+  RuntimeContext,
+  RuntimeEvent,
+} from "../runtime/runtime.ts";
 import { WorkspaceManager } from "../workspace/workspace.ts";
 import { ArtifactStore } from "../artifacts/store.ts";
 import { NotificationHub, NotificationOutbox } from "../notifications/index.ts";
@@ -84,7 +88,10 @@ export class ProjectRuntime {
     private readonly runtime: AgentRuntime,
     private readonly workspaces: WorkspaceManager,
     private readonly artifactStore: ArtifactStore,
-    private readonly notifications = new NotificationOutbox(store, new NotificationHub()),
+    private readonly notifications = new NotificationOutbox(
+      store,
+      new NotificationHub(),
+    ),
     private readonly logger = new Logger(),
     private readonly eventHub: EventHub = new MemoryEventHub(store),
     readonly sessionManager: SessionManager = new SessionManager(store),
@@ -96,7 +103,8 @@ export class ProjectRuntime {
     actionRegistry?: ActionRegistry,
   ) {
     this.taskEngine = taskEngine ?? new TaskEngine(store, logger);
-    this.taskScheduler = taskScheduler ?? new TaskScheduler(this.taskEngine, logger);
+    this.taskScheduler =
+      taskScheduler ?? new TaskScheduler(this.taskEngine, logger);
     this.taskLoader = taskLoader ?? new TaskLoader(logger);
     this.actionRegistry = actionRegistry ?? defaultActionRegistry;
 
@@ -138,22 +146,21 @@ export class ProjectRuntime {
     taskRegistry.register(
       new ScriptTaskExecutor(
         {
-          ...(this.project.projectDir ? { getWorkdir: () => this.project.projectDir } : {}),
+          ...(this.project.projectDir
+            ? { getWorkdir: () => this.project.projectDir }
+            : {}),
         },
         logger,
       ),
     );
     taskRegistry.register(
-      new ActionTaskExecutor(
-        this.actionRegistry,
-        logger,
-        (context) =>
-          this.createActionContext({
-            sessionId: `task_action_${context.task.taskId}`,
-            taskKey: context.task.taskKey,
-            signal: context.signal,
-            workspacePath: this.project.projectDir,
-          }),
+      new ActionTaskExecutor(this.actionRegistry, logger, (context) =>
+        this.createActionContext({
+          sessionId: `task_action_${context.task.taskId}`,
+          taskKey: context.task.taskKey,
+          signal: context.signal,
+          workspacePath: this.project.projectDir,
+        }),
       ),
     );
 
@@ -174,7 +181,8 @@ export class ProjectRuntime {
     scope?: ActionScope | undefined;
     signal?: AbortSignal | undefined;
   }): ActionContext {
-    const workspacePath = params.workspacePath ?? this.project.projectDir ?? process.cwd();
+    const workspacePath =
+      params.workspacePath ?? this.project.projectDir ?? process.cwd();
     return createActionContext({
       projectId: this.project.id,
       sessionId: params.sessionId,
@@ -213,7 +221,10 @@ export class ProjectRuntime {
           },
           "task",
         );
-        const turn = await this.turn(sessionRoute.sessionId, dispatchParams.prompt);
+        const turn = await this.turn(
+          sessionRoute.sessionId,
+          dispatchParams.prompt,
+        );
         return { sessionId: sessionRoute.sessionId, turnId: turn.id };
       },
     });
@@ -238,7 +249,8 @@ export class ProjectRuntime {
       !this.project.runtime?.type
     ) {
       const codexHome =
-        this.project.runtime?.codexHome ?? path.resolve(".data/codex", this.project.id);
+        this.project.runtime?.codexHome ??
+        path.resolve(".data/codex", this.project.id);
       await SkillManager.syncSkillsToCodex(
         codexHome,
         this.project,
@@ -250,7 +262,9 @@ export class ProjectRuntime {
         });
       });
     }
-    this.timers.push(setInterval(() => void this.manageSessionLifecycles(), 60_000));
+    this.timers.push(
+      setInterval(() => void this.manageSessionLifecycles(), 60_000),
+    );
     this.timers.push(
       setInterval(
         () => void this.pollScheduledJobs(),
@@ -298,12 +312,20 @@ export class ProjectRuntime {
     metadata?: Record<string, unknown>,
     source?: string,
   ): Promise<SessionRoute> {
-    if (this.project.repositories.length === 0 && this.project.id !== GLOBAL_PROJECT_ID)
+    if (
+      this.project.repositories.length === 0 &&
+      this.project.id !== GLOBAL_PROJECT_ID
+    )
       throw new Error(`project ${this.project.id} has no repository`);
     const sessionId = `ses_${randomUUID()}`;
-    const workspaceInfo = await this.workspaces.ensureSessionWorkspaces(this.project, sessionId);
+    const workspaceInfo = await this.workspaces.ensureSessionWorkspaces(
+      this.project,
+      sessionId,
+    );
     const primaryRepo =
-      (repositoryId ? this.project.repositories.find((r) => r.id === repositoryId) : undefined) ??
+      (repositoryId
+        ? this.project.repositories.find((r) => r.id === repositoryId)
+        : undefined) ??
       this.project.repositories.find((r) => r.isPrimary) ??
       this.project.repositories[0];
     const workspacePath =
@@ -311,25 +333,33 @@ export class ProjectRuntime {
       workspaceInfo.primaryPath ||
       workspaceInfo.sessionRoot;
 
-    const taskKey = typeof metadata?.taskKey === "string" ? metadata.taskKey : undefined;
+    const taskKey =
+      typeof metadata?.taskKey === "string" ? metadata.taskKey : undefined;
     const context = this.context(workspacePath, sessionId, taskKey);
     const runtimeSession = await this.runtime.startSession(context);
     const resolvedSource =
       source ??
-      (metadata?.taskType === "project_task" || metadata?.taskKey ? "task" : undefined) ??
+      (metadata?.taskType === "project_task" || metadata?.taskKey
+        ? "task"
+        : undefined) ??
       "unknown";
+    const runtimeName = this.runtime.name ?? this.runtime.type ?? "unknown";
     const route: SessionRoute = {
       sessionId,
-      title: typeof metadata?.title === "string" && metadata.title ? metadata.title : "New Session",
+      title:
+        typeof metadata?.title === "string" && metadata.title
+          ? metadata.title
+          : "New Session",
       projectId: this.project.id,
       ...(primaryRepo?.id ? { repositoryId: primaryRepo.id } : {}),
       projectRuntimeId: `project-runtime:${this.project.id}`,
       runtimeSessionId: runtimeSession.id,
+      runtime: runtimeName,
       configRevision: this.project.revision ?? 1,
       status: "active",
       source: resolvedSource,
       lastActiveAt: new Date().toISOString(),
-      ...(metadata ? { metadata } : {}),
+      metadata: { ...(metadata ?? {}), runtime: runtimeName },
     };
     await this.store.createSession(route);
     this.sessionManager.loadOrCreate(route);
@@ -378,16 +408,25 @@ export class ProjectRuntime {
       await entity.transitionTo("closing");
       await entity.flush(this.store);
     } catch (e) {
-      this.logger.warn("failed to transition session to closing", { sessionId, error: e });
+      this.logger.warn("failed to transition session to closing", {
+        sessionId,
+        error: e,
+      });
     }
     await this.admissions.get(sessionId)?.catch(() => {});
     await this.cancelQueued(sessionId);
     const active = this.activeTurns.get(sessionId);
     if (active) await this.interrupt(sessionId);
     try {
-      await this.bounded(this.pumps.get(sessionId) ?? Promise.resolve(), "session close timed out");
+      await this.bounded(
+        this.pumps.get(sessionId) ?? Promise.resolve(),
+        "session close timed out",
+      );
     } catch (e) {
-      this.logger.warn("session pump wait timed out during close", { sessionId, error: e });
+      this.logger.warn("session pump wait timed out during close", {
+        sessionId,
+        error: e,
+      });
     }
     const route = entity?.toRoute() ?? (await this.store.getSession(sessionId));
     if (route?.runtimeSessionId) {
@@ -397,13 +436,19 @@ export class ProjectRuntime {
           route.runtimeSessionId,
         );
       } catch (e) {
-        this.logger.warn("runtime releaseSession failed during close", { sessionId, error: e });
+        this.logger.warn("runtime releaseSession failed during close", {
+          sessionId,
+          error: e,
+        });
       }
     }
     try {
       await this.workspaces.removeSession(this.project, sessionId);
     } catch (e) {
-      this.logger.warn("workspaces removeSession failed during close", { sessionId, error: e });
+      this.logger.warn("workspaces removeSession failed during close", {
+        sessionId,
+        error: e,
+      });
     }
     if (route) {
       await this.emit(route, "session.closed", "gateway", {});
@@ -418,7 +463,10 @@ export class ProjectRuntime {
           await this.store.updateSession({ ...route, status: "closed" });
         }
       } catch (err) {
-        this.logger.warn("failed to transition session to closed", { sessionId, error: err });
+        this.logger.warn("failed to transition session to closed", {
+          sessionId,
+          error: err,
+        });
       }
     } else {
       await this.store.deleteSession(sessionId);
@@ -437,7 +485,9 @@ export class ProjectRuntime {
   private async entity(id: string): Promise<SessionEntity> {
     const entity = await this.sessionManager.getOrLoad(id);
     if (!entity || entity.projectId !== this.project.id)
-      throw new Error(`session ${id} is not owned by project ${this.project.id}`);
+      throw new Error(
+        `session ${id} is not owned by project ${this.project.id}`,
+      );
     return entity;
   }
   async loadSession(id: string): Promise<SessionRoute> {
@@ -471,12 +521,14 @@ export class ProjectRuntime {
       if (this.stopping) throw new Error("runtime is stopping");
       if (entity.status === "archived")
         throw new Error(`session ${sessionId} is archived and read-only`);
-      if (entity.status === "closing") throw new Error(`session ${sessionId} is closing`);
+      if (entity.status === "closing")
+        throw new Error(`session ${sessionId} is closing`);
       if (this.maintenance.has(sessionId))
         throw new Error("session maintenance in progress; retry the message");
       if (!input.trim()) throw new Error("input is required");
       const queue = this.pendingTurns.get(sessionId) ?? [];
-      if (queue.length >= (this.options.queueLimit ?? 64)) throw new Error("session queue is full");
+      if (queue.length >= (this.options.queueLimit ?? 64))
+        throw new Error("session queue is full");
       entity.touch();
       if (entity.status !== "suspended") await entity.transitionTo("active");
       await entity.flush(this.store);
@@ -488,7 +540,10 @@ export class ProjectRuntime {
         createdAt: new Date().toISOString(),
       };
       await this.store.createTurn(turn);
-      await this.emit(entity.toRoute(), "turn.queued", "gateway", { turnId: turn.id, input });
+      await this.emit(entity.toRoute(), "turn.queued", "gateway", {
+        turnId: turn.id,
+        input,
+      });
       queue.push(turn);
       this.pendingTurns.set(sessionId, queue);
       this.startPump(sessionId);
@@ -503,7 +558,8 @@ export class ProjectRuntime {
     this.pumps.set(id, task);
     void task.finally(() => {
       this.pumps.delete(id);
-      if (this.pendingTurns.get(id)?.length && !this.stopping) this.startPump(id);
+      if (this.pendingTurns.get(id)?.length && !this.stopping)
+        this.startPump(id);
     });
   }
   private async pump(id: string): Promise<void> {
@@ -540,7 +596,10 @@ export class ProjectRuntime {
       await completed;
     }
   }
-  private async finishQueued(route: SessionRoute, turn: TurnRecord): Promise<void> {
+  private async finishQueued(
+    route: SessionRoute,
+    turn: TurnRecord,
+  ): Promise<void> {
     await this.store.updateTurn(turn.id, {
       status: "interrupted",
       finishedAt: new Date().toISOString(),
@@ -565,7 +624,10 @@ export class ProjectRuntime {
     await this.admissions.get(id)?.catch(() => {});
     await this.pumps.get(id);
   }
-  private async bounded(task: Promise<unknown>, message: string): Promise<void> {
+  private async bounded(
+    task: Promise<unknown>,
+    message: string,
+  ): Promise<void> {
     let timer: Timer | undefined;
     try {
       await Promise.race([
@@ -595,12 +657,16 @@ export class ProjectRuntime {
   async interrupt(sessionId: string, turnId?: string): Promise<void> {
     await this.admissions.get(sessionId)?.catch(() => {});
     const route = await this.loadSession(sessionId);
-    if (turnId && this.pendingTurns.get(sessionId)?.some((t) => t.id === turnId)) {
+    if (
+      turnId &&
+      this.pendingTurns.get(sessionId)?.some((t) => t.id === turnId)
+    ) {
       await this.cancelQueued(sessionId, turnId);
       return;
     }
     const active = this.activeTurns.get(sessionId);
-    if (!active || active.settled || (turnId && active.turn.id !== turnId)) return;
+    if (!active || active.settled || (turnId && active.turn.id !== turnId))
+      return;
     if (!active.canceled) {
       active.canceled = true;
       if (active.runtimeId)
@@ -610,7 +676,10 @@ export class ProjectRuntime {
           active.runtimeId,
         );
     }
-    await this.bounded(active.completed, "turn interrupt timed out; workspace retained");
+    await this.bounded(
+      active.completed,
+      "turn interrupt timed out; workspace retained",
+    );
   }
   async compact(sessionId: string): Promise<void> {
     const route = await this.loadSession(sessionId);
@@ -620,7 +689,11 @@ export class ProjectRuntime {
     );
     await this.emit(route, "compaction.completed", this.runtime.type, {});
   }
-  async approve(sessionId: string, requestId: string, result: unknown): Promise<void> {
+  async approve(
+    sessionId: string,
+    requestId: string,
+    result: unknown,
+  ): Promise<void> {
     const route = await this.loadSession(sessionId);
     await this.runtime.respondToApproval(
       this.context(await this.workspacePath(route), sessionId),
@@ -638,7 +711,10 @@ export class ProjectRuntime {
     return this.store.listArtifacts(sessionId);
   }
 
-  async artifact(sessionId: string, artifactId: string): Promise<ArtifactRecord> {
+  async artifact(
+    sessionId: string,
+    artifactId: string,
+  ): Promise<ArtifactRecord> {
     const artifacts = await this.listArtifacts(sessionId);
     const artifact = artifacts.find((item) => item.id === artifactId);
     if (!artifact) throw new Error(`artifact not found: ${artifactId}`);
@@ -655,8 +731,18 @@ export class ProjectRuntime {
     const entity = await this.entity(id);
     const workspacePath = await this.workspacePath(route);
     const taskKey =
-      typeof route.metadata?.taskKey === "string" ? route.metadata.taskKey : undefined;
+      typeof route.metadata?.taskKey === "string"
+        ? route.metadata.taskKey
+        : undefined;
     const context = this.context(workspacePath, id, taskKey);
+    const currentRuntime = this.runtime.name ?? this.runtime.type;
+    if (route.runtime && route.runtime !== currentRuntime) {
+      this.logger.warn("session runtime mismatch with project runtime", {
+        sessionId: id,
+        sessionRuntime: route.runtime,
+        projectRuntime: currentRuntime,
+      });
+    }
     const runtimeSessionId = route.runtimeSessionId
       ? (await this.runtime.resumeSession(context, route.runtimeSessionId)).id
       : (await this.runtime.startSession(context)).id;
@@ -673,7 +759,9 @@ export class ProjectRuntime {
       startedAt: new Date().toISOString(),
     });
     await entity.notifyTurnStarted(turn.id, turn.input);
-    await this.emit(entity.toRoute(), "turn.started", this.runtime.type, { turnId: turn.id });
+    await this.emit(entity.toRoute(), "turn.started", this.runtime.type, {
+      turnId: turn.id,
+    });
     const runtimeTurn = await this.runtime.startTurn(
       context,
       runtimeSessionId,
@@ -682,23 +770,37 @@ export class ProjectRuntime {
     );
     active.runtimeId = runtimeTurn.id;
     await this.store.updateTurn(turn.id, { runtimeTurnId: runtimeTurn.id });
-    while (active.early.length) await this.processRuntimeEvent(id, active.early.shift()!);
+    while (active.early.length)
+      await this.processRuntimeEvent(id, active.early.shift()!);
     active.starting = false;
     if (active.canceled && !active.settled)
-      await this.runtime.interruptTurn(context, runtimeSessionId, runtimeTurn.id);
+      await this.runtime.interruptTurn(
+        context,
+        runtimeSessionId,
+        runtimeTurn.id,
+      );
     await active.completed;
   }
   private async workspacePath(route: SessionRoute): Promise<string> {
-    if (this.project.id === GLOBAL_PROJECT_ID || this.project.repositories.length === 0) {
+    if (
+      this.project.id === GLOBAL_PROJECT_ID ||
+      this.project.repositories.length === 0
+    ) {
       return this.workspaces.ensure(this.project, route.sessionId);
     }
     const repository =
-      this.project.repositories.find((item) => item.id === route.repositoryId) ??
-      this.project.repositories[0];
-    if (!repository) throw new Error(`project ${this.project.id} has no repository`);
+      this.project.repositories.find(
+        (item) => item.id === route.repositoryId,
+      ) ?? this.project.repositories[0];
+    if (!repository)
+      throw new Error(`project ${this.project.id} has no repository`);
     return this.workspaces.ensure(this.project, route.sessionId, repository);
   }
-  private context(workspacePath: string, sessionId: string, taskKey?: string): RuntimeContext {
+  private context(
+    workspacePath: string,
+    sessionId: string,
+    taskKey?: string,
+  ): RuntimeContext {
     return {
       project: this.project,
       workspacePath,
@@ -721,44 +823,65 @@ export class ProjectRuntime {
       return;
     }
     const previous = this.runtimeEvents.get(id) ?? Promise.resolve();
-    const task = previous.catch(() => {}).then(() => this.processRuntimeEvent(id, event));
+    const task = previous
+      .catch(() => {})
+      .then(() => this.processRuntimeEvent(id, event));
     this.runtimeEvents.set(id, task);
     try {
       await task;
     } catch (error) {
-      this.logger.error("runtime event processing failed", { sessionId: id, error });
-      if (active && !active.settled) await this.finishTurn(id, active, "failed", String(error));
+      this.logger.error("runtime event processing failed", {
+        sessionId: id,
+        error,
+      });
+      if (active && !active.settled)
+        await this.finishTurn(id, active, "failed", String(error));
     }
   }
-  private async processRuntimeEvent(id: string, event: RuntimeEvent): Promise<void> {
+  private async processRuntimeEvent(
+    id: string,
+    event: RuntimeEvent,
+  ): Promise<void> {
     const entity = this.sessionManager.get(id);
     if (!entity) return;
     const active = this.activeTurns.get(id);
     const type = event.type as EventRecord["type"];
     if (event.type === "runtime.disconnected") {
-      if (active) await this.finishTurn(id, active, "failed", "agent runtime exited");
+      if (active)
+        await this.finishTurn(id, active, "failed", "agent runtime exited");
       return;
     }
     if (
       event.turnId &&
-      (!active || (event.turnId !== active.runtimeId && event.turnId !== active.turn.id))
+      (!active ||
+        (event.turnId !== active.runtimeId && event.turnId !== active.turn.id))
     )
       return;
     if (type === "turn.started") return;
     if (
       active &&
-      (type === "turn.completed" || type === "turn.failed" || type === "turn.interrupted")
+      (type === "turn.completed" ||
+        type === "turn.failed" ||
+        type === "turn.interrupted")
     ) {
       await this.finishTurn(
         id,
         active,
-        type === "turn.completed" ? "completed" : type === "turn.failed" ? "failed" : "interrupted",
+        type === "turn.completed"
+          ? "completed"
+          : type === "turn.failed"
+            ? "failed"
+            : "interrupted",
         undefined,
         event,
       );
       return;
     }
-    if (active && event.type === "agent.message.completed" && event.payload.text) {
+    if (
+      active &&
+      event.type === "agent.message.completed" &&
+      event.payload.text
+    ) {
       const text = event.payload.text;
       await this.store.updateTurn(active.turn.id, { output: text });
       await this.artifactStore.write(
@@ -807,15 +930,20 @@ export class ProjectRuntime {
         turnId: active.turn.id,
       });
       if (this.project.notifyOnTurnCompleted) {
-        await this.notifications.queue(entity.projectId, id, this.project.notifications, {
-          title: `Turn ${status}`,
-          text: `Session ${id} finished with status ${status}.`,
-          metadata: {
-            projectId: this.project.id,
-            sessionId: id,
-            turnId: active.turn.id,
+        await this.notifications.queue(
+          entity.projectId,
+          id,
+          this.project.notifications,
+          {
+            title: `Turn ${status}`,
+            text: `Session ${id} finished with status ${status}.`,
+            metadata: {
+              projectId: this.project.id,
+              sessionId: id,
+              turnId: active.turn.id,
+            },
           },
-        });
+        );
       }
     } finally {
       if (this.activeTurns.get(id) === active) this.activeTurns.delete(id);
@@ -845,7 +973,9 @@ export class ProjectRuntime {
         sequence: seq,
         type,
         runtime,
-        ...(payload && typeof payload === "object" && typeof (payload as any).turnId === "string"
+        ...(payload &&
+        typeof payload === "object" &&
+        typeof (payload as any).turnId === "string"
           ? { turnId: (payload as any).turnId }
           : {}),
         payload,
@@ -876,7 +1006,8 @@ export class ProjectRuntime {
   private async manageSessionLifecycles(): Promise<void> {
     if (this.stopping) return;
     const idleTimeout = this.project.runtime?.idleTimeoutMs ?? 30 * 60_000;
-    const archiveTimeout = this.project.runtime?.archiveTimeoutMs ?? 60 * 60_000;
+    const archiveTimeout =
+      this.project.runtime?.archiveTimeoutMs ?? 60 * 60_000;
     for (const stored of await this.store.listSessions(this.project.id)) {
       const id = stored.sessionId;
       // Scheduled task sessions must terminate immediately upon completion, never suspended
@@ -898,16 +1029,20 @@ export class ProjectRuntime {
       this.maintenance.add(id);
       try {
         const entity = await this.entity(id);
-        if (entity.status === "archived" || entity.status === "closing") continue;
+        if (entity.status === "archived" || entity.status === "closing")
+          continue;
         const idle = Date.now() - Date.parse(entity.lastActiveAt);
         const shouldSuspend = entity.status === "active" && idle >= idleTimeout;
         let archive = idle >= archiveTimeout;
         if (archive && (await this.hasPendingScheduledJobs(id))) {
           archive = false;
-          this.logger.info("session archive deferred for pending scheduled job", {
-            sessionId: id,
-            idleDurationMs: idle,
-          });
+          this.logger.info(
+            "session archive deferred for pending scheduled job",
+            {
+              sessionId: id,
+              idleDurationMs: idle,
+            },
+          );
         }
         if (!archive && !shouldSuspend) continue;
         const route = entity.toRoute();
@@ -926,7 +1061,10 @@ export class ProjectRuntime {
           { idleDurationMs: idle },
         );
       } catch (error) {
-        this.logger.warn("session lifecycle transition failed", { sessionId: id, error });
+        this.logger.warn("session lifecycle transition failed", {
+          sessionId: id,
+          error,
+        });
       } finally {
         this.maintenance.delete(id);
       }
@@ -961,7 +1099,10 @@ export class ProjectRuntime {
     result = result.replaceAll("{{taskId}}", vars.taskId);
     result = result.replaceAll("{{taskKey}}", vars.taskKey);
     result = result.replaceAll("{{taskName}}", vars.taskName);
-    result = result.replaceAll("{{state}}", JSON.stringify(vars.state, null, 2));
+    result = result.replaceAll(
+      "{{state}}",
+      JSON.stringify(vars.state, null, 2),
+    );
 
     // Support {{state.fieldName}} variable extraction
     result = result.replace(/\{\{state\.([a-zA-Z0-9_]+)\}\}/g, (_, field) => {
@@ -995,7 +1136,8 @@ export class ProjectRuntime {
         const fullPath = path.join(executorsDir, file);
         try {
           const mod = (await import(fullPath)) as Record<string, unknown>;
-          const candidate = mod.default ?? mod.executor ?? Object.values(mod)[0];
+          const candidate =
+            mod.default ?? mod.executor ?? Object.values(mod)[0];
           if (
             candidate &&
             typeof candidate === "object" &&
@@ -1022,7 +1164,8 @@ export class ProjectRuntime {
             });
           }
         } catch (fileErr) {
-          const msg = fileErr instanceof Error ? fileErr.message : String(fileErr);
+          const msg =
+            fileErr instanceof Error ? fileErr.message : String(fileErr);
           this.logger.warn("failed to load custom executor file", {
             projectId: this.project.id,
             file,
@@ -1061,7 +1204,10 @@ export class ProjectRuntime {
    */
   async listTasks(): Promise<TaskDefinition[]> {
     if (!this.project.projectDir) return [];
-    return this.taskLoader.loadProjectTasks(this.project.projectDir, this.project.id);
+    return this.taskLoader.loadProjectTasks(
+      this.project.projectDir,
+      this.project.id,
+    );
   }
 
   /**
@@ -1089,7 +1235,8 @@ export class ProjectRuntime {
       return executor.execute({
         task,
         stateBefore,
-        updateState: (newState) => this.taskEngine.updateState(task.taskKey, newState),
+        updateState: (newState) =>
+          this.taskEngine.updateState(task.taskKey, newState),
       });
     }
     return {
@@ -1106,7 +1253,10 @@ export class ProjectRuntime {
   async pollScheduledJobs(asOf: Date = new Date()): Promise<void> {
     if (this.stopping) return;
     try {
-      const dueJobs = await this.store.listDueScheduledJobs(this.project.id, asOf);
+      const dueJobs = await this.store.listDueScheduledJobs(
+        this.project.id,
+        asOf,
+      );
       for (const job of dueJobs) {
         await this.processDueScheduledJob(job);
       }
@@ -1127,11 +1277,14 @@ export class ProjectRuntime {
       session.status === "archived" ||
       session.status === "failed"
     ) {
-      this.logger.info("scheduled job abandoned because session is closed or archived", {
-        jobId: job.jobId,
-        sessionId: job.sessionId,
-        status: session?.status,
-      });
+      this.logger.info(
+        "scheduled job abandoned because session is closed or archived",
+        {
+          jobId: job.jobId,
+          sessionId: job.sessionId,
+          status: session?.status,
+        },
+      );
       await this.store.updateScheduledJobStatus(
         job.jobId,
         ScheduledJobStatus.ABANDONED,
@@ -1144,7 +1297,9 @@ export class ProjectRuntime {
     // Guard 2: Stale turn protection (ensure session has not progressed with a new turn)
     const latestTurn = await this.store.getLatestTurn(job.sessionId);
     const createdTurnId =
-      typeof job.metadata.createdTurnId === "string" ? job.metadata.createdTurnId : undefined;
+      typeof job.metadata.createdTurnId === "string"
+        ? job.metadata.createdTurnId
+        : undefined;
 
     const matchesCreatedTurn =
       !createdTurnId ||
@@ -1153,13 +1308,16 @@ export class ProjectRuntime {
       latestTurn.runtimeTurnId === createdTurnId;
 
     if (!matchesCreatedTurn) {
-      this.logger.info("scheduled job abandoned because session has progressed with new turn", {
-        jobId: job.jobId,
-        sessionId: job.sessionId,
-        createdTurnId,
-        latestTurnId: latestTurn?.id,
-        latestRuntimeTurnId: latestTurn?.runtimeTurnId,
-      });
+      this.logger.info(
+        "scheduled job abandoned because session has progressed with new turn",
+        {
+          jobId: job.jobId,
+          sessionId: job.sessionId,
+          createdTurnId,
+          latestTurnId: latestTurn?.id,
+          latestRuntimeTurnId: latestTurn?.runtimeTurnId,
+        },
+      );
       await this.store.updateScheduledJobStatus(
         job.jobId,
         ScheduledJobStatus.ABANDONED,
@@ -1170,7 +1328,10 @@ export class ProjectRuntime {
     }
 
     // Guard passed: mark running and launch conversation turn
-    await this.store.updateScheduledJobStatus(job.jobId, ScheduledJobStatus.RUNNING);
+    await this.store.updateScheduledJobStatus(
+      job.jobId,
+      ScheduledJobStatus.RUNNING,
+    );
     this.logger.info("waking up session for scheduled job", {
       jobId: job.jobId,
       sessionId: job.sessionId,

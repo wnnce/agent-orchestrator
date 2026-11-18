@@ -1,13 +1,20 @@
-import type { McpServerConfig, NotificationConfig, ProjectConfig, ProjectRuntimeConfig } from "../domain/types.ts";
+import type {
+  McpServerConfig,
+  NotificationConfig,
+  ProjectConfig,
+  ProjectRuntimeConfig,
+} from "../domain/types.ts";
 import type { Store } from "../persistence/store.ts";
 import { ArtifactStore } from "../artifacts/store.ts";
 import { WorkspaceManager } from "../workspace/workspace.ts";
-import { FakeRuntime, type AgentRuntime } from "../runtime/runtime.ts";
-import { CodexRuntime } from "../runtime/codex.ts";
+import {
+  RuntimeRegistry,
+  defaultRuntimeRegistry,
+  type AgentRuntime,
+} from "../runtime/index.ts";
 import { ProjectRuntime } from "./runtime.ts";
 import type { AppConfig } from "../config/config.ts";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { Logger } from "../observability/logger.ts";
 import { NotificationHub, NotificationOutbox } from "../notifications/index.ts";
 import { MemoryEventHub, type EventHub } from "../events/hub.ts";
@@ -28,14 +35,22 @@ export class ProjectManager {
     private readonly logger: Logger,
     eventHub?: EventHub,
     readonly sessionManager: SessionManager = new SessionManager(store, logger),
+    private readonly runtimeRegistry: RuntimeRegistry = defaultRuntimeRegistry,
   ) {
     this.eventHub = eventHub ?? new MemoryEventHub(store, sessionManager);
     const globalProjectsDir = path.resolve(process.cwd(), "projects");
     const defaultRuntimeType =
-      (this.projects[0]?.runtime?.type as "codex" | "fake") ??
-      (this.projects[0]?.agent?.type as "codex" | "fake") ??
+      this.projects[0]?.runtime?.type ??
+      this.projects[0]?.agent?.type ??
       "codex";
-    this.globalProject = createGlobalProjectConfig(globalProjectsDir, defaultRuntimeType);
+    this.globalProject = createGlobalProjectConfig(
+      globalProjectsDir,
+      defaultRuntimeType,
+    );
+  }
+
+  getRuntimeRegistry(): RuntimeRegistry {
+    return this.runtimeRegistry;
   }
   async start(): Promise<void> {
     const workspaceRoot = `${this.config.dataDir}/projects`;
@@ -52,7 +67,8 @@ export class ProjectManager {
         });
       }
 
-      const runtimeType = project.runtime?.type ?? project.agent?.type ?? "codex";
+      const runtimeType =
+        project.runtime?.type ?? project.agent?.type ?? "codex";
       this.logger.info("starting project runtime", {
         projectId: project.id,
         runtime: runtimeType,
@@ -61,11 +77,17 @@ export class ProjectManager {
       this.runtimes.set(project.id, runtime);
       await runtime.start();
     }
-    this.logger.info("project runtimes started", { projectCount: this.projects.length });
+    this.logger.info("project runtimes started", {
+      projectCount: this.projects.length,
+    });
   }
   async stop(): Promise<void> {
-    await Promise.all([...this.runtimes.values()].map((runtime) => runtime.stop()));
-    this.logger.info("project runtimes stopped", { projectCount: this.runtimes.size });
+    await Promise.all(
+      [...this.runtimes.values()].map((runtime) => runtime.stop()),
+    );
+    this.logger.info("project runtimes stopped", {
+      projectCount: this.runtimes.size,
+    });
   }
   get(projectId: string): ProjectRuntime {
     let runtime = this.runtimes.get(projectId);
@@ -100,13 +122,16 @@ export class ProjectManager {
       projectMcpServers,
     );
     const model = project.agent?.model ?? project.runtime?.model;
-    const reasoningEffort = project.agent?.reasoningEffort ?? project.runtime?.reasoningEffort;
+    const reasoningEffort =
+      project.agent?.reasoningEffort ?? project.runtime?.reasoningEffort;
 
     const runtimeConfig: ProjectRuntimeConfig = {
       type: runtimeType,
       approvalPolicy: project.runtime?.approvalPolicy ?? "never",
       sandbox: project.runtime?.sandbox ?? "danger-full-access",
-      codexHome: project.runtime?.codexHome ?? path.join(this.config.dataDir, "codex", project.id),
+      codexHome:
+        project.runtime?.codexHome ??
+        path.join(this.config.dataDir, "codex", project.id),
       mcpServers,
       ...(model ? { model } : {}),
       ...(reasoningEffort ? { reasoningEffort } : {}),
@@ -130,7 +155,8 @@ export class ProjectManager {
     };
     const workspaceRoot = `${this.config.dataDir}/projects`;
     const baseRoot = `${this.config.dataDir}/bases`;
-    const workspaces = sharedWorkspaces ?? new WorkspaceManager(workspaceRoot, baseRoot);
+    const workspaces =
+      sharedWorkspaces ?? new WorkspaceManager(workspaceRoot, baseRoot);
     const artifacts = new ArtifactStore(this.config.artifactDir, this.store);
 
     const actionRegistry = new ActionRegistry(this.logger, this.store);
@@ -138,27 +164,25 @@ export class ProjectManager {
       actionRegistry.registerAll(defaultActionRegistry.list());
     }
 
-    let runtime: AgentRuntime;
-    if (effective.runtime?.type === "codex")
-      runtime = new CodexRuntime(
-        fileURLToPath(import.meta.resolve("@openai/codex/bin/codex.js")),
-        this.logger.child({ projectId: project.id }),
-        this.config.codex,
+    const runtime = this.runtimeRegistry.create(runtimeType, {
+      project: effective,
+      logger: this.logger.child({ projectId: project.id }),
+      config: this.config,
+      actionRegistry,
+      globalProject:
         project.id === GLOBAL_PROJECT_ID ? undefined : this.globalProject,
-        actionRegistry,
-      );
-    else if (effective.runtime?.type === "fake") runtime = new FakeRuntime();
-    else
-      throw new Error(
-        `no runtime adapter registered for project ${project.id}: ${effective.runtime?.type}`,
-      );
+    });
     return new ProjectRuntime(
       effective,
       this.store,
       runtime,
       workspaces,
       artifacts,
-      new NotificationOutbox(this.store, new NotificationHub(this.logger), this.logger),
+      new NotificationOutbox(
+        this.store,
+        new NotificationHub(this.logger),
+        this.logger,
+      ),
       this.logger,
       this.eventHub,
       this.sessionManager,

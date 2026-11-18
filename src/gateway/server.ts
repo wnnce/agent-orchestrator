@@ -119,11 +119,14 @@ export class Gateway {
         path: c.req.path,
         error: err,
       });
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+      return c.json(
+        { error: err instanceof Error ? err.message : String(err) },
+        400,
+      );
     });
 
     // 3. Health & Readiness checks (no authentication)
-    app.route("/", createSystemRouter());
+    app.route("/", createSystemRouter(this.projects.getRuntimeRegistry()));
 
     // 4. Channel adapters (authenticate with platform credentials)
     app.route("/", createChannelsRouter({ feishu: this.feishu }));
@@ -142,7 +145,10 @@ export class Gateway {
 
     // 6. Domain routes
     app.route("/", createProjectsRouter({ projects: this.projects }));
-    app.route("/", createTasksRouter({ projects: this.projects, store: this.store }));
+    app.route(
+      "/",
+      createTasksRouter({ projects: this.projects, store: this.store }),
+    );
     app.route("/", createActionsRouter({ store: this.store }));
     app.route("/", createScheduledJobsRouter({ store: this.store }));
     app.route(
@@ -170,7 +176,9 @@ export class Gateway {
       app.get("*", async (c) => {
         const file = Bun.file(`${staticRoot}/index.html`);
         if (await file.exists()) {
-          return new Response(file, { headers: { "content-type": "text/html" } });
+          return new Response(file, {
+            headers: { "content-type": "text/html" },
+          });
         }
         return c.text("Not found", 404);
       });

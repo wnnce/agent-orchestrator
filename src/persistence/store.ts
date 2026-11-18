@@ -38,7 +38,15 @@ export interface Store {
   updateTurn(
     turnId: string,
     patch: Partial<
-      Pick<TurnRecord, "status" | "runtimeTurnId" | "output" | "error" | "startedAt" | "finishedAt">
+      Pick<
+        TurnRecord,
+        | "status"
+        | "runtimeTurnId"
+        | "output"
+        | "error"
+        | "startedAt"
+        | "finishedAt"
+      >
     >,
   ): Promise<void>;
   appendEvent(event: EventRecord): Promise<EventRecord>;
@@ -53,9 +61,14 @@ export interface Store {
     status?: "sent" | "partial" | "failed" | undefined;
     limit?: number | undefined;
   }): Promise<NotificationDelivery[]>;
-  pendingNotifications?(limit?: number, projectId?: string): Promise<NotificationDelivery[]>;
+  pendingNotifications?(
+    limit?: number,
+    projectId?: string,
+  ): Promise<NotificationDelivery[]>;
   recordTaskExecution(execution: TaskExecutionRecord): Promise<void>;
-  getLatestTaskExecutionState(taskKey: string): Promise<Record<string, unknown> | null>;
+  getLatestTaskExecutionState(
+    taskKey: string,
+  ): Promise<Record<string, unknown> | null>;
   listTaskExecutions(
     taskKey?: string | undefined,
     limit?: number | undefined,
@@ -64,7 +77,10 @@ export interface Store {
   createScheduledJob(job: ScheduledJobRecord): Promise<void>;
   cancelScheduledJob(sessionId: string, identifier: string): Promise<boolean>;
   cancelScheduledJobById(jobId: string): Promise<boolean>;
-  listDueScheduledJobs(projectId?: string, asOf?: Date): Promise<ScheduledJobRecord[]>;
+  listDueScheduledJobs(
+    projectId?: string,
+    asOf?: Date,
+  ): Promise<ScheduledJobRecord[]>;
   listScheduledJobs(filter?: {
     sessionId?: string | undefined;
     projectId?: string | undefined;
@@ -78,7 +94,9 @@ export interface Store {
     finishedAt?: string,
   ): Promise<void>;
   recordActionExecution(record: ActionExecutionRecord): Promise<void>;
-  listActionExecutions(filter?: ActionExecutionFilter): Promise<ActionExecutionRecord[]>;
+  listActionExecutions(
+    filter?: ActionExecutionFilter,
+  ): Promise<ActionExecutionRecord[]>;
   close(): Promise<void>;
 }
 
@@ -96,6 +114,10 @@ export class MemoryStore implements Store {
     const sessionWithSource: SessionRoute = {
       ...route,
       source: route.source ?? "unknown",
+      runtime:
+        route.runtime ??
+        (route.metadata?.runtime as string | undefined) ??
+        "unknown",
     };
     this.sessions.set(route.sessionId, sessionWithSource);
     return sessionWithSource;
@@ -125,7 +147,9 @@ export class MemoryStore implements Store {
     const current = this.sessions.get(route.sessionId);
     if (
       current &&
-      (!route.title || route.title === "新会话" || route.title === "New Chat") &&
+      (!route.title ||
+        route.title === "新会话" ||
+        route.title === "New Chat") &&
       current.title &&
       current.title !== "新会话" &&
       current.title !== "New Chat"
@@ -178,7 +202,8 @@ export class MemoryStore implements Store {
       }
     }
     for (const [messageId, inboundSessionId] of this.inboundMessages) {
-      if (inboundSessionId === sessionId) this.inboundMessages.delete(messageId);
+      if (inboundSessionId === sessionId)
+        this.inboundMessages.delete(messageId);
     }
   }
   async createTurn(turn: TurnRecord): Promise<void> {
@@ -188,7 +213,9 @@ export class MemoryStore implements Store {
     return this.turns.get(turnId) ?? null;
   }
   async getLatestTurn(sessionId: string): Promise<TurnRecord | null> {
-    const list = Array.from(this.turns.values()).filter((t) => t.sessionId === sessionId);
+    const list = Array.from(this.turns.values()).filter(
+      (t) => t.sessionId === sessionId,
+    );
     return list.at(-1) ?? null;
   }
   async updateTurn(turnId: string, patch: Partial<TurnRecord>): Promise<void> {
@@ -206,8 +233,13 @@ export class MemoryStore implements Store {
     const list = this.events.get(sessionId);
     return list?.at(-1)?.sequence ?? 0;
   }
-  async listEvents(sessionId: string, afterSequence = 0): Promise<EventRecord[]> {
-    return (this.events.get(sessionId) ?? []).filter((event) => event.sequence > afterSequence);
+  async listEvents(
+    sessionId: string,
+    afterSequence = 0,
+  ): Promise<EventRecord[]> {
+    return (this.events.get(sessionId) ?? []).filter(
+      (event) => event.sequence > afterSequence,
+    );
   }
   async addArtifact(artifact: ArtifactRecord): Promise<void> {
     this.artifacts.push(artifact);
@@ -215,7 +247,9 @@ export class MemoryStore implements Store {
   async listArtifacts(sessionId: string): Promise<ArtifactRecord[]> {
     return this.artifacts.filter((item) => item.sessionId === sessionId);
   }
-  async recordNotificationDelivery(delivery: NotificationDelivery): Promise<void> {
+  async recordNotificationDelivery(
+    delivery: NotificationDelivery,
+  ): Promise<void> {
     this.notifications.set(delivery.id, delivery);
   }
   async listNotificationDeliveries(filter?: {
@@ -225,20 +259,30 @@ export class MemoryStore implements Store {
     limit?: number | undefined;
   }): Promise<NotificationDelivery[]> {
     let items = [...this.notifications.values()];
-    if (filter?.projectId) items = items.filter((d) => d.projectId === filter.projectId);
-    if (filter?.sessionId) items = items.filter((d) => d.sessionId === filter.sessionId);
+    if (filter?.projectId)
+      items = items.filter((d) => d.projectId === filter.projectId);
+    if (filter?.sessionId)
+      items = items.filter((d) => d.sessionId === filter.sessionId);
     if (filter?.status) items = items.filter((d) => d.status === filter.status);
     return items.slice(0, filter?.limit ?? 50);
   }
-  async pendingNotifications(_limit = 20, _projectId?: string): Promise<NotificationDelivery[]> {
+  async pendingNotifications(
+    _limit = 20,
+    _projectId?: string,
+  ): Promise<NotificationDelivery[]> {
     return [];
   }
   async recordTaskExecution(execution: TaskExecutionRecord): Promise<void> {
     this.taskExecutions.unshift(execution);
   }
-  async getLatestTaskExecutionState(taskKey: string): Promise<Record<string, unknown> | null> {
+  async getLatestTaskExecutionState(
+    taskKey: string,
+  ): Promise<Record<string, unknown> | null> {
     const found = this.taskExecutions.find(
-      (item) => item.taskKey === taskKey && item.status === "success" && item.stateAfter,
+      (item) =>
+        item.taskKey === taskKey &&
+        item.status === "success" &&
+        item.stateAfter,
     );
     return found?.stateAfter ?? null;
   }
@@ -255,7 +299,10 @@ export class MemoryStore implements Store {
   async createScheduledJob(job: ScheduledJobRecord): Promise<void> {
     this.scheduledJobs.set(job.jobId, job);
   }
-  async cancelScheduledJob(sessionId: string, identifier: string): Promise<boolean> {
+  async cancelScheduledJob(
+    sessionId: string,
+    identifier: string,
+  ): Promise<boolean> {
     for (const [id, job] of this.scheduledJobs.entries()) {
       if (
         job.sessionId === sessionId &&
@@ -294,7 +341,9 @@ export class MemoryStore implements Store {
     status?: ScheduledJobStatusCode | undefined;
     limit?: number | undefined;
   }): Promise<ScheduledJobRecord[]> {
-    let list = [...this.scheduledJobs.values()].filter((item) => (item.deletedAt ?? 0) === 0);
+    let list = [...this.scheduledJobs.values()].filter(
+      (item) => (item.deletedAt ?? 0) === 0,
+    );
     if (filter?.sessionId) {
       list = list.filter((item) => item.sessionId === filter.sessionId);
     }
@@ -344,11 +393,16 @@ export class MemoryStore implements Store {
       createdAt: record.createdAt ?? new Date().toISOString(),
     });
   }
-  async listActionExecutions(filter?: ActionExecutionFilter): Promise<ActionExecutionRecord[]> {
+  async listActionExecutions(
+    filter?: ActionExecutionFilter,
+  ): Promise<ActionExecutionRecord[]> {
     let list = this.actionExecutions;
-    if (filter?.projectId) list = list.filter((item) => item.projectId === filter.projectId);
-    if (filter?.sessionId) list = list.filter((item) => item.sessionId === filter.sessionId);
-    if (filter?.actionName) list = list.filter((item) => item.actionName === filter.actionName);
+    if (filter?.projectId)
+      list = list.filter((item) => item.projectId === filter.projectId);
+    if (filter?.sessionId)
+      list = list.filter((item) => item.sessionId === filter.sessionId);
+    if (filter?.actionName)
+      list = list.filter((item) => item.actionName === filter.actionName);
     return list.slice(0, filter?.limit ?? 50);
   }
   async close(): Promise<void> {}
@@ -357,14 +411,21 @@ export class MemoryStore implements Store {
 export class PostgresStore implements Store {
   constructor(private readonly pool: Pool) {}
   static fromUrl(databaseUrl: string): PostgresStore {
-    return new PostgresStore(new Pool({ connectionString: databaseUrl, max: 10 }));
+    return new PostgresStore(
+      new Pool({ connectionString: databaseUrl, max: 10 }),
+    );
   }
   async createSession(route: SessionRoute): Promise<SessionRoute> {
     const title = route.title ?? "新会话";
     const source = route.source ?? "unknown";
-    const metadataJson = JSON.stringify(route.metadata ?? {});
+    const runtime =
+      route.runtime ??
+      (route.metadata?.runtime as string | undefined) ??
+      "unknown";
+    const metadata = { ...(route.metadata ?? {}), runtime };
+    const metadataJson = JSON.stringify(metadata);
     await this.pool.query(
-      "INSERT INTO sessions(session_id, project_id, repository_id, project_runtime_id, runtime_session_id, config_revision, status, source, external_channel, external_conversation_id, external_thread_id, last_active_at, created_at, updated_at, deleted_at, title, metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now(),now(),0,$13,$14::jsonb)",
+      "INSERT INTO sessions(session_id, project_id, repository_id, project_runtime_id, runtime_session_id, config_revision, status, source, runtime, external_channel, external_conversation_id, external_thread_id, last_active_at, created_at, updated_at, deleted_at, title, metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,now(),now(),0,$14,$15::jsonb)",
       [
         route.sessionId,
         route.projectId,
@@ -374,6 +435,7 @@ export class PostgresStore implements Store {
         route.configRevision,
         route.status,
         source,
+        runtime,
         route.externalChannel ?? null,
         route.externalConversationId ?? null,
         route.externalThreadId ?? null,
@@ -382,7 +444,7 @@ export class PostgresStore implements Store {
         metadataJson,
       ],
     );
-    return { ...route, title, source };
+    return { ...route, title, source, runtime, metadata };
   }
   async getSession(sessionId: string): Promise<SessionRoute | null> {
     const result = await this.pool.query(
@@ -402,6 +464,7 @@ export class PostgresStore implements Store {
           configRevision: row.config_revision,
           status: row.status,
           source: row.source ?? "unknown",
+          runtime: row.runtime ?? row.metadata?.runtime ?? "unknown",
           externalChannel: row.external_channel ?? undefined,
           externalConversationId: row.external_conversation_id ?? undefined,
           externalThreadId: row.external_thread_id ?? undefined,
@@ -410,7 +473,9 @@ export class PostgresStore implements Store {
           updatedAt: row.updated_at?.toISOString(),
           deletedAt: Number(row.deleted_at ?? 0),
           metadata:
-            row.metadata && typeof row.metadata === "object" ? row.metadata : undefined,
+            row.metadata && typeof row.metadata === "object"
+              ? row.metadata
+              : undefined,
         }
       : null;
   }
@@ -450,13 +515,19 @@ export class PostgresStore implements Store {
       updatedAt: row.updated_at?.toISOString(),
       deletedAt: Number(row.deleted_at ?? 0),
       metadata:
-        row.metadata && typeof row.metadata === "object" ? row.metadata : undefined,
+        row.metadata && typeof row.metadata === "object"
+          ? row.metadata
+          : undefined,
     }));
   }
   async updateSession(route: SessionRoute): Promise<void> {
-    const metadataJson = JSON.stringify(route.metadata ?? {});
+    const metadata = {
+      ...(route.metadata ?? {}),
+      ...(route.runtime ? { runtime: route.runtime } : {}),
+    };
+    const metadataJson = JSON.stringify(metadata);
     await this.pool.query(
-      "UPDATE sessions SET project_id=$2, repository_id=$3, project_runtime_id=$4, runtime_session_id=$5, config_revision=$6, status=$7, last_active_at=$8, title=COALESCE(NULLIF(NULLIF($9::varchar, '新会话'), 'New Chat'), title), metadata=$10::jsonb, source=COALESCE($11, source), updated_at=now() WHERE session_id=$1 AND deleted_at = 0",
+      "UPDATE sessions SET project_id=$2, repository_id=$3, project_runtime_id=$4, runtime_session_id=$5, config_revision=$6, status=$7, last_active_at=$8, title=COALESCE(NULLIF(NULLIF($9::varchar, '新会话'), 'New Chat'), title), metadata=$10::jsonb, source=COALESCE($11, source), runtime=COALESCE($12, runtime), updated_at=now() WHERE session_id=$1 AND deleted_at = 0",
       [
         route.sessionId,
         route.projectId,
@@ -469,6 +540,7 @@ export class PostgresStore implements Store {
         route.title ?? null,
         metadataJson,
         route.source ?? null,
+        route.runtime ?? null,
       ],
     );
   }
@@ -501,6 +573,7 @@ export class PostgresStore implements Store {
           configRevision: row.config_revision,
           status: row.status,
           source: row.source ?? "unknown",
+          runtime: row.runtime ?? row.metadata?.runtime ?? "unknown",
           externalChannel: row.external_channel ?? undefined,
           externalConversationId: row.external_conversation_id ?? undefined,
           externalThreadId: row.external_thread_id ?? undefined,
@@ -526,7 +599,10 @@ export class PostgresStore implements Store {
     return result.rowCount === 1;
   }
   async releaseInboundMessage(messageId: string): Promise<void> {
-    await this.pool.query("DELETE FROM inbound_messages WHERE message_id = $1", [messageId]);
+    await this.pool.query(
+      "DELETE FROM inbound_messages WHERE message_id = $1",
+      [messageId],
+    );
   }
   async deleteSession(sessionId: string): Promise<void> {
     const client = await this.pool.connect();
@@ -567,7 +643,10 @@ export class PostgresStore implements Store {
     );
   }
   async getTurn(turnId: string): Promise<TurnRecord | null> {
-    const result = await this.pool.query("SELECT * FROM turns WHERE turn_id = $1", [turnId]);
+    const result = await this.pool.query(
+      "SELECT * FROM turns WHERE turn_id = $1",
+      [turnId],
+    );
     const row = result.rows[0];
     return row ? this.rowToTurn(row) : null;
   }
@@ -582,7 +661,15 @@ export class PostgresStore implements Store {
   async updateTurn(
     turnId: string,
     patch: Partial<
-      Pick<TurnRecord, "status" | "runtimeTurnId" | "output" | "error" | "startedAt" | "finishedAt">
+      Pick<
+        TurnRecord,
+        | "status"
+        | "runtimeTurnId"
+        | "output"
+        | "error"
+        | "startedAt"
+        | "finishedAt"
+      >
     >,
   ): Promise<void> {
     const current = await this.getTurn(turnId);
@@ -626,7 +713,10 @@ export class PostgresStore implements Store {
     );
     return Number(result.rows[0]?.max_seq ?? 0);
   }
-  async listEvents(sessionId: string, afterSequence = 0): Promise<EventRecord[]> {
+  async listEvents(
+    sessionId: string,
+    afterSequence = 0,
+  ): Promise<EventRecord[]> {
     const result = await this.pool.query(
       "SELECT * FROM events WHERE session_id = $1 AND sequence > $2 ORDER BY sequence",
       [sessionId, afterSequence],
@@ -677,7 +767,9 @@ export class PostgresStore implements Store {
       createdAt: row.created_at.toISOString(),
     }));
   }
-  async recordNotificationDelivery(delivery: NotificationDelivery): Promise<void> {
+  async recordNotificationDelivery(
+    delivery: NotificationDelivery,
+  ): Promise<void> {
     await this.pool.query(
       `INSERT INTO notification_deliveries(
         delivery_id, project_id, session_id, configs, message,
@@ -722,7 +814,8 @@ export class PostgresStore implements Store {
     }
     params.push(filter?.limit ?? 50);
 
-    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const where =
+      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const result = await this.pool.query(
       `SELECT * FROM notification_deliveries ${where} ORDER BY created_at DESC LIMIT $${idx}`,
       params,
@@ -739,7 +832,10 @@ export class PostgresStore implements Store {
       createdAt: row.created_at.toISOString(),
     }));
   }
-  async pendingNotifications(_limit = 20, _projectId?: string): Promise<NotificationDelivery[]> {
+  async pendingNotifications(
+    _limit = 20,
+    _projectId?: string,
+  ): Promise<NotificationDelivery[]> {
     return [];
   }
   async recordTaskExecution(execution: TaskExecutionRecord): Promise<void> {
@@ -763,19 +859,26 @@ export class PostgresStore implements Store {
         execution.durationMs ?? null,
         execution.stateBefore ? JSON.stringify(execution.stateBefore) : null,
         execution.stateAfter ? JSON.stringify(execution.stateAfter) : null,
-        execution.actionsSummary ? JSON.stringify(execution.actionsSummary) : "{}",
+        execution.actionsSummary
+          ? JSON.stringify(execution.actionsSummary)
+          : "{}",
         execution.errorMessage ?? null,
         execution.createdAt ? new Date(execution.createdAt) : new Date(),
       ],
     );
   }
 
-  async getLatestTaskExecutionState(taskKey: string): Promise<Record<string, unknown> | null> {
+  async getLatestTaskExecutionState(
+    taskKey: string,
+  ): Promise<Record<string, unknown> | null> {
     const result = await this.pool.query(
       "SELECT state_after FROM task_executions WHERE task_key = $1 AND status = 'success' AND state_after IS NOT NULL ORDER BY id DESC LIMIT 1",
       [taskKey],
     );
-    return (result.rows[0]?.state_after ?? null) as Record<string, unknown> | null;
+    return (result.rows[0]?.state_after ?? null) as Record<
+      string,
+      unknown
+    > | null;
   }
 
   async listTaskExecutions(
@@ -794,7 +897,8 @@ export class PostgresStore implements Store {
       wheres.push(`project_id = $${params.length}`);
     }
     params.push(limit);
-    const whereClause = wheres.length > 0 ? `WHERE ${wheres.join(" AND ")}` : "";
+    const whereClause =
+      wheres.length > 0 ? `WHERE ${wheres.join(" AND ")}` : "";
     const result = await this.pool.query(
       `SELECT * FROM task_executions ${whereClause} ORDER BY id DESC LIMIT $${params.length}`,
       params,
@@ -843,10 +947,18 @@ export class PostgresStore implements Store {
     );
   }
 
-  async cancelScheduledJob(sessionId: string, identifier: string): Promise<boolean> {
+  async cancelScheduledJob(
+    sessionId: string,
+    identifier: string,
+  ): Promise<boolean> {
     const result = await this.pool.query(
       "UPDATE scheduled_jobs SET status=$3, updated_at=now() WHERE session_id=$1 AND status=$4 AND (job_id=$2 OR name=$2) AND deleted_at = 0",
-      [sessionId, identifier, ScheduledJobStatus.CANCELLED, ScheduledJobStatus.PENDING],
+      [
+        sessionId,
+        identifier,
+        ScheduledJobStatus.CANCELLED,
+        ScheduledJobStatus.PENDING,
+      ],
     );
     return (result.rowCount ?? 0) > 0;
   }
@@ -941,7 +1053,12 @@ export class PostgresStore implements Store {
   ): Promise<void> {
     await this.pool.query(
       "UPDATE scheduled_jobs SET status=$2, result_summary=COALESCE($3, result_summary), finished_at=COALESCE($4, finished_at), updated_at=now() WHERE job_id=$1 AND deleted_at = 0",
-      [jobId, status, summary ?? null, finishedAt ? new Date(finishedAt) : null],
+      [
+        jobId,
+        status,
+        summary ?? null,
+        finishedAt ? new Date(finishedAt) : null,
+      ],
     );
   }
   async recordActionExecution(record: ActionExecutionRecord): Promise<void> {
@@ -968,7 +1085,9 @@ export class PostgresStore implements Store {
       ],
     );
   }
-  async listActionExecutions(filter?: ActionExecutionFilter): Promise<ActionExecutionRecord[]> {
+  async listActionExecutions(
+    filter?: ActionExecutionFilter,
+  ): Promise<ActionExecutionRecord[]> {
     const conditions: string[] = [];
     const values: unknown[] = [];
     let idx = 1;
@@ -986,7 +1105,8 @@ export class PostgresStore implements Store {
       values.push(filter.actionName);
     }
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const whereClause =
+      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const limit = Math.max(1, Math.min(filter?.limit ?? 50, 200));
     values.push(limit);
 
@@ -1015,7 +1135,9 @@ export class PostgresStore implements Store {
       result: row.result ?? undefined,
       errorMessage: row.error_message ?? undefined,
       durationMs: Number(row.duration_ms ?? 0),
-      createdAt: row.created_at ? new Date(row.created_at).toISOString() : undefined,
+      createdAt: row.created_at
+        ? new Date(row.created_at).toISOString()
+        : undefined,
     }));
   }
   async close(): Promise<void> {
@@ -1037,7 +1159,10 @@ export class PostgresStore implements Store {
   }
 }
 
-export function newSessionRoute(projectId: string, configRevision = 1): SessionRoute {
+export function newSessionRoute(
+  projectId: string,
+  configRevision = 1,
+): SessionRoute {
   return {
     sessionId: `ses_${randomUUID()}`,
     projectId,
