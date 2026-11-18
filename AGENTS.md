@@ -42,6 +42,30 @@ Do not substitute npm, pnpm, or Yarn lockfiles.
 Do not manually edit generated Codex protocol files under `src/runtime/codex/generated/`. Regenerate
 them with `bun run generate:codex` when the upstream protocol intentionally changes.
 
+## Documentation Guidelines
+
+All project documentation follows a standardized directory structure under `docs/`:
+
+- `docs/designs/<xx>-<kebab-title>/`: Technical designs, RFCs, and integration proposals.
+  - `<xx>`: Two-digit sequential prefix (e.g., `01`, `02`).
+  - `<kebab-title>`: Short, descriptive lowercase name separated by hyphens (e.g., `01-task-and-action`, `02-pi-agent-sdk-integration`).
+  - Each design proposal must live in its own dedicated subdirectory containing a `README.md` (or main design specification) alongside any supporting diagrams, schema snippets, or examples.
+- `docs/architecture/`: System-level architectural topology, canonical protocols, and subsystem blueprints.
+- `docs/memory/`: Living development state, context checkpoints, and session continuity notes (e.g., `context.md`).
+- `docs/references/`: Guides, environment setups, and external SDK reference specifications.
+
+### Design Document Structure
+
+Design documents under `docs/designs/<xx>-<kebab-title>/` should follow this standard outline:
+
+1. **Overview & Metadata**: Title, status (`Draft` | `In Review` | `Accepted` | `Superseded`), target module, and date.
+2. **Context & Motivation**: The problem statement, background, and why the change is necessary.
+3. **Goals & Non-Goals**: Clear, testable boundaries defining what is and isn't in scope.
+4. **Detailed Technical Design**: Component architecture, class/interface contracts, data models, event mappings, and concurrency/lifecycle handling.
+5. **Configuration Specification**: YAML schema additions, defaults, and overrides.
+6. **Implementation Phases & Testing Plan**: Step-by-step rollout plan, unit/integration test coverage, and validation criteria.
+7. **Alternatives & Tradeoffs**: Other considered options and rationale for chosen decisions.
+
 ## Code Style
 
 - Use TypeScript with the repository's strict compiler settings.

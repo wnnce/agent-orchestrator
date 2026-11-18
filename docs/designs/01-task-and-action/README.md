@@ -1,10 +1,22 @@
-# In-Memory Engine (Queue + Pool + Worker) Task & Action Architecture Design
+# 01 - In-Memory Engine (Queue + Pool + Worker) Task & Action Architecture Design
+
+| Metadata          | Details                                    |
+| :---------------- | :----------------------------------------- |
+| **Document ID**   | `01-task-and-action`                       |
+| **Status**        | `Accepted`                                 |
+| **Author**        | Agent Orchestrator Team                    |
+| **Created At**    | 2026-11-13                                 |
+| **Target Module** | `src/task/`, `src/actions/`                |
+
+---
+
+## 1. Overview & Context
 
 This document specifies the task scheduling and action execution architecture for **Agent Orchestrator**. This design replaces legacy trigger tables with a modern architecture featuring **Markdown-declared configurations, pure in-memory queue & worker pool scheduling, append-only execution auditing with state snapshots, and native ToolCall-driven Actions**.
 
 ---
 
-## 1. Core Principles & Architectural Evolution
+## 2. Core Principles & Architectural Evolution
 
 ### 1. Markdown as Single Source of Truth for Static Configuration
 * **No Database Task Definition Tables**: Avoids storing static task definitions in relational tables, eliminating configuration drift and overwrite synchronization issues on cold start.
@@ -33,7 +45,7 @@ The database does not handle queue scheduling or locks; it only stores audits an
 
 ---
 
-## 2. Overall Architecture
+## 3. Overall Architecture
 
 ```mermaid
 flowchart TD
@@ -93,24 +105,24 @@ flowchart TD
 
 ---
 
-## 3. Schema & Task Specifications
+## 4. Schema & Task Specifications
 
 ### 1. Database DDL Definitions
 | File Path | Description |
 | :--- | :--- |
-| [docs/task-and-action/schema/scheduled_jobs.sql](file:///home/ranchangxin/Documents/projects/learning/agent-orchestrator/docs/task-and-action/schema/scheduled_jobs.sql) | Dynamic in-session timers with session binding, trigger time, payload, and cancellation status. |
-| [docs/task-and-action/schema/task_executions.sql](file:///home/ranchangxin/Documents/projects/learning/agent-orchestrator/docs/task-and-action/schema/task_executions.sql) | Task execution audit logs indexed by `task_key` for fast history lookup and cold-start state hydration. |
+| [docs/designs/01-task-and-action/schema/scheduled_jobs.sql](file:///home/ranchangxin/Documents/projects/learning/agent-orchestrator/docs/designs/01-task-and-action/schema/scheduled_jobs.sql) | Dynamic in-session timers with session binding, trigger time, payload, and cancellation status. |
+| [docs/designs/01-task-and-action/schema/task_executions.sql](file:///home/ranchangxin/Documents/projects/learning/agent-orchestrator/docs/designs/01-task-and-action/schema/task_executions.sql) | Task execution audit logs indexed by `task_key` for fast history lookup and cold-start state hydration. |
 
 ### 2. Task Specifications
 | File Path | Description |
 | :--- | :--- |
-| [docs/task-and-action/examples/tasks/sync-github-issues.md](file:///home/ranchangxin/Documents/projects/learning/agent-orchestrator/docs/task-and-action/examples/tasks/sync-github-issues.md) | **Production Example 1 (Inspection & Dispatch)**: Periodically scan GitHub issues, filter by `last_processed_issue_id`, call `dispatch_agent_task` for isolated fix sessions, and call `update_task_state` to advance cursor. |
-| [docs/task-and-action/examples/tasks/daily-health-check.md](file:///home/ranchangxin/Documents/projects/learning/agent-orchestrator/docs/task-and-action/examples/tasks/daily-health-check.md) | **Production Example 2 (Daily Health Inspection)**: Run read-only verification checks daily, call `notify_user` to send notifications, and persist inspection state. |
-| [docs/task-and-action/examples/tasks/in-session-scheduling.md](file:///home/ranchangxin/Documents/projects/learning/agent-orchestrator/docs/task-and-action/examples/tasks/in-session-scheduling.md) | **In-Session Scheduling Flow**: Demonstrates `schedule_job`, `cancel_job`, and session liveness guard handling. |
+| [docs/designs/01-task-and-action/examples/tasks/sync-github-issues.md](file:///home/ranchangxin/Documents/projects/learning/agent-orchestrator/docs/designs/01-task-and-action/examples/tasks/sync-github-issues.md) | **Production Example 1 (Inspection & Dispatch)**: Periodically scan GitHub issues, filter by `last_processed_issue_id`, call `dispatch_agent_task` for isolated fix sessions, and call `update_task_state` to advance cursor. |
+| [docs/designs/01-task-and-action/examples/tasks/daily-health-check.md](file:///home/ranchangxin/Documents/projects/learning/agent-orchestrator/docs/designs/01-task-and-action/examples/tasks/daily-health-check.md) | **Production Example 2 (Daily Health Inspection)**: Run read-only verification checks daily, call `notify_user` to send notifications, and persist inspection state. |
+| [docs/designs/01-task-and-action/examples/tasks/in-session-scheduling.md](file:///home/ranchangxin/Documents/projects/learning/agent-orchestrator/docs/designs/01-task-and-action/examples/tasks/in-session-scheduling.md) | **In-Session Scheduling Flow**: Demonstrates `schedule_job`, `cancel_job`, and session liveness guard handling. |
 
 ---
 
-## 4. Frontmatter Specification
+## 5. Frontmatter Specification
 
 Task markdown files use YAML Frontmatter:
 
