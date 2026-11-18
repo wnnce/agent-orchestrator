@@ -3,7 +3,7 @@
 | Metadata          | Details                                                                       |
 | :---------------- | :---------------------------------------------------------------------------- |
 | **Document ID**   | `03-code-review-remediation`                                                  |
-| **Status**        | `Draft`                                                                       |
+| **Status**        | `Accepted`（已实施，见第 5 节）                                               |
 | **Created At**    | 2026-11-18                                                                    |
 | **Target Module** | `src/project/`, `src/runtime/`, `src/workspace/`, `src/gateway/`, `src/config/` |
 | **Code Baseline** | `main@03e61a8` + 工作区未提交改动（含 Pi 适配器最新版本）                     |
@@ -440,10 +440,57 @@ bun test
 
 涉及前端显示的阶段（#11 的系统提示、#13 的标题兜底）还需要执行 `cd web && bun run build`。
 
-需要数据迁移的变更：#4（source 改为 `dispatch`）、#7（新增 `workspace_path` 列）、#13（标题改为 `NULL`）。`database/schema.sql` 同步更新为最终结构，存量数据的迁移脚本放在 `scripts/` 下，单独执行。
+需要数据迁移的变更：#4（source 改为 `dispatch`）、#7（新增 `workspace_path` 列）、#13（标题改为 `NULL`）。`database/schema.sql` 同步更新为最终结构，存量数据的迁移脚本放在 `database/migrations/` 下，按文件名顺序手动执行。
 
 **本轮未纳入、建议另行处理的审查项**
 
 - #1：默认监听 `0.0.0.0` 且不鉴权，同时 Codex 默认 `danger-full-access`；Web Studio 不支持 token，开启鉴权后无法使用。
 - #2：Git token 通过 `git config http.extraheader` 明文写进 `.git/config`，agent 可以读到。
 - #3：`repository.url` 是本地路径时，基础仓库同步会对用户自己的仓库执行 `reset --hard` 并改写 git 身份。
+
+---
+
+## 5. 实施结果
+
+全部条目已实施，按 `label: title` 规范提交（未 push）：
+
+| 提交 | 内容 |
+| :--- | :--- |
+| `f9908df fix: always complete session close` | #6 |
+| `ff89a09 fix: treat dispatched sessions as regular sessions` | #4 |
+| `2799a3a refactor: stop re-syncing workspaces on every session operation` | #7、3.9 |
+| `0e16702 fix: report runtime session resets instead of starting over silently` | #11、3.5 |
+| `4e61d70 refactor: rebuild codex adapter on the generated app-server protocol` | #5、#9、3.1 |
+| `f735712 fix: replace session title placeholders with a nullable title` | #13、3.8 |
+| `51c0123 refactor: keep codex home generation inside the codex adapter` | 3.2、3.3、3.4 |
+| `dbe4087 refactor: tighten pi runtime configuration and session handling` | 3.6 |
+| `d3da715 refactor: merge the project agent section into runtime at load time` | 3.7 |
+
+存量 PostgreSQL 数据库需要按顺序执行 `database/migrations/` 下的三个脚本：
+
+- `20261118_01_dispatch_session_source.sql`
+- `20261118_02_session_workspace_path.sql`
+- `20261118_03_session_title_null.sql`
+
+验证：`bun run typecheck`、`bun run lint`、`bun test`（329 个通过）、`bun run build`、`cd web && bun run build` 均通过。迁移脚本和 `PostgresStore` 的会话相关 SQL 在 `postgres` 容器的临时数据库上验证过。另外用 fake 运行时把服务实际启动，对接口做了一次冒烟测试。
+
+### 与方案的差异
+
+- **#7**：没有加 `baseSyncIntervalMs`。基础仓库只在服务启动时和创建新会话时同步，并发请求由已有的单飞机制合并，所以不需要额外的时间间隔。git 执行器也没有改成可注入，测试通过继承 `WorkspaceManager` 统计调用次数。
+- **#9**：权限申请、旧版 `execCommandApproval`/`applyPatchApproval`、MCP elicitation、用户输入请求一律回复 JSON-RPC 错误 `-32601`，没有逐个实现拒绝语义，也没有加审批超时。审批接口的请求体改为 `{ requestId, decision: "approved" | "rejected" }`。
+- **3.1**：订阅了但没有对应标准事件的通知（token 用量、限流、实时音频等）直接不产生事件，不再落成 `runtime.unmapped`，避免事件日志里堆满噪音。
+- **3.2**：服务级 `runtimes.codex` 仍然整体透传。这是 Codex 自己的配置命名空间，原来的设计和测试都依赖这一点。只有项目级 `runtime` 收紧为「`config` 显式透传 + 映射字段」，没有为每种运行时拆分 schema。
+- **3.5**：没有新增 `turn.steered` 事件。
+- **3.7**：范围收窄。`AppConfig` 上的扁平访问器和 YAML 扁平字段的兼容映射都保留了：它们只在一处统一转换，并且测试里大量用到，改动面大、收益小。实际做的是：
+  - 项目的 `agent` 在 schema 解析时并入 `runtime`；
+  - 删除 `codex.auth.apiKey`、`codex.configPath` 和顶层 `pi` 这几个别名；
+  - 注册表只读 `runtimes.codex`。
+- **3.8**：新增的配置段叫 `titles: { model, apiKey, baseUrl }`，`baseUrl` 写 OpenAI 兼容的 API 根地址，程序固定拼上 `/chat/completions`。
+
+### 需要注意的行为变化
+
+- 自动生成标题不再借用 `router` 的配置。想用模型生成标题，需要配置 `titles`；不配置时使用消息首行。
+- `runtimes.pi` 不再接受单 provider 简写（顶层的 `provider/model/apiKey/baseUrl`），需要改用 `defaultProvider`、`defaultModel`、`providers`。显式配置了但 Pi 不认识的模型会直接报错。
+- Pi 的 `auth.json` 和 `models.json` 改为从项目的 agentDir（默认 `<dataDir>/pi/<project>`）读取，不再读宿主机的 `~/.pi`。
+- Codex 的 `baseConfigPath` 指向的文件不存在或解析失败时会报错，不再被忽略。
+
