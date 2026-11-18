@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { ProjectConfig, RuntimeType } from "../domain/types.ts";
+import type { ProjectConfig } from "../domain/types.ts";
 
 export const GLOBAL_PROJECT_ID = "_global_";
 
@@ -34,7 +34,7 @@ You are a global assistant serving an analytical role:
 
 export function createGlobalProjectConfig(
   projectDir?: string,
-  runtimeType: RuntimeType = "codex",
+  runtimeType = "codex",
 ): ProjectConfig {
   const dir = projectDir ?? path.resolve(process.cwd(), "projects");
   return {

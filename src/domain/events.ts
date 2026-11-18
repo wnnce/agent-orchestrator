@@ -1,4 +1,4 @@
-import type { BaseLogRecord, RuntimeType } from "./types.ts";
+import type { BaseLogRecord } from "./types.ts";
 
 /**
  * ============================================================================
@@ -464,7 +464,7 @@ export interface EventRecord<T extends string = EventType, P = unknown>
   turnId?: string | undefined;
   sequence: number;
   type: T;
-  runtime: RuntimeType | "gateway" | "task" | "notification" | (string & {});
+  runtime: string;
   payload: P;
   createdAt: string;
   schemaVersion: number;

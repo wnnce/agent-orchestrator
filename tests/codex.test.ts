@@ -64,7 +64,15 @@ test("Codex replaces imported state and strips inherited Codex settings", async 
   };
   const runtime = new CodexRuntime(script, new Logger({ sink: () => {} }), {
     apiKey: "service-test-key",
-    baseUrl: "https://provider.example.com/v1",
+    model_provider: "custom-proxy",
+    model_providers: {
+      "custom-proxy": {
+        name: "custom-proxy",
+        base_url: "https://provider.example.com/v1",
+        wire_api: "responses",
+        requires_openai_auth: true,
+      },
+    },
   });
   try {
     await mkdir(codexHome);
@@ -121,7 +129,9 @@ createInterface({ input: process.stdin }).on("line", line => {
       await Bun.file(path.join(codexHome, "config.toml")).text(),
     ) as any;
     expect(generated.cli_auth_credentials_store).toBe("file");
-    expect(generated.model_providers.cliproxyapi.base_url).toBe("https://provider.example.com/v1");
+    expect(generated.model_providers["custom-proxy"].base_url).toBe(
+      "https://provider.example.com/v1",
+    );
     expect(generated.mcp_servers["project-tools"].url).toBe("https://tools.example.com/mcp");
     expect(generated.mcp_servers.personal).toBeUndefined();
     const spawn = await Bun.file(path.join(codexHome, "spawn.json")).json();
@@ -150,6 +160,166 @@ test("Codex requires the service API key instead of reusing existing login state
         onEvent: () => {},
       }),
     ).rejects.toThrow("codex.apiKey");
+  } finally {
+    await runtime.stop();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Codex runtime maps arbitrary configuration and custom model providers to config.toml", async () => {
+  const root = await mkdtemp("/tmp/codex-arbitrary-config-");
+  const codexHome = path.join(root, "managed-codex");
+  const script = path.join(root, "fake-codex");
+  await writeFile(
+    script,
+    `#!/usr/bin/env bun
+import { createInterface } from "node:readline";
+createInterface({ input: process.stdin }).on("line", line => {
+  const m = JSON.parse(line);
+  if (m.method === "initialize") console.log(JSON.stringify({ id: m.id, result: {} }));
+  else if (m.method === "thread/start") console.log(JSON.stringify({ id: m.id, result: { thread: { id: "thread-custom" } } }));
+});
+`,
+    { mode: 0o755 },
+  );
+
+  const runtime = new CodexRuntime(
+    script,
+    new Logger({ sink: () => {} }),
+    {
+      apiKey: "custom-api-key",
+      model: "o3-mini",
+      model_provider: "custom_gateway",
+      model_providers: {
+        custom_gateway: {
+          name: "custom_gateway",
+          base_url: "https://custom-gateway.internal/v1",
+          wire_api: "chat",
+          requires_openai_auth: false,
+        },
+      },
+      custom_section: {
+        telemetry: false,
+        retries: 3,
+      },
+    },
+  );
+
+  try {
+    await runtime.startSession({
+      project: {
+        ...project,
+        runtime: {
+          type: "codex",
+          codexHome,
+          config: {
+            temperature: 0.2,
+          },
+        },
+      },
+      workspacePath: root,
+      onEvent: () => {},
+    });
+
+    const generatedToml = Bun.TOML.parse(
+      await Bun.file(path.join(codexHome, "config.toml")).text(),
+    ) as any;
+
+    expect(generatedToml.model).toBe("o3-mini");
+    expect(generatedToml.model_provider).toBe("custom_gateway");
+    expect(generatedToml.model_providers.custom_gateway).toEqual({
+      name: "custom_gateway",
+      base_url: "https://custom-gateway.internal/v1",
+      wire_api: "chat",
+      requires_openai_auth: false,
+    });
+    expect(generatedToml.custom_section).toEqual({
+      telemetry: false,
+      retries: 3,
+    });
+    expect(generatedToml.temperature).toBe(0.2);
+    expect(generatedToml.cli_auth_credentials_store).toBe("file");
+  } finally {
+    await runtime.stop();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Codex runtime merges baseConfigPath template file and project runtime overrides", async () => {
+  const root = await mkdtemp("/tmp/codex-base-template-");
+  const codexHome = path.join(root, "managed-codex");
+  const baseTomlFile = path.join(root, "base.toml");
+  await writeFile(
+    baseTomlFile,
+    `
+[model_providers.shared_proxy]
+name = "shared_proxy"
+base_url = "https://shared.internal/v1"
+wire_api = "responses"
+
+[company_defaults]
+region = "us-east-1"
+`,
+  );
+
+  const script = path.join(root, "fake-codex");
+  await writeFile(
+    script,
+    `#!/usr/bin/env bun
+import { createInterface } from "node:readline";
+createInterface({ input: process.stdin }).on("line", line => {
+  const m = JSON.parse(line);
+  if (m.method === "initialize") console.log(JSON.stringify({ id: m.id, result: {} }));
+  else if (m.method === "thread/start") console.log(JSON.stringify({ id: m.id, result: { thread: { id: "thread-base" } } }));
+});
+`,
+    { mode: 0o755 },
+  );
+
+  const runtime = new CodexRuntime(
+    script,
+    new Logger({ sink: () => {} }),
+    {
+      apiKey: "service-key",
+      baseConfigPath: baseTomlFile,
+      model_provider: "shared_proxy",
+    },
+  );
+
+  try {
+    await runtime.startSession({
+      project: {
+        ...project,
+        runtime: {
+          type: "codex",
+          codexHome,
+          model: "gpt-4o",
+          reasoningEffort: "high",
+          config: {
+            company_defaults: {
+              cluster: "prod-1",
+            },
+          },
+        },
+      },
+      workspacePath: root,
+      onEvent: () => {},
+    });
+
+    const generatedToml = Bun.TOML.parse(
+      await Bun.file(path.join(codexHome, "config.toml")).text(),
+    ) as any;
+
+    expect(generatedToml.model).toBe("gpt-4o");
+    expect(generatedToml.model_reasoning_effort).toBe("high");
+    expect(generatedToml.model_provider).toBe("shared_proxy");
+    expect(generatedToml.model_providers.shared_proxy.base_url).toBe(
+      "https://shared.internal/v1",
+    );
+    expect(generatedToml.company_defaults).toEqual({
+      region: "us-east-1",
+      cluster: "prod-1",
+    });
   } finally {
     await runtime.stop();
     await rm(root, { recursive: true, force: true });

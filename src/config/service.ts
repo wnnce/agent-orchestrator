@@ -38,14 +38,15 @@ export const routerConfigSchema = z.strictObject({
   baseUrl: z.url().default("https://api.openai.com/v1"),
 });
 
-export const codexConfigSchema = z.strictObject({
-  apiKey: optionalText,
-  baseUrl: z
-    .union([z.literal(""), z.url()])
-    .transform((value) => value || undefined)
-    .optional(),
-  mcpServers: z.array(mcpServerConfigSchema).optional(),
-});
+export const codexConfigSchema = z
+  .object({
+    apiKey: optionalText,
+    mcpServers: z.array(mcpServerConfigSchema).optional(),
+    config: z.record(z.string(), z.unknown()).optional(),
+    baseConfigPath: z.string().optional(),
+    configPath: z.string().optional(),
+  })
+  .passthrough();
 
 export const feishuConfigSchema = z
   .strictObject({
@@ -79,9 +80,12 @@ export const wecomConfigSchema = z
     },
   );
 
-export const runtimesConfigSchema = z.strictObject({
-  codex: codexConfigSchema.prefault({}),
-});
+export const runtimesConfigSchema = z
+  .object({
+    codex: codexConfigSchema.prefault({}),
+  })
+  .catchall(z.record(z.string(), z.unknown()))
+  .prefault({});
 
 export const channelsConfigSchema = z.strictObject({
   feishu: feishuConfigSchema.prefault({}),
@@ -202,7 +206,7 @@ export interface AppConfig {
   storage?: StorageConfig;
   auth?: AuthConfig;
   router?: RouterConfig;
-  runtimes?: {
+  runtimes?: Record<string, Record<string, unknown>> & {
     codex: CodexConfig;
   };
   channels?: {

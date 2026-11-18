@@ -117,8 +117,14 @@ export class ProjectManager {
     const projectMcpServers = (project.agent?.mcpServers ??
       project.runtime?.mcpServers ??
       []) as McpServerConfig[];
+    const runtimeConfigEntry = (this.config.runtimes?.[runtimeType] ??
+      (runtimeType === "codex" ? this.config.codex : undefined)) as
+      | { mcpServers?: McpServerConfig[] }
+      | undefined;
     const mcpServers = mergeMcpServers(
-      (this.config.codex?.mcpServers ?? []) as McpServerConfig[],
+      (runtimeConfigEntry?.mcpServers ??
+        this.config.codex?.mcpServers ??
+        []) as McpServerConfig[],
       projectMcpServers,
     );
     const model = project.agent?.model ?? project.runtime?.model;
@@ -126,6 +132,7 @@ export class ProjectManager {
       project.agent?.reasoningEffort ?? project.runtime?.reasoningEffort;
 
     const runtimeConfig: ProjectRuntimeConfig = {
+      ...project.runtime,
       type: runtimeType,
       approvalPolicy: project.runtime?.approvalPolicy ?? "never",
       sandbox: project.runtime?.sandbox ?? "danger-full-access",

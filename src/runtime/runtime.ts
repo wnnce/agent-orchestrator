@@ -1,4 +1,4 @@
-import type { ProjectConfig, RuntimeType } from "../domain/types.ts";
+import type { ProjectConfig } from "../domain/types.ts";
 import type { ActionContext } from "../actions/types.ts";
 import type {
   CanonicalEventType,

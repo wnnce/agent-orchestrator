@@ -33,7 +33,6 @@ routerApiKey: test-router-key
 routerBaseUrl: https://router.example.com/v1
 codex:
   apiKey: test-codex-key
-  baseUrl: https://codex.example.com/v1
 feishu:
   enabled: true
   verificationToken: test-verification-token
@@ -55,7 +54,6 @@ feishu:
       routerBaseUrl: "https://router.example.com/v1",
       codex: {
         apiKey: "test-codex-key",
-        baseUrl: "https://codex.example.com/v1",
       },
       feishu: { enabled: true, verificationToken: "test-verification-token" },
     });
@@ -93,9 +91,24 @@ feishu:
     ]);
   });
 
-  test("does not accept external Codex configuration paths", async () => {
-    await writeFile(file, "codex:\n  authDir: /home/user/.codex\n");
-    await expect(loadConfig(file)).rejects.toThrow("Unrecognized key");
+  test("accepts arbitrary custom runtime parameters under runtimes/codex", async () => {
+    await writeFile(
+      file,
+      `
+runtimes:
+  codex:
+    apiKey: test-key
+    customOption: 123
+    model_providers:
+      my_provider:
+        base_url: https://example.com/v1
+`,
+    );
+    const config = await loadConfig(file);
+    expect((config.codex as any).customOption).toBe(123);
+    expect((config.codex as any).model_providers.my_provider.base_url).toBe(
+      "https://example.com/v1",
+    );
   });
 
   test("applies defaults and derives the artifact directory", async () => {
@@ -137,7 +150,6 @@ feishu:
       expect(config.logLevel).toBe("info");
       expect(config.feishu.enabled).toBe(false);
       expect(config.codex.apiKey).toBeUndefined();
-      expect(config.codex.baseUrl).toBeUndefined();
     } finally {
       for (const [key, value] of Object.entries(previous)) {
         if (value === undefined) delete process.env[key];
@@ -153,7 +165,6 @@ feishu:
     ["logLevel: verbose", "logLevel"],
     ["feishu:\n  enabled: true", "feishu.verificationToken"],
     ["unknownOption: true", "Unrecognized key"],
-    ["codex:\n  baseUrl: invalid-url", "codex.baseUrl"],
     ["codexBinary: /opt/external/codex", "Unrecognized key"],
   ])("rejects invalid configuration: %s", async (content, field) => {
     await writeFile(file, content);
@@ -204,7 +215,7 @@ router:
 runtimes:
   codex:
     apiKey: codex-key
-    baseUrl: https://codex-proxy.ai/v1
+    model_provider: custom
 
 channels:
   feishu:
@@ -235,7 +246,7 @@ channels:
     });
     expect(config.runtimes!.codex).toEqual({
       apiKey: "codex-key",
-      baseUrl: "https://codex-proxy.ai/v1",
+      model_provider: "custom",
     });
     expect(config.channels!.feishu).toEqual({
       enabled: true,

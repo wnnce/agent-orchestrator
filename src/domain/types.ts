@@ -1,6 +1,5 @@
 export * from "./events.ts";
 
-export type RuntimeType = "codex" | "pi" | "fake" | (string & {});
 export type SessionStatus =
   | "active"
   | "idle"
@@ -64,7 +63,7 @@ export interface ProjectRoutingDescription {
 }
 
 export interface ProjectAgentConfig {
-  type?: RuntimeType;
+  type?: string;
   model?: string;
   temperature?: number;
   reasoningEffort?: string;
@@ -72,7 +71,7 @@ export interface ProjectAgentConfig {
 }
 
 export interface ProjectRuntimeConfig {
-  type: RuntimeType;
+  type: string;
   model?: string;
   reasoningEffort?: string;
   approvalPolicy?: "never" | "on-request" | "on-failure" | "untrusted";
@@ -82,6 +81,9 @@ export interface ProjectRuntimeConfig {
   cwdRoot?: string;
   codexHome?: string;
   mcpServers?: McpServerConfig[];
+  config?: Record<string, unknown>;
+  baseConfigPath?: string;
+  [key: string]: unknown;
 }
 
 export interface ProjectMetaConfig {

@@ -1,7 +1,5 @@
 import { z } from "zod";
 
-export const runtimeTypeSchema = z.string().min(1);
-
 export const gitIdentitySchema = z.object({
   name: z.string().min(1).optional(),
   email: z.string().optional(),
@@ -102,7 +100,7 @@ export const notificationConfigSchema = z
   });
 
 export const projectAgentConfigSchema = z.object({
-  type: runtimeTypeSchema.optional(),
+  type: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
   temperature: z.number().min(0).max(2).optional(),
   reasoningEffort: z.string().min(1).optional(),
@@ -170,7 +168,7 @@ export const projectConfigSchema = z
       routing: routingDescriptionSchema,
       runtime: z
         .object({
-          type: runtimeTypeSchema,
+          type: z.string().min(1),
           model: z.string().min(1).optional(),
           reasoningEffort: z.string().min(1).optional(),
           approvalPolicy: z
@@ -184,7 +182,10 @@ export const projectConfigSchema = z
           cwdRoot: z.string().min(1).optional(),
           codexHome: z.string().min(1).optional(),
           mcpServers: z.array(mcpServerConfigSchema).optional(),
+          config: z.record(z.string(), z.unknown()).optional(),
+          baseConfigPath: z.string().optional(),
         })
+        .passthrough()
         .optional(),
       agent: projectAgentConfigSchema.optional(),
       committer: gitIdentitySchema.optional(),
