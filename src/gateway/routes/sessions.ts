@@ -30,7 +30,7 @@ export function createSessionsRouter(deps: SessionsRouteDeps): Hono {
   router.post("/sessions", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     const external = externalRef(body.external);
-    const source = typeof body.source === "string" ? body.source : external?.channel ?? "web";
+    const source = external?.channel ?? "web";
     const created = await deps.service.createSession({
       ...(typeof body.projectId === "string" ? { projectId: body.projectId } : {}),
       ...(typeof body.title === "string" ? { title: body.title } : {}),
@@ -46,7 +46,7 @@ export function createSessionsRouter(deps: SessionsRouteDeps): Hono {
     const projectId = c.req.param("projectId");
     const body = await c.req.json().catch(() => ({}));
     const external = externalRef(body.external);
-    const source = typeof body.source === "string" ? body.source : external?.channel ?? "web";
+    const source = external?.channel ?? "web";
     const created = await deps.service.createSession({
       projectId,
       ...(typeof body.title === "string" ? { title: body.title } : {}),
@@ -187,7 +187,7 @@ export function createSessionsRouter(deps: SessionsRouteDeps): Hono {
     const route = await deps.store.getSession(sessionId);
     if (!route) return c.json({ error: "session_not_found" }, 404);
 
-    if (route.source === "task" || route.metadata?.taskType === "project_task") {
+    if (route.source === "task") {
       return c.json(
         {
           error: "task_session_read_only",

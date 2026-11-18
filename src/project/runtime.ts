@@ -117,7 +117,6 @@ export class ProjectRuntime {
             title: `Task: ${task.name}`,
             taskKey: task.taskKey,
             taskId: task.taskId,
-            taskType: "project_task",
           },
           "task",
         );
@@ -217,9 +216,9 @@ export class ProjectRuntime {
             title: dispatchParams.title,
             sourceSessionId: params.sessionId,
             ...(params.taskKey ? { sourceTaskKey: params.taskKey } : {}),
-            ...(dispatchParams.metadata ?? {}),
+            ...(dispatchParams.metadata ? { dispatch: dispatchParams.metadata } : {}),
           },
-          "task",
+          "dispatch",
         );
         const turn = await this.turn(
           sessionRoute.sessionId,
@@ -304,14 +303,19 @@ export class ProjectRuntime {
     this.logger.info("project runtime stopped", { projectId: this.project.id });
   }
 
-  /** Finishes closes that a previous process started but never completed. */
+  /**
+   * Cleans up what a previous process left behind: closes it started but never completed, and
+   * scheduled-task sessions it was running when it stopped.
+   */
   private async reconcileSessions(): Promise<void> {
     const sessions = await this.store.listSessions(this.project.id, {
       includeTasks: true,
     });
     for (const session of sessions) {
-      if (session.status !== "closing") continue;
-      this.logger.info("finishing close left over from a previous run", {
+      const abandonedTask =
+        session.source === "task" && session.status !== "closed" && session.status !== "archived";
+      if (session.status !== "closing" && !abandonedTask) continue;
+      this.logger.info("cleaning up session left over from a previous run", {
         projectId: this.project.id,
         sessionId: session.sessionId,
       });
@@ -323,10 +327,14 @@ export class ProjectRuntime {
     return SkillManager.listProjectSkills(this.project);
   }
 
+  /**
+   * Creates a session. `source` records who created it and is the only thing that marks a
+   * session as a scheduled-task session (`"task"`).
+   */
   async createSession(
     repositoryId?: string,
     metadata?: Record<string, unknown>,
-    source?: string,
+    source = "api",
   ): Promise<SessionRoute> {
     if (
       this.project.repositories.length === 0 &&
@@ -353,12 +361,6 @@ export class ProjectRuntime {
       typeof metadata?.taskKey === "string" ? metadata.taskKey : undefined;
     const context = this.context(workspacePath, sessionId, taskKey);
     const runtimeSession = await this.runtime.startSession(context);
-    const resolvedSource =
-      source ??
-      (metadata?.taskType === "project_task" || metadata?.taskKey
-        ? "task"
-        : undefined) ??
-      "unknown";
     const runtimeName = this.runtime.name ?? this.runtime.type ?? "unknown";
     const route: SessionRoute = {
       sessionId,
@@ -373,7 +375,7 @@ export class ProjectRuntime {
       runtime: runtimeName,
       configRevision: this.project.revision ?? 1,
       status: "active",
-      source: resolvedSource,
+      source,
       lastActiveAt: new Date().toISOString(),
       metadata: { ...(metadata ?? {}), runtime: runtimeName },
     };
@@ -1043,15 +1045,6 @@ export class ProjectRuntime {
       this.project.runtime?.archiveTimeoutMs ?? 60 * 60_000;
     for (const stored of await this.store.listSessions(this.project.id)) {
       const id = stored.sessionId;
-      // Scheduled task sessions must terminate immediately upon completion, never suspended
-      if (
-        stored.source === "task" ||
-        stored.metadata?.taskType === "project_task" ||
-        stored.metadata?.taskKey
-      ) {
-        await this.cleanupSession(id, { deleteFromStore: false });
-        continue;
-      }
       if (
         this.activeTurns.has(id) ||
         this.pendingTurns.get(id)?.length ||

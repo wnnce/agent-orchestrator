@@ -185,6 +185,26 @@ describe("session execution and control", () => {
     await runtime.start();
     expect((await store.getSession(sessionId))?.status).toBe("closed");
   });
+  test("dispatched sessions are regular sessions", async () => {
+    const context = runtime.createActionContext({ sessionId });
+    const dispatched = await context.dispatchTask({
+      title: "Child",
+      prompt: "work",
+      metadata: { taskKey: "spoofed" },
+    });
+    const route = await store.getSession(dispatched.sessionId);
+    expect(route?.source).toBe("dispatch");
+    expect(route?.metadata?.taskKey).toBeUndefined();
+    expect(route?.metadata?.sourceSessionId).toBe(sessionId);
+    const listed = await store.listSessions("execution");
+    expect(listed.map((s) => s.sessionId)).toContain(dispatched.sessionId);
+  });
+  test("start cleans up task sessions abandoned by a previous run", async () => {
+    const task = await runtime.createSession(undefined, { taskKey: "execution:nightly" }, "task");
+    await runtime.sessionManager.remove(task.sessionId);
+    await runtime.start();
+    expect((await store.getSession(task.sessionId))?.status).toBe("closed");
+  });
   test("runtime disconnect completes the active turn as failed", async () => {
     const turn = await runtime.turn(sessionId, "long");
     await agent.started(1);

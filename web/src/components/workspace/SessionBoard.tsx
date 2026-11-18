@@ -329,11 +329,7 @@ export function SessionBoard() {
   // Filter sessions by search query (matches title or sessionId or repo or project or channel)
   // and exclude scheduled task sessions
   const filteredSessions = useMemo(() => {
-    const nonTaskSessions = sessions.filter(
-      (s) =>
-        (s as any).metadata?.taskType !== "project_task" &&
-        !(s as any).metadata?.taskKey,
-    );
+    const nonTaskSessions = sessions.filter((s) => s.source !== "task");
     if (!searchQuery.trim()) return nonTaskSessions;
     const q = searchQuery.toLowerCase();
     return nonTaskSessions.filter(

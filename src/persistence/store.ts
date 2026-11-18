@@ -134,12 +134,7 @@ export class MemoryStore implements Store {
       all = all.filter((s) => s.projectId === projectId);
     }
     if (!options?.includeTasks) {
-      all = all.filter(
-        (s) =>
-          s.source !== "task" &&
-          s.metadata?.taskType !== "project_task" &&
-          !s.metadata?.taskKey,
-      );
+      all = all.filter((s) => s.source !== "task");
     }
     return all.sort((a, b) => b.lastActiveAt.localeCompare(a.lastActiveAt));
   }
@@ -490,9 +485,7 @@ export class PostgresStore implements Store {
       wheres.push(`project_id = $${params.length}`);
     }
     if (!options?.includeTasks) {
-      wheres.push(
-        "(source != 'task' AND (metadata->>'taskType' IS NULL OR metadata->>'taskType' != 'project_task') AND metadata->>'taskKey' IS NULL)",
-      );
+      wheres.push("source != 'task'");
     }
     const query = `SELECT * FROM sessions WHERE ${wheres.join(" AND ")} ORDER BY last_active_at DESC`;
     const result = await this.pool.query(query, params);

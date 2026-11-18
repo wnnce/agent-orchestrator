@@ -20,6 +20,7 @@ web interface.
 - `src/actions/`, `src/task/`: actions, task execution, and scheduling.
 - `src/persistence/`: `Store`, `MemoryStore`, and `PostgresStore` implementations.
 - `database/schema.sql`: complete schema for initializing a new PostgreSQL database.
+- `database/migrations/`: one-off SQL upgrades for existing databases, applied manually in name order.
 - `scripts/`: explicit operational scripts such as database initialization.
 - `web/`: React/Vite web application.
 - `tests/`: Bun test suite.

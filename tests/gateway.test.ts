@@ -177,12 +177,18 @@ describe("Gateway with Hono", () => {
       const explicitTitleBody = (await explicitTitleRes.json()) as any;
       expect(explicitTitleBody.session.title).toBe("Explicit Title On Creation");
 
-      // Check GET /sessions does not include project_task sessions
+      // Check GET /sessions hides scheduled-task sessions but lists dispatched ones
       const projectRuntime = projectManager.get("test-proj");
-      const taskSession = await projectRuntime.createSession(undefined, {
-        taskKey: "test-proj:cron-test",
-        taskType: "project_task",
-      });
+      const taskSession = await projectRuntime.createSession(
+        undefined,
+        { taskKey: "test-proj:cron-test" },
+        "task",
+      );
+      const dispatchedSession = await projectRuntime.createSession(
+        undefined,
+        { sourceSessionId: sessionId, dispatch: { taskKey: "spoofed" } },
+        "dispatch",
+      );
       const listSessionsRes = await gateway.handle(
         new Request("http://localhost/sessions?projectId=test-proj"),
       );
@@ -192,6 +198,7 @@ describe("Gateway with Hono", () => {
       expect(returnedIds).toContain(sessionId);
       expect(returnedIds).toContain(explicitTitleBody.session.sessionId);
       expect(returnedIds).not.toContain(taskSession.sessionId);
+      expect(returnedIds).toContain(dispatchedSession.sessionId);
 
       // Delete session
       const deleteRes = await gateway.handle(
