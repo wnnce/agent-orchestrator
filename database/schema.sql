@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   status VARCHAR(50) NOT NULL,
   source VARCHAR(50) NOT NULL DEFAULT 'unknown',
   runtime VARCHAR(50) NOT NULL DEFAULT 'unknown',
+  workspace_path TEXT,
   external_channel VARCHAR(50),
   external_conversation_id VARCHAR(255),
   external_thread_id VARCHAR(255),

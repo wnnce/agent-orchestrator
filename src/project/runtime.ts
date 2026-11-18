@@ -373,6 +373,7 @@ export class ProjectRuntime {
       projectRuntimeId: `project-runtime:${this.project.id}`,
       runtimeSessionId: runtimeSession.id,
       runtime: runtimeName,
+      workspacePath,
       configRevision: this.project.revision ?? 1,
       status: "active",
       source,
@@ -449,7 +450,7 @@ export class ProjectRuntime {
     if (route?.runtimeSessionId) {
       try {
         await this.runtime.releaseSession(
-          this.context(await this.workspacePath(route), sessionId),
+          this.context(this.workspacePath(route), sessionId),
           route.runtimeSessionId,
         );
       } catch (e) {
@@ -683,7 +684,7 @@ export class ProjectRuntime {
     const active = this.activeTurns.get(sessionId);
     if (!active?.runtimeId || active.settled) throw new Error("no active turn");
     await this.runtime.steerTurn(
-      this.context(await this.workspacePath(route), sessionId),
+      this.context(this.workspacePath(route), sessionId),
       route.runtimeSessionId ?? "",
       active.runtimeId,
       input,
@@ -706,7 +707,7 @@ export class ProjectRuntime {
       active.canceled = true;
       if (active.runtimeId)
         await this.runtime.interruptTurn(
-          this.context(await this.workspacePath(route), sessionId),
+          this.context(this.workspacePath(route), sessionId),
           route.runtimeSessionId ?? "",
           active.runtimeId,
         );
@@ -719,7 +720,7 @@ export class ProjectRuntime {
   async compact(sessionId: string): Promise<void> {
     const route = await this.loadSession(sessionId);
     await this.runtime.compactSession(
-      this.context(await this.workspacePath(route), sessionId),
+      this.context(this.workspacePath(route), sessionId),
       route.runtimeSessionId ?? "",
     );
     await this.emit(route, "compaction.completed", this.runtime.type, {});
@@ -731,7 +732,7 @@ export class ProjectRuntime {
   ): Promise<void> {
     const route = await this.loadSession(sessionId);
     await this.runtime.respondToApproval(
-      this.context(await this.workspacePath(route), sessionId),
+      this.context(this.workspacePath(route), sessionId),
       requestId,
       result,
     );
@@ -764,7 +765,7 @@ export class ProjectRuntime {
     const id = route.sessionId;
     const active = this.activeTurns.get(id)!;
     const entity = await this.entity(id);
-    const workspacePath = await this.workspacePath(route);
+    const workspacePath = await this.ensureWorkspace(route);
     const taskKey =
       typeof route.metadata?.taskKey === "string"
         ? route.metadata.taskKey
@@ -816,20 +817,25 @@ export class ProjectRuntime {
       );
     await active.completed;
   }
-  private async workspacePath(route: SessionRoute): Promise<string> {
-    if (
-      this.project.id === GLOBAL_PROJECT_ID ||
-      this.project.repositories.length === 0
-    ) {
-      return this.workspaces.ensure(this.project, route.sessionId);
+  /**
+   * The session's working directory. It is stored when the session is created; sessions created
+   * before that was stored get it computed. Never touches git.
+   */
+  private workspacePath(route: SessionRoute): string {
+    if (route.workspacePath) return route.workspacePath;
+    const info = this.workspaces.resolveSessionWorkspace(this.project, route.sessionId);
+    return (route.repositoryId && info.repoPaths.get(route.repositoryId)) || info.primaryPath;
+  }
+  /** Recreates the session's worktrees when they are missing, e.g. after the data dir was cleaned. */
+  private async ensureWorkspace(route: SessionRoute): Promise<string> {
+    if (!this.workspaces.isSessionReady(this.project, route.sessionId)) {
+      this.logger.warn("session workspace is missing; recreating it", {
+        projectId: this.project.id,
+        sessionId: route.sessionId,
+      });
+      await this.workspaces.ensureSessionWorkspaces(this.project, route.sessionId);
     }
-    const repository =
-      this.project.repositories.find(
-        (item) => item.id === route.repositoryId,
-      ) ?? this.project.repositories[0];
-    if (!repository)
-      throw new Error(`project ${this.project.id} has no repository`);
-    return this.workspaces.ensure(this.project, route.sessionId, repository);
+    return this.workspacePath(route);
   }
   private context(
     workspacePath: string,
@@ -1074,7 +1080,7 @@ export class ProjectRuntime {
         const route = entity.toRoute();
         if (route.runtimeSessionId)
           await this.runtime.releaseSession(
-            this.context(await this.workspacePath(route), id),
+            this.context(this.workspacePath(route), id),
             route.runtimeSessionId,
           );
         if (archive) await this.workspaces.removeSession(this.project, id);

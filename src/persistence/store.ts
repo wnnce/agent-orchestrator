@@ -420,7 +420,7 @@ export class PostgresStore implements Store {
     const metadata = { ...(route.metadata ?? {}), runtime };
     const metadataJson = JSON.stringify(metadata);
     await this.pool.query(
-      "INSERT INTO sessions(session_id, project_id, repository_id, project_runtime_id, runtime_session_id, config_revision, status, source, runtime, external_channel, external_conversation_id, external_thread_id, last_active_at, created_at, updated_at, deleted_at, title, metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,now(),now(),0,$14,$15::jsonb)",
+      "INSERT INTO sessions(session_id, project_id, repository_id, project_runtime_id, runtime_session_id, config_revision, status, source, runtime, external_channel, external_conversation_id, external_thread_id, last_active_at, created_at, updated_at, deleted_at, title, metadata, workspace_path) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,now(),now(),0,$14,$15::jsonb,$16)",
       [
         route.sessionId,
         route.projectId,
@@ -437,6 +437,7 @@ export class PostgresStore implements Store {
         route.lastActiveAt,
         title,
         metadataJson,
+        route.workspacePath ?? null,
       ],
     );
     return { ...route, title, source, runtime, metadata };
@@ -446,34 +447,9 @@ export class PostgresStore implements Store {
       "SELECT * FROM sessions WHERE session_id = $1 AND deleted_at = 0",
       [sessionId],
     );
-    const row = result.rows[0];
-    return row
-      ? {
-          id: Number(row.id),
-          sessionId: row.session_id,
-          title: row.title ?? "新会话",
-          projectId: row.project_id,
-          repositoryId: row.repository_id ?? undefined,
-          projectRuntimeId: row.project_runtime_id,
-          runtimeSessionId: row.runtime_session_id,
-          configRevision: row.config_revision,
-          status: row.status,
-          source: row.source ?? "unknown",
-          runtime: row.runtime ?? row.metadata?.runtime ?? "unknown",
-          externalChannel: row.external_channel ?? undefined,
-          externalConversationId: row.external_conversation_id ?? undefined,
-          externalThreadId: row.external_thread_id ?? undefined,
-          lastActiveAt: row.last_active_at.toISOString(),
-          createdAt: row.created_at?.toISOString(),
-          updatedAt: row.updated_at?.toISOString(),
-          deletedAt: Number(row.deleted_at ?? 0),
-          metadata:
-            row.metadata && typeof row.metadata === "object"
-              ? row.metadata
-              : undefined,
-        }
-      : null;
+    return result.rows[0] ? toSessionRoute(result.rows[0]) : null;
   }
+
   async listSessions(
     projectId?: string,
     options?: { includeTasks?: boolean },
@@ -489,29 +465,7 @@ export class PostgresStore implements Store {
     }
     const query = `SELECT * FROM sessions WHERE ${wheres.join(" AND ")} ORDER BY last_active_at DESC`;
     const result = await this.pool.query(query, params);
-    return result.rows.map((row) => ({
-      id: Number(row.id),
-      sessionId: row.session_id,
-      title: row.title ?? "新会话",
-      projectId: row.project_id,
-      repositoryId: row.repository_id ?? undefined,
-      projectRuntimeId: row.project_runtime_id,
-      runtimeSessionId: row.runtime_session_id,
-      configRevision: row.config_revision,
-      status: row.status,
-      source: row.source ?? "unknown",
-      externalChannel: row.external_channel ?? undefined,
-      externalConversationId: row.external_conversation_id ?? undefined,
-      externalThreadId: row.external_thread_id ?? undefined,
-      lastActiveAt: row.last_active_at.toISOString(),
-      createdAt: row.created_at?.toISOString(),
-      updatedAt: row.updated_at?.toISOString(),
-      deletedAt: Number(row.deleted_at ?? 0),
-      metadata:
-        row.metadata && typeof row.metadata === "object"
-          ? row.metadata
-          : undefined,
-    }));
+    return result.rows.map(toSessionRoute);
   }
   async updateSession(route: SessionRoute): Promise<void> {
     const metadata = {
@@ -553,29 +507,7 @@ export class PostgresStore implements Store {
       "SELECT * FROM sessions WHERE external_channel=$1 AND external_conversation_id=$2 AND external_thread_id IS NOT DISTINCT FROM $3 AND status != 'archived' AND deleted_at = 0 ORDER BY last_active_at DESC LIMIT 1",
       [channel, conversationId, threadId ?? null],
     );
-    const row = result.rows[0];
-    return row
-      ? {
-          id: Number(row.id),
-          sessionId: row.session_id,
-          title: row.title ?? "新会话",
-          projectId: row.project_id,
-          repositoryId: row.repository_id ?? undefined,
-          projectRuntimeId: row.project_runtime_id,
-          runtimeSessionId: row.runtime_session_id,
-          configRevision: row.config_revision,
-          status: row.status,
-          source: row.source ?? "unknown",
-          runtime: row.runtime ?? row.metadata?.runtime ?? "unknown",
-          externalChannel: row.external_channel ?? undefined,
-          externalConversationId: row.external_conversation_id ?? undefined,
-          externalThreadId: row.external_thread_id ?? undefined,
-          lastActiveAt: row.last_active_at.toISOString(),
-          createdAt: row.created_at?.toISOString(),
-          updatedAt: row.updated_at?.toISOString(),
-          deletedAt: Number(row.deleted_at ?? 0),
-        }
-      : null;
+    return result.rows[0] ? toSessionRoute(result.rows[0]) : null;
   }
   async claimInboundMessage(message: InboundMessageRecord): Promise<boolean> {
     const result = await this.pool.query(
@@ -1164,5 +1096,31 @@ export function newSessionRoute(
     configRevision,
     status: "active",
     lastActiveAt: new Date().toISOString(),
+  };
+}
+
+/** Maps a `sessions` row to a SessionRoute. */
+function toSessionRoute(row: Record<string, any>): SessionRoute {
+  return {
+    id: Number(row.id),
+    sessionId: row.session_id,
+    title: row.title ?? "新会话",
+    projectId: row.project_id,
+    repositoryId: row.repository_id ?? undefined,
+    projectRuntimeId: row.project_runtime_id,
+    runtimeSessionId: row.runtime_session_id,
+    runtime: row.runtime ?? row.metadata?.runtime ?? "unknown",
+    workspacePath: row.workspace_path ?? undefined,
+    configRevision: row.config_revision,
+    status: row.status,
+    source: row.source ?? "unknown",
+    externalChannel: row.external_channel ?? undefined,
+    externalConversationId: row.external_conversation_id ?? undefined,
+    externalThreadId: row.external_thread_id ?? undefined,
+    lastActiveAt: row.last_active_at.toISOString(),
+    createdAt: row.created_at?.toISOString(),
+    updatedAt: row.updated_at?.toISOString(),
+    deletedAt: Number(row.deleted_at ?? 0),
+    metadata: row.metadata && typeof row.metadata === "object" ? row.metadata : undefined,
   };
 }

@@ -55,7 +55,7 @@ export class ProjectManager {
   async start(): Promise<void> {
     const workspaceRoot = `${this.config.dataDir}/projects`;
     const baseRoot = `${this.config.dataDir}/bases`;
-    const workspaces = new WorkspaceManager(workspaceRoot, baseRoot);
+    const workspaces = new WorkspaceManager(workspaceRoot, baseRoot, undefined, this.logger);
 
     for (const project of this.projects) {
       try {
@@ -163,7 +163,8 @@ export class ProjectManager {
     const workspaceRoot = `${this.config.dataDir}/projects`;
     const baseRoot = `${this.config.dataDir}/bases`;
     const workspaces =
-      sharedWorkspaces ?? new WorkspaceManager(workspaceRoot, baseRoot);
+      sharedWorkspaces ??
+      new WorkspaceManager(workspaceRoot, baseRoot, undefined, this.logger);
     const artifacts = new ArtifactStore(this.config.artifactDir, this.store);
 
     const actionRegistry = new ActionRegistry(this.logger, this.store);

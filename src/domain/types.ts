@@ -179,6 +179,8 @@ export interface SessionRoute extends BaseEntity {
   projectRuntimeId: string;
   runtimeSessionId: string | null;
   runtime?: string;
+  /** Absolute path of the session's working directory, fixed when the session is created. */
+  workspacePath?: string;
   configRevision: number;
   status: SessionStatus;
   source?: string;
