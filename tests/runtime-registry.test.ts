@@ -130,12 +130,13 @@ describe("RuntimeRegistry", () => {
     );
   });
 
-  test("defaultRuntimeRegistry contains built-in codex and fake runtimes with metadata", () => {
+  test("defaultRuntimeRegistry contains built-in codex, pi, and fake runtimes with metadata", () => {
     expect(defaultRuntimeRegistry.has("codex")).toBe(true);
     expect(defaultRuntimeRegistry.has("fake")).toBe(true);
+    expect(defaultRuntimeRegistry.has("pi")).toBe(true);
 
     const runtimes = defaultRuntimeRegistry.listRuntimes();
-    expect(runtimes.length).toBeGreaterThanOrEqual(2);
+    expect(runtimes.length).toBeGreaterThanOrEqual(3);
 
     const fakeMeta = runtimes.find((r) => r.name === "fake");
     expect(fakeMeta).toBeDefined();
@@ -145,6 +146,11 @@ describe("RuntimeRegistry", () => {
     const codexMeta = runtimes.find((r) => r.name === "codex");
     expect(codexMeta).toBeDefined();
     expect(codexMeta?.capabilities?.mcp).toBe(true);
+
+    const piMeta = runtimes.find((r) => r.name === "pi");
+    expect(piMeta).toBeDefined();
+    expect(piMeta?.capabilities?.streaming).toBe(true);
+    expect(piMeta?.capabilities?.resume).toBe(true);
 
     const fake = defaultRuntimeRegistry.create("fake", {
       project: createSampleProject("sample"),

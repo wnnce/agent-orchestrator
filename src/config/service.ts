@@ -72,13 +72,10 @@ export const wecomConfigSchema = z
     secret: optionalText,
     wsUrl: optionalText,
   })
-  .refine(
-    (config) => !config.enabled || (!!config.botId && !!config.secret),
-    {
-      path: ["botId"],
-      message: "botId and secret are required when WeCom is enabled",
-    },
-  );
+  .refine((config) => !config.enabled || (!!config.botId && !!config.secret), {
+    path: ["botId"],
+    message: "botId and secret are required when WeCom is enabled",
+  });
 
 export const runtimesConfigSchema = z
   .object({
@@ -161,11 +158,13 @@ function normalizeRawConfig(raw: unknown): unknown {
   delete obj.routerApiKey;
   delete obj.routerBaseUrl;
 
-  // 6. runtimes (codex)
+  // 6. runtimes (codex, pi)
   const runtimes = { ...(obj.runtimes ?? {}) };
   if (obj.codex !== undefined && runtimes.codex === undefined) runtimes.codex = obj.codex;
+  if (obj.pi !== undefined && runtimes.pi === undefined) runtimes.pi = obj.pi;
   obj.runtimes = runtimes;
   delete obj.codex;
+  delete obj.pi;
 
   // 7. channels (feishu, wecom)
   const channels = { ...(obj.channels ?? {}) };

@@ -17,6 +17,7 @@
     "formatCheck": "prettier --check src tests"
   },
   "dependencies": {
+    "@earendil-works/pi-coding-agent": "^1.5.2",
     "@larksuiteoapi/node-sdk": "^1.76.0",
     "@openai/codex": "0.167.0",
     "@openai/codex-sdk": "0.167.0",

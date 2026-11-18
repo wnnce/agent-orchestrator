@@ -41,6 +41,23 @@ runtimes:
     #     wire_api: "responses"
     #     requires_openai_auth: true
     # mcpServers: [] # Global servers inherited by projects
+  pi:
+    defaultProvider: deepseek
+    defaultModel: deepseek-flash
+    providers:
+      deepseek:
+        baseUrl: https://api.deepseek.com
+        apiKey: ""
+        api: openai-responses # Optional wire protocol: openai-responses | openai-completions
+        models:
+          - id: deepseek-flash
+            name: DeepSeek Flash
+            contextWindow: 1000000
+            maxTokens: 384000
+            reasoning: true
+            compat:
+              requiresReasoningContentOnAssistantMessages: true
+              thinkingFormat: deepseek
 
 # 7. External integration channels
 channels:

@@ -6,6 +6,7 @@ import { Logger } from "../observability/logger.ts";
 import type { AgentRuntime, RuntimeCapabilities } from "./runtime.ts";
 import { FAKE_CAPABILITIES, FakeRuntime } from "./runtime.ts";
 import { CODEX_CAPABILITIES, CodexRuntime } from "./codex.ts";
+import { PI_CAPABILITIES, PiRuntime } from "./pi/index.ts";
 
 /**
  * Metadata describing a registered runtime and its capabilities.
@@ -200,6 +201,23 @@ export function createDefaultRuntimeRegistry(
     {
       description: "OpenAI Codex app-server runtime adapter",
       capabilities: CODEX_CAPABILITIES,
+    },
+  );
+
+  registry.register(
+    "pi",
+    (ctx) => {
+      const runtimeConfig = (ctx.config.runtimes?.pi ?? {}) as any;
+      return new PiRuntime(
+        ctx.logger,
+        runtimeConfig,
+        ctx.globalProject,
+        ctx.actionRegistry,
+      );
+    },
+    {
+      description: "Pi Agent native TypeScript SDK in-process runtime adapter",
+      capabilities: PI_CAPABILITIES,
     },
   );
 
