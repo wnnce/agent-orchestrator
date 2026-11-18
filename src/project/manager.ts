@@ -40,9 +40,7 @@ export class ProjectManager {
     this.eventHub = eventHub ?? new MemoryEventHub(store, sessionManager);
     const globalProjectsDir = path.resolve(process.cwd(), "projects");
     const defaultRuntimeType =
-      this.projects[0]?.runtime?.type ??
-      this.projects[0]?.agent?.type ??
-      "codex";
+      this.projects[0]?.runtime?.type ?? "codex";
     this.globalProject = createGlobalProjectConfig(
       globalProjectsDir,
       defaultRuntimeType,
@@ -68,7 +66,7 @@ export class ProjectManager {
       }
 
       const runtimeType =
-        project.runtime?.type ?? project.agent?.type ?? "codex";
+        project.runtime?.type ?? "codex";
       this.logger.info("starting project runtime", {
         projectId: project.id,
         runtime: runtimeType,
@@ -113,10 +111,8 @@ export class ProjectManager {
     project: ProjectConfig,
     sharedWorkspaces?: WorkspaceManager,
   ): ProjectRuntime {
-    const runtimeType = project.runtime?.type ?? project.agent?.type ?? "codex";
-    const projectMcpServers = (project.agent?.mcpServers ??
-      project.runtime?.mcpServers ??
-      []) as McpServerConfig[];
+    const runtimeType = project.runtime?.type ?? "codex";
+    const projectMcpServers = project.runtime?.mcpServers ?? [];
     const runtimeConfigEntry = (this.config.runtimes?.[runtimeType] ??
       (runtimeType === "codex" ? this.config.codex : undefined)) as
       | { mcpServers?: McpServerConfig[] }
@@ -127,24 +123,12 @@ export class ProjectManager {
         []) as McpServerConfig[],
       projectMcpServers,
     );
-    const model = project.agent?.model ?? project.runtime?.model;
-    const reasoningEffort =
-      project.agent?.reasoningEffort ?? project.runtime?.reasoningEffort;
-
     const runtimeConfig: ProjectRuntimeConfig = {
       ...project.runtime,
       type: runtimeType,
       approvalPolicy: project.runtime?.approvalPolicy ?? "never",
       sandbox: project.runtime?.sandbox ?? "danger-full-access",
       mcpServers,
-      ...(model ? { model } : {}),
-      ...(reasoningEffort ? { reasoningEffort } : {}),
-      ...(project.runtime?.idleTimeoutMs !== undefined
-        ? { idleTimeoutMs: project.runtime.idleTimeoutMs }
-        : {}),
-      ...(project.runtime?.archiveTimeoutMs !== undefined
-        ? { archiveTimeoutMs: project.runtime.archiveTimeoutMs }
-        : {}),
     };
 
     const effectiveNotifications = mergeNotifications(

@@ -683,7 +683,7 @@ describe("Feishu /close Command", () => {
         summary: "test",
         keywords: ["close-test"],
       },
-      agent: { type: "fake" },
+      runtime: { type: "fake" },
       repositories: [{ id: "main", url: "", baseBranch: "main", isPrimary: true }],
     };
 

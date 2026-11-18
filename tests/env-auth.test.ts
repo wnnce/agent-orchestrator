@@ -332,7 +332,7 @@ agent:
 
     const loaded = await loadProjects(projDir);
     expect(loaded.length).toBe(1);
-    expect(loaded[0]!.agent?.mcpServers?.[0]?.http_headers?.Authorization).toBe(
+    expect(loaded[0]!.runtime?.mcpServers?.[0]?.http_headers?.Authorization).toBe(
       "Bearer ghp_super_secret_12345",
     );
   });

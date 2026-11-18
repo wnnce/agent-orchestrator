@@ -17,7 +17,7 @@ const sampleProject: ProjectConfig = {
     repositories: ["sample/repo"],
     keywords: ["test", "sample"],
   },
-  agent: {
+  runtime: {
     type: "fake",
   },
   repositories: [

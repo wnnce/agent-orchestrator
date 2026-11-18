@@ -218,7 +218,22 @@ export const projectConfigSchema = z
       }
       repoIds.add(repo.id);
     }
-  });
+  })
+  .transform(foldAgentIntoRuntime);
+
+/**
+ * `agent` is an older name for part of `runtime` (type, model, reasoningEffort, mcpServers).
+ * It is merged into `runtime` once here — `runtime` wins where both set a field — so the rest of
+ * the code only reads `runtime`.
+ */
+function foldAgentIntoRuntime<
+  T extends { agent?: object | undefined; runtime?: object | undefined },
+>(project: T): Omit<T, "agent"> {
+  const { agent, ...rest } = project;
+  const { temperature: _unused, ...agentRuntime } = (agent ?? {}) as Record<string, unknown>;
+  if (Object.keys(agentRuntime).length === 0) return rest;
+  return { ...rest, runtime: { ...agentRuntime, ...project.runtime } } as Omit<T, "agent">;
+}
 
 export const projectFileSchema = z.object({
   projects: z.array(projectConfigSchema),

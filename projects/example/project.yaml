@@ -22,8 +22,9 @@ auth:
   type: token
   token: "{env:GITHUB_TOKEN}"
 
-# Agent & Model Configuration
-agent:
+# Agent runtime & model configuration
+runtime:
+  type: codex
   model: deepseek-v4-pro
   reasoningEffort: high
   mcpServers:

@@ -14,7 +14,8 @@ projects:
       routingHints: [Use this project for backend service and protobuf schema changes.]
 
     # Agent & MCP Server Configuration
-    agent:
+    runtime:
+      type: codex
       model: gpt-5-codex
       reasoningEffort: high
       mcpServers:

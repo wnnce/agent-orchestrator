@@ -62,14 +62,6 @@ export interface ProjectRoutingDescription {
   routingHints?: string[];
 }
 
-export interface ProjectAgentConfig {
-  type?: string;
-  model?: string;
-  temperature?: number;
-  reasoningEffort?: string;
-  mcpServers?: McpServerConfig[];
-}
-
 export interface ProjectRuntimeConfig {
   type: string;
   model?: string;
@@ -105,7 +97,6 @@ export interface ProjectConfig {
   project?: ProjectMetaConfig;
   routing: ProjectRoutingDescription;
   runtime?: ProjectRuntimeConfig;
-  agent?: ProjectAgentConfig;
   committer?: GitIdentity;
   auth?: RepoAuthConfig;
   env?: Record<string, string>;

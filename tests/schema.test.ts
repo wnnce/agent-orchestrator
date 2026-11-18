@@ -94,7 +94,7 @@ test("project schema accepts multi-repo configuration with auth", () => {
   expect(parsed.repositories[0]?.isPrimary).toBe(true);
   expect(parsed.repositories[0]?.auth?.type).toBe("ssh-key");
   expect(parsed.repositories[1]?.auth?.tokenEnv).toBe("GITHUB_TOKEN");
-  expect(parsed.agent?.model).toBe("gpt-5-codex");
+  expect(parsed.runtime?.model).toBe("gpt-5-codex");
 });
 
 test("loadProjects successfully loads from projects directory and ignores disabled projects", async () => {
@@ -146,5 +146,20 @@ test("project schema successfully loads projects.example.yaml", async () => {
   expect(p.repositories[0]?.id).toBe("service");
   expect(p.repositories[0]?.isPrimary).toBe(true);
   expect(p.repositories[1]?.id).toBe("proto");
-  expect(p.agent?.model).toBe("gpt-5-codex");
+  expect(p.runtime?.model).toBe("gpt-5-codex");
+});
+
+test("the older agent section is merged into runtime, runtime winning on conflicts", () => {
+  const parsed = projectConfigSchema.parse({
+    ...baseProject,
+    runtime: { type: "codex", model: "from-runtime" },
+    agent: { model: "from-agent", reasoningEffort: "high", temperature: 0.2 },
+  });
+  expect(parsed.runtime).toMatchObject({
+    type: "codex",
+    model: "from-runtime",
+    reasoningEffort: "high",
+  });
+  expect(parsed.runtime).not.toHaveProperty("temperature");
+  expect(parsed).not.toHaveProperty("agent");
 });
