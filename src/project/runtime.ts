@@ -18,6 +18,7 @@ import type {
   RuntimeContext,
   RuntimeEvent,
 } from "../runtime/runtime.ts";
+import { RuntimeSessionNotFoundError } from "../runtime/runtime.ts";
 import { WorkspaceManager } from "../workspace/workspace.ts";
 import { ArtifactStore } from "../artifacts/store.ts";
 import { NotificationHub, NotificationOutbox } from "../notifications/index.ts";
@@ -74,6 +75,8 @@ export class ProjectRuntime {
   private readonly eventQueues = new Map<string, Promise<void>>();
   private readonly runtimeEvents = new Map<string, Promise<void>>();
   private readonly sessionSequences = new Map<string, number>();
+  /** Sessions the agent runtime currently holds in this process. */
+  private readonly boundSessions = new Set<string>();
   private readonly timers: Timer[] = [];
   private stopping = false;
 
@@ -296,6 +299,7 @@ export class ProjectRuntime {
     await Promise.allSettled([...this.admissions.values()]);
     for (const id of [...this.pendingTurns.keys()]) await this.cancelQueued(id);
     await this.runtime.stop();
+    this.boundSessions.clear();
     for (const [id, active] of [...this.activeTurns]) {
       await this.finishTurn(id, active, "failed", "runtime stopped");
     }
@@ -361,7 +365,8 @@ export class ProjectRuntime {
       typeof metadata?.taskKey === "string" ? metadata.taskKey : undefined;
     const context = this.context(workspacePath, sessionId, taskKey);
     const runtimeSession = await this.runtime.startSession(context);
-    const runtimeName = this.runtime.name ?? this.runtime.type ?? "unknown";
+    this.boundSessions.add(sessionId);
+    const runtimeName = this.runtimeName();
     const route: SessionRoute = {
       sessionId,
       title:
@@ -447,12 +452,9 @@ export class ProjectRuntime {
       });
     }
     const route = entity?.toRoute() ?? (await this.store.getSession(sessionId));
-    if (route?.runtimeSessionId) {
+    if (route) {
       try {
-        await this.runtime.releaseSession(
-          this.context(this.workspacePath(route), sessionId),
-          route.runtimeSessionId,
-        );
+        await this.releaseRuntimeSession(route);
       } catch (e) {
         this.logger.warn("runtime releaseSession failed during close", {
           sessionId,
@@ -723,7 +725,6 @@ export class ProjectRuntime {
       this.context(this.workspacePath(route), sessionId),
       route.runtimeSessionId ?? "",
     );
-    await this.emit(route, "compaction.completed", this.runtime.type, {});
   }
   async approve(
     sessionId: string,
@@ -771,18 +772,7 @@ export class ProjectRuntime {
         ? route.metadata.taskKey
         : undefined;
     const context = this.context(workspacePath, id, taskKey);
-    const currentRuntime = this.runtime.name ?? this.runtime.type;
-    if (route.runtime && route.runtime !== currentRuntime) {
-      this.logger.warn("session runtime mismatch with project runtime", {
-        sessionId: id,
-        sessionRuntime: route.runtime,
-        projectRuntime: currentRuntime,
-      });
-    }
-    const runtimeSessionId = route.runtimeSessionId
-      ? (await this.runtime.resumeSession(context, route.runtimeSessionId)).id
-      : (await this.runtime.startSession(context)).id;
-    entity.bindRuntime(runtimeSessionId);
+    const runtimeSessionId = await this.bindRuntimeSession(entity, context);
     if (entity.status !== "closing") await entity.transitionTo("active");
     entity.touch();
     await entity.flush(this.store);
@@ -816,6 +806,65 @@ export class ProjectRuntime {
         runtimeTurn.id,
       );
     await active.completed;
+  }
+  /**
+   * Makes sure the agent runtime holds this session, resuming it at most once per process.
+   * When the runtime no longer has the session, or the project switched runtimes, a new runtime
+   * session is started and `session.runtime_reset` tells clients the earlier context is gone.
+   */
+  private async bindRuntimeSession(
+    entity: SessionEntity,
+    context: RuntimeContext,
+  ): Promise<string> {
+    const route = entity.toRoute();
+    const previousId = route.runtimeSessionId;
+    if (previousId && this.boundSessions.has(route.sessionId)) return previousId;
+
+    const runtimeName = this.runtimeName();
+    let resetReason: "not_found" | "runtime_changed" | undefined;
+    let runtimeSessionId: string | undefined;
+    if (previousId && route.runtime && route.runtime !== "unknown" && route.runtime !== runtimeName) {
+      resetReason = "runtime_changed";
+    } else if (previousId) {
+      try {
+        runtimeSessionId = (await this.runtime.resumeSession(context, previousId)).id;
+      } catch (error) {
+        if (!(error instanceof RuntimeSessionNotFoundError)) throw error;
+        resetReason = "not_found";
+      }
+    }
+    runtimeSessionId ??= (await this.runtime.startSession(context)).id;
+    entity.bindRuntime(runtimeSessionId, runtimeName);
+    this.boundSessions.add(route.sessionId);
+
+    if (previousId && resetReason) {
+      this.logger.warn("runtime session reset; earlier agent context is lost", {
+        sessionId: route.sessionId,
+        reason: resetReason,
+        runtime: runtimeName,
+        previousRuntimeSessionId: previousId,
+        runtimeSessionId,
+      });
+      await this.emit(route, "session.runtime_reset", "gateway", {
+        reason: resetReason,
+        runtime: runtimeName,
+        previousRuntimeSessionId: previousId,
+        runtimeSessionId,
+      });
+    }
+    return runtimeSessionId;
+  }
+  private runtimeName(): string {
+    return this.runtime.name ?? this.runtime.type;
+  }
+  /** Releases the runtime's hold on a session; the next turn resumes it. */
+  private async releaseRuntimeSession(route: SessionRoute): Promise<void> {
+    this.boundSessions.delete(route.sessionId);
+    if (!route.runtimeSessionId) return;
+    await this.runtime.releaseSession(
+      this.context(this.workspacePath(route), route.sessionId),
+      route.runtimeSessionId,
+    );
   }
   /**
    * The session's working directory. It is stored when the session is created; sessions created
@@ -887,7 +936,10 @@ export class ProjectRuntime {
     if (!entity) return;
     const active = this.activeTurns.get(id);
     const type = event.type as EventRecord["type"];
+    // Session lifecycle events are ours to emit; see the contract on AgentRuntime.
+    if (event.type.startsWith("session.")) return;
     if (event.type === "runtime.disconnected") {
+      this.boundSessions.delete(id);
       if (active)
         await this.finishTurn(id, active, "failed", "agent runtime exited");
       return;
@@ -1077,12 +1129,7 @@ export class ProjectRuntime {
           );
         }
         if (!archive && !shouldSuspend) continue;
-        const route = entity.toRoute();
-        if (route.runtimeSessionId)
-          await this.runtime.releaseSession(
-            this.context(this.workspacePath(route), id),
-            route.runtimeSessionId,
-          );
+        await this.releaseRuntimeSession(entity.toRoute());
         if (archive) await this.workspaces.removeSession(this.project, id);
         await entity.transitionTo(archive ? "archived" : "suspended");
         await entity.flush(this.store);

@@ -22,6 +22,7 @@ import type {
   RuntimeSession,
   RuntimeTurn,
 } from "../runtime.ts";
+import { RuntimeSessionNotFoundError } from "../runtime.ts";
 import { PI_CAPABILITIES } from "./capabilities.ts";
 import { PiNormalizer } from "./normalizer.ts";
 import { bridgeActionsToPiTools } from "./tools.ts";
@@ -51,13 +52,6 @@ export class PiRuntime implements AgentRuntime {
    */
   async startSession(context: RuntimeContext): Promise<RuntimeSession> {
     const wrapper = await this.setupSession(context);
-
-    await context.onEvent({
-      type: "session.started",
-      sessionId: wrapper.sessionId,
-      payload: { workspacePath: context.workspacePath },
-    });
-
     return { id: wrapper.sessionId, workspacePath: context.workspacePath };
   }
 
@@ -68,24 +62,10 @@ export class PiRuntime implements AgentRuntime {
     if (this.sessions.has(runtimeSessionId)) {
       const wrapper = this.sessions.get(runtimeSessionId)!;
       wrapper.context = context;
-
-      await context.onEvent({
-        type: "session.resumed",
-        sessionId: runtimeSessionId,
-        payload: { workspacePath: context.workspacePath },
-      });
-
       return { id: runtimeSessionId, workspacePath: context.workspacePath };
     }
 
     const wrapper = await this.setupSession(context, runtimeSessionId);
-
-    await context.onEvent({
-      type: "session.resumed",
-      sessionId: wrapper.sessionId,
-      payload: { workspacePath: context.workspacePath },
-    });
-
     return { id: wrapper.sessionId, workspacePath: context.workspacePath };
   }
 
@@ -109,14 +89,6 @@ export class PiRuntime implements AgentRuntime {
     wrapper.currentRuntimeTurnId = runtimeTurnId;
     wrapper.lastAssistantText = undefined;
     wrapper.isTurnEnded = false;
-
-    // Emit turn.started
-    await context.onEvent({
-      type: "turn.started",
-      sessionId,
-      turnId,
-      payload: { runtimeTurnId, input },
-    });
 
     // Run prompt asynchronously so startTurn returns immediately with runtimeTurnId
     wrapper.activeTurnPromise = (async () => {
@@ -162,13 +134,6 @@ export class PiRuntime implements AgentRuntime {
     if (!wrapper) return;
 
     await wrapper.session.steer(input);
-
-    await context.onEvent({
-      type: "agent.message.delta",
-      sessionId,
-      turnId: wrapper.currentTurnId,
-      payload: { text: `[Steer] ${input}` },
-    });
   }
 
   /**
@@ -206,22 +171,10 @@ export class PiRuntime implements AgentRuntime {
 
     try {
       await wrapper.session.compact();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("Nothing to compact") || msg.includes("Already compacted")) {
-        this.logger.debug("compaction skipped (session too small or already compacted)", {
-          sessionId,
-        });
-      } else {
-        throw err;
-      }
+    } catch (error) {
+      if (!isNothingToCompact(error)) throw error;
+      this.logger.debug("pi compaction skipped", { sessionId, reason: String(error) });
     }
-
-    await context.onEvent({
-      type: "compaction.completed",
-      sessionId,
-      payload: {},
-    });
   }
 
   /**
@@ -243,12 +196,6 @@ export class PiRuntime implements AgentRuntime {
     if (wrapper.unsubscribe) wrapper.unsubscribe();
     wrapper.session.dispose();
     this.sessions.delete(sessionId);
-
-    await context.onEvent({
-      type: "session.closed",
-      sessionId,
-      payload: { sessionId },
-    });
   }
 
   /**
@@ -309,15 +256,10 @@ export class PiRuntime implements AgentRuntime {
     // Session persistence handling
     let sessionManager = SessionManager.create(context.workspacePath, sessionDir);
     if (existingSessionId) {
-      try {
-        const list = await SessionManager.list(context.workspacePath, sessionDir);
-        const match = list.find((s) => s.id === existingSessionId);
-        if (match) {
-          sessionManager = SessionManager.open(match.path);
-        }
-      } catch {
-        // Fall back to new session
-      }
+      const stored = await SessionManager.list(context.workspacePath, sessionDir);
+      const match = stored.find((s) => s.id === existingSessionId);
+      if (!match) throw new RuntimeSessionNotFoundError(existingSessionId);
+      sessionManager = SessionManager.open(match.path);
     }
 
     // MCP extension handling
@@ -597,6 +539,12 @@ export class PiRuntime implements AgentRuntime {
 
     return { model, thinkingLevel, builtinTools };
   }
+}
+
+/** Pi rejects manual compaction of short or already compacted sessions with plain errors. */
+function isNothingToCompact(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("Nothing to compact") || message.includes("Already compacted");
 }
 
 function normalizeThinkingLevel(level: unknown): ThinkingLevel {

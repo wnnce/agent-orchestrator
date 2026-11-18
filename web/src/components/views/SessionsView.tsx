@@ -171,6 +171,8 @@ function SessionConversationView({ sessionId }: { sessionId: string }) {
         artifactDebounceTimerRef.current = setTimeout(() => {
           fetchArtifacts(sessionId).then(setArtifacts);
         }, 150);
+      } else if (evt.type === "session.runtime_reset") {
+        toast.warning("运行时会话已重置，Agent 不再保留之前的对话上下文");
       } else if (evt.type === "session.renamed" && evt.payload?.title) {
         const newTitle = evt.payload.title;
         setSessions((prev) =>

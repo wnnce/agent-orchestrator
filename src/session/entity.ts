@@ -69,8 +69,9 @@ export class SessionEntity {
     this.route.title = title;
     this.revision++;
   }
-  bindRuntime(id: string): void {
+  bindRuntime(id: string, runtime: string): void {
     this.route.runtimeSessionId = id;
+    this.route.runtime = runtime;
     this.revision++;
   }
   bindExternal(ref: { channel: string; conversationId: string; threadId?: string }): void {

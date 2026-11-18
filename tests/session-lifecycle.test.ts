@@ -14,7 +14,7 @@ describe("single-owner session state", () => {
     await store.createSession(route);
     const manager = new SessionManager(store, logger);
     const entity = manager.loadOrCreate(route);
-    entity.bindRuntime("new-thread");
+    entity.bindRuntime("new-thread", "codex");
     await entity.transitionTo("suspended");
     const snapshot = entity.toRoute();
     snapshot.status = "active";
@@ -46,10 +46,10 @@ describe("single-owner session state", () => {
       }
       await original(snapshot);
     };
-    entity.bindRuntime("first");
+    entity.bindRuntime("first", "codex");
     const first = entity.flush(store);
     await writing;
-    entity.bindRuntime("second");
+    entity.bindRuntime("second", "codex");
     const second = entity.flush(store);
     release();
     await Promise.all([first, second]);

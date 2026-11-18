@@ -21,6 +21,7 @@ import type {
   RuntimeSession,
   RuntimeTurn,
 } from "./runtime.ts";
+import { RuntimeSessionNotFoundError } from "./runtime.ts";
 import {
   defaultActionRegistry,
   ActionRegistry,
@@ -539,14 +540,11 @@ export class CodexRuntime implements AgentRuntime {
       });
       this.contexts.set(runtimeSessionId, context);
       return { id: runtimeSessionId, workspacePath: context.workspacePath };
-    } catch (err) {
-      if ((err as Error).message?.includes("no rollout found")) {
-        this.logger.warn("rollout not found for thread, starting new thread", {
-          runtimeSessionId,
-        });
-        return this.startSession(context);
-      }
-      throw err;
+    } catch (error) {
+      // app-server reports an unknown thread only through its error message.
+      if ((error as Error).message?.includes("no rollout found"))
+        throw new RuntimeSessionNotFoundError(runtimeSessionId);
+      throw error;
     }
   }
   async startTurn(

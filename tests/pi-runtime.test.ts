@@ -355,14 +355,10 @@ describe("Pi Agent Native SDK Runtime", () => {
         const session = await runtime.startSession(context);
         expect(session.id).toBeDefined();
         expect(session.workspacePath).toBe(tmpWorkspace);
-        expect(events.some((e) => e.type === "session.started" && e.sessionId === session.id)).toBe(
-          true,
-        );
 
         // 2. startTurn
         const turn = await runtime.startTurn(context, session.id, "turn_101", "Hello Pi");
         expect(turn.id).toBeDefined();
-        expect(events.some((e) => e.type === "turn.started" && e.turnId === "turn_101")).toBe(true);
 
         // Wait for async prompt turn to complete
         await new Promise((resolve) => setTimeout(resolve, 80));
@@ -384,15 +380,17 @@ describe("Pi Agent Native SDK Runtime", () => {
         // 3. resumeSession
         const resumed = await runtime.resumeSession(context, session.id);
         expect(resumed.id).toBe(session.id);
-        expect(events.some((e) => e.type === "session.resumed")).toBe(true);
 
-        // 4. compactSession
+        // 4. compactSession: a session this short has nothing to compact, which is not an error
         await runtime.compactSession(context, session.id);
-        expect(events.some((e) => e.type === "compaction.completed")).toBe(true);
 
         // 5. releaseSession
         await runtime.releaseSession(context, session.id);
-        expect(events.some((e) => e.type === "session.closed")).toBe(true);
+
+        // Session lifecycle events belong to ProjectRuntime, not to the runtime
+        expect(events.some((e) => e.type.startsWith("session.") || e.type === "turn.started")).toBe(
+          false,
+        );
 
         await runtime.stop();
       } finally {
@@ -444,7 +442,7 @@ describe("Pi Agent Native SDK Runtime", () => {
       }
     });
 
-    it("handles steerTurn by sending steer delta event", async () => {
+    it("forwards steer input without emitting synthetic messages", async () => {
       const tmpWorkspace = mkdtempSync(join(tmpdir(), "pi-rt-steer-"));
       try {
         const mockModelRuntime = await createMockModelRuntime(["hello"]);
@@ -474,12 +472,10 @@ describe("Pi Agent Native SDK Runtime", () => {
 
         await runtime.steerTurn(context, session.id, turn.id, "Change direction please");
 
-        const steerDelta = events.find(
-          (e) =>
-            e.type === "agent.message.delta" &&
-            (e.payload as any).text?.includes("[Steer] Change direction please"),
+        const steerEcho = events.find((e) =>
+          String((e.payload as any).text ?? "").includes("Change direction please"),
         );
-        expect(steerDelta).toBeDefined();
+        expect(steerEcho).toBeUndefined();
 
         await runtime.releaseSession(context, session.id);
         await runtime.stop();

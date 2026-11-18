@@ -256,6 +256,14 @@ export interface SessionResumedPayload {
   readonly metadata?: Record<string, unknown> | undefined;
 }
 
+/** The runtime lost the session (or the project switched runtimes); a new one was started. */
+export interface SessionRuntimeResetPayload {
+  readonly reason: "not_found" | "runtime_changed";
+  readonly runtime: string;
+  readonly previousRuntimeSessionId: string;
+  readonly runtimeSessionId: string;
+}
+
 export interface SessionSuspendedPayload {
   readonly sessionId?: string | undefined;
   readonly reason?: string | undefined;
@@ -370,6 +378,7 @@ export interface CanonicalEventPayloadMap {
   "turn.interrupted": TurnCompletedPayload;
   "session.started": SessionStartedPayload;
   "session.resumed": SessionResumedPayload;
+  "session.runtime_reset": SessionRuntimeResetPayload;
   "session.suspended": SessionSuspendedPayload;
   "session.archived": SessionArchivedPayload;
   "session.closed": SessionClosedPayload;
