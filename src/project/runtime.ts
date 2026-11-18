@@ -262,6 +262,7 @@ export class ProjectRuntime {
         });
       });
     }
+    await this.reconcileSessions();
     this.timers.push(
       setInterval(() => void this.manageSessionLifecycles(), 60_000),
     );
@@ -301,6 +302,21 @@ export class ProjectRuntime {
     }
     await Promise.allSettled([...this.pumps.values()]);
     this.logger.info("project runtime stopped", { projectId: this.project.id });
+  }
+
+  /** Finishes closes that a previous process started but never completed. */
+  private async reconcileSessions(): Promise<void> {
+    const sessions = await this.store.listSessions(this.project.id, {
+      includeTasks: true,
+    });
+    for (const session of sessions) {
+      if (session.status !== "closing") continue;
+      this.logger.info("finishing close left over from a previous run", {
+        projectId: this.project.id,
+        sessionId: session.sessionId,
+      });
+      await this.cleanupSession(session.sessionId, { deleteFromStore: false });
+    }
   }
 
   async listSkills(): Promise<ProjectSkill[]> {
@@ -415,8 +431,7 @@ export class ProjectRuntime {
     }
     await this.admissions.get(sessionId)?.catch(() => {});
     await this.cancelQueued(sessionId);
-    const active = this.activeTurns.get(sessionId);
-    if (active) await this.interrupt(sessionId);
+    await this.stopActiveTurn(sessionId);
     try {
       await this.bounded(
         this.pumps.get(sessionId) ?? Promise.resolve(),
@@ -481,6 +496,24 @@ export class ProjectRuntime {
       sessionId,
       retained: options?.deleteFromStore === false,
     });
+  }
+  /**
+   * Interrupts the running turn during close. A runtime that does not confirm in time must not
+   * block the close, so the turn is then settled as interrupted on our side.
+   */
+  private async stopActiveTurn(sessionId: string): Promise<void> {
+    const active = this.activeTurns.get(sessionId);
+    if (!active) return;
+    try {
+      await this.interrupt(sessionId);
+    } catch (error) {
+      this.logger.warn("turn did not stop during close; settling it as interrupted", {
+        sessionId,
+        turnId: active.turn.id,
+        error,
+      });
+      await this.finishTurn(sessionId, active, "interrupted", "interrupt timed out during close");
+    }
   }
   private async entity(id: string): Promise<SessionEntity> {
     const entity = await this.sessionManager.getOrLoad(id);
@@ -678,7 +711,7 @@ export class ProjectRuntime {
     }
     await this.bounded(
       active.completed,
-      "turn interrupt timed out; workspace retained",
+      "turn interrupt timed out",
     );
   }
   async compact(sessionId: string): Promise<void> {

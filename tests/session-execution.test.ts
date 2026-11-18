@@ -169,17 +169,21 @@ describe("session execution and control", () => {
     expect(agent.released).toHaveLength(1);
     expect(await store.getSession(sessionId)).toBeNull();
   });
-  test("a close timeout retains the session and workspace", async () => {
+  test("close completes even when the runtime never confirms the interrupt", async () => {
     agent.acknowledgeInterrupt = false;
-    await runtime.turn(sessionId, "long");
+    const turn = await runtime.turn(sessionId, "long");
     await agent.started(1);
-    await expect(runtime.cleanupSession(sessionId)).rejects.toThrow("timed out");
-    expect((await store.getSession(sessionId))?.status).toBe("closing");
-    expect(agent.released).toHaveLength(0);
-    await expect(runtime.turn(sessionId, "late")).rejects.toThrow("closing");
-    await agent.finish(0, "interrupted");
-    await runtime.waitForIdle(sessionId);
-    await runtime.cleanupSession(sessionId);
+    await runtime.cleanupSession(sessionId, { deleteFromStore: false });
+    expect((await store.getTurn(turn.id))?.status).toBe("interrupted");
+    expect((await store.getSession(sessionId))?.status).toBe("closed");
+    expect(agent.released).toHaveLength(1);
+  });
+  test("start finishes closes left over from a previous run", async () => {
+    const stored = (await store.getSession(sessionId))!;
+    await store.updateSession({ ...stored, status: "closing" });
+    await runtime.sessionManager.remove(sessionId);
+    await runtime.start();
+    expect((await store.getSession(sessionId))?.status).toBe("closed");
   });
   test("runtime disconnect completes the active turn as failed", async () => {
     const turn = await runtime.turn(sessionId, "long");
