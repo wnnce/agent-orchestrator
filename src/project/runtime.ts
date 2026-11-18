@@ -246,25 +246,6 @@ export class ProjectRuntime {
       projectId: this.project.id,
       runtime: this.runtime.type,
     });
-    if (
-      this.project.runtime?.type === "codex" ||
-      this.project.agent?.type === "codex" ||
-      !this.project.runtime?.type
-    ) {
-      const codexHome =
-        this.project.runtime?.codexHome ??
-        path.resolve(".data/codex", this.project.id);
-      await SkillManager.syncSkillsToCodex(
-        codexHome,
-        this.project,
-        this.inheritedSkillsProject,
-      ).catch((err) => {
-        this.logger.warn("failed to sync project skills on start", {
-          projectId: this.project.id,
-          error: (err as Error).message,
-        });
-      });
-    }
     await this.reconcileSessions();
     this.timers.push(
       setInterval(() => void this.manageSessionLifecycles(), 60_000),

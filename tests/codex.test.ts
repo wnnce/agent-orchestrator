@@ -325,3 +325,36 @@ createInterface({ input: process.stdin }).on("line", line => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("project runtime fields Codex does not know stay out of config.toml", async () => {
+  const { buildCodexConfig } = await import("../src/runtime/codex/home.ts");
+  const config = await buildCodexConfig(
+    {
+      ...project,
+      runtime: {
+        type: "codex",
+        model: "gpt-5",
+        idleTimeoutMs: 60_000,
+        provider: "deepseek",
+        apiKey: "pi-key",
+        config: { model_verbosity: "low" },
+      },
+    },
+    { apiKey: "service-key", model_provider: "proxy", mcpServers: [] },
+  );
+  expect(config).toMatchObject({ model: "gpt-5", model_provider: "proxy", model_verbosity: "low" });
+  expect(config).not.toHaveProperty("idleTimeoutMs");
+  expect(config).not.toHaveProperty("provider");
+  expect(config).not.toHaveProperty("apiKey");
+  expect(config).not.toHaveProperty("mcpServers");
+});
+
+test("a missing Codex base config file is an error, not an empty config", async () => {
+  const { buildCodexConfig } = await import("../src/runtime/codex/home.ts");
+  await expect(
+    buildCodexConfig(
+      { ...project, runtime: { type: "codex", baseConfigPath: "/nonexistent/base.toml" } },
+      { apiKey: "service-key" },
+    ),
+  ).rejects.toThrow();
+});

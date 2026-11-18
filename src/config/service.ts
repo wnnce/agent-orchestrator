@@ -51,7 +51,6 @@ export const codexConfigSchema = z
     mcpServers: z.array(mcpServerConfigSchema).optional(),
     config: z.record(z.string(), z.unknown()).optional(),
     baseConfigPath: z.string().optional(),
-    configPath: z.string().optional(),
   })
   .passthrough();
 

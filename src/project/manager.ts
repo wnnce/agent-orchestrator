@@ -136,9 +136,6 @@ export class ProjectManager {
       type: runtimeType,
       approvalPolicy: project.runtime?.approvalPolicy ?? "never",
       sandbox: project.runtime?.sandbox ?? "danger-full-access",
-      codexHome:
-        project.runtime?.codexHome ??
-        path.join(this.config.dataDir, "codex", project.id),
       mcpServers,
       ...(model ? { model } : {}),
       ...(reasoningEffort ? { reasoningEffort } : {}),

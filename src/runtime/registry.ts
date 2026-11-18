@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import type { AppConfig, CodexConfig } from "../config/config.ts";
+import type { AppConfig } from "../config/config.ts";
 import type { ProjectConfig } from "../domain/types.ts";
 import type { ActionRegistry } from "../actions/registry.ts";
 import { Logger } from "../observability/logger.ts";
@@ -187,15 +187,13 @@ export function createDefaultRuntimeRegistry(
       const codexBinary = fileURLToPath(
         import.meta.resolve("@openai/codex/bin/codex.js"),
       );
-      const runtimeConfig = (ctx.config.runtimes?.codex ??
-        ctx.config.codex ??
-        {}) as CodexConfig;
       return new CodexRuntime(
         codexBinary,
         ctx.logger,
-        runtimeConfig,
+        ctx.config.runtimes?.codex ?? {},
         ctx.globalProject,
         ctx.actionRegistry,
+        ctx.config.dataDir,
       );
     },
     {
