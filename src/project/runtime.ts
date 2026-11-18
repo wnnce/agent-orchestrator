@@ -15,6 +15,7 @@ import { isTransientEvent } from "../domain/events.ts";
 import type { Store } from "../persistence/store.ts";
 import type {
   AgentRuntime,
+  ApprovalDecision,
   RuntimeContext,
   RuntimeEvent,
 } from "../runtime/runtime.ts";
@@ -729,15 +730,18 @@ export class ProjectRuntime {
   async approve(
     sessionId: string,
     requestId: string,
-    result: unknown,
+    decision: ApprovalDecision,
   ): Promise<void> {
     const route = await this.loadSession(sessionId);
     await this.runtime.respondToApproval(
       this.context(this.workspacePath(route), sessionId),
       requestId,
-      result,
+      decision,
     );
-    await this.emit(route, "approval.resolved", "gateway", { requestId });
+    await this.emit(route, "approval.resolved", "gateway", {
+      requestId,
+      decision,
+    });
   }
   async events(sessionId: string, after = 0): Promise<EventRecord[]> {
     await this.loadSession(sessionId);

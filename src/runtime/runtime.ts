@@ -23,6 +23,9 @@ export class RuntimeSessionNotFoundError extends Error {
   }
 }
 
+/** A user's answer to `approval.requested`. */
+export type ApprovalDecision = "approved" | "rejected";
+
 export interface RuntimeSession {
   id: string;
   workspacePath: string;
@@ -104,7 +107,7 @@ export interface AgentRuntime {
   respondToApproval(
     context: RuntimeContext,
     requestId: string,
-    result: unknown,
+    decision: ApprovalDecision,
   ): Promise<void>;
   releaseSession(context: RuntimeContext, sessionId: string): Promise<void>;
   stop(): Promise<void>;
@@ -190,7 +193,7 @@ export class FakeRuntime implements AgentRuntime {
   async respondToApproval(
     _context: RuntimeContext,
     _requestId: string,
-    _result: unknown,
+    _decision: ApprovalDecision,
   ): Promise<void> {}
   async releaseSession(
     _context: RuntimeContext,

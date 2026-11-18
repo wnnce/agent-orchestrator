@@ -238,7 +238,15 @@ export function createSessionsRouter(deps: SessionsRouteDeps): Hono {
     if (!route) return c.json({ error: "session_not_found" }, 404);
     const project = deps.projects.get(route.projectId);
     const body = await c.req.json().catch(() => ({}));
-    await project.approve(sessionId, String(body.requestId ?? ""), body.result);
+    const requestId = typeof body.requestId === "string" ? body.requestId : "";
+    const decision = body.decision;
+    if (!requestId || (decision !== "approved" && decision !== "rejected")) {
+      return c.json(
+        { error: "invalid_approval", message: 'Expected { requestId, decision: "approved" | "rejected" }' },
+        400,
+      );
+    }
+    await project.approve(sessionId, requestId, decision);
     return c.json({ status: "accepted" }, 202);
   });
 

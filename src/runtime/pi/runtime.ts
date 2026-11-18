@@ -17,6 +17,7 @@ import type { McpServerConfig, ProjectConfig } from "../../domain/types.ts";
 import { Logger } from "../../observability/logger.ts";
 import type {
   AgentRuntime,
+  ApprovalDecision,
   RuntimeCapabilities,
   RuntimeContext,
   RuntimeSession,
@@ -183,7 +184,7 @@ export class PiRuntime implements AgentRuntime {
   async respondToApproval(
     _context: RuntimeContext,
     _requestId: string,
-    _result: unknown,
+    _decision: ApprovalDecision,
   ): Promise<void> {}
 
   /**
