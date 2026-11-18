@@ -29,6 +29,13 @@ router:
   apiKey: ""
   baseUrl: https://api.openai.com/v1
 
+# Session titles: an OpenAI-compatible chat model names new sessions from their first message.
+# Leave apiKey blank to use the first line of the message instead.
+titles:
+  model: ""
+  apiKey: ""
+  baseUrl: https://api.openai.com/v1 # e.g. https://dashscope.aliyuncs.com/compatible-mode/v1
+
 # 6. Default agent runtime settings
 runtimes:
   codex:

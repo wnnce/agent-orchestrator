@@ -264,6 +264,10 @@ export interface SessionRuntimeResetPayload {
   readonly runtimeSessionId: string;
 }
 
+export interface SessionRenamedPayload {
+  readonly title: string;
+}
+
 export interface SessionSuspendedPayload {
   readonly sessionId?: string | undefined;
   readonly reason?: string | undefined;
@@ -379,6 +383,7 @@ export interface CanonicalEventPayloadMap {
   "session.started": SessionStartedPayload;
   "session.resumed": SessionResumedPayload;
   "session.runtime_reset": SessionRuntimeResetPayload;
+  "session.renamed": SessionRenamedPayload;
   "session.suspended": SessionSuspendedPayload;
   "session.archived": SessionArchivedPayload;
   "session.closed": SessionClosedPayload;

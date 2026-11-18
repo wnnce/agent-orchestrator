@@ -22,8 +22,11 @@ export interface Store {
     projectId?: string,
     options?: { includeTasks?: boolean },
   ): Promise<SessionRoute[]>;
+  /** Saves session state. Titles are not written here; see updateSessionTitle and setTitleIfEmpty. */
   updateSession(route: SessionRoute): Promise<void>;
   updateSessionTitle(sessionId: string, title: string): Promise<boolean>;
+  /** Sets the title only while the session has none; returns whether it was set. */
+  setTitleIfEmpty(sessionId: string, title: string): Promise<boolean>;
   findSessionByExternal(
     channel: string,
     conversationId: string,
@@ -139,23 +142,19 @@ export class MemoryStore implements Store {
     return all.sort((a, b) => b.lastActiveAt.localeCompare(a.lastActiveAt));
   }
   async updateSession(route: SessionRoute): Promise<void> {
-    const current = this.sessions.get(route.sessionId);
-    if (
-      current &&
-      (!route.title ||
-        route.title === "新会话" ||
-        route.title === "New Chat") &&
-      current.title &&
-      current.title !== "新会话" &&
-      current.title !== "New Chat"
-    ) {
-      route.title = current.title;
-    }
-    this.sessions.set(route.sessionId, route);
+    const { title: _ignored, ...state } = route;
+    const title = this.sessions.get(route.sessionId)?.title;
+    this.sessions.set(route.sessionId, { ...state, ...(title ? { title } : {}) });
   }
   async updateSessionTitle(sessionId: string, title: string): Promise<boolean> {
     const session = this.sessions.get(sessionId);
     if (!session) return false;
+    session.title = title;
+    return true;
+  }
+  async setTitleIfEmpty(sessionId: string, title: string): Promise<boolean> {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.title) return false;
     session.title = title;
     return true;
   }
@@ -411,7 +410,7 @@ export class PostgresStore implements Store {
     );
   }
   async createSession(route: SessionRoute): Promise<SessionRoute> {
-    const title = route.title ?? "新会话";
+    const title = route.title ?? null;
     const source = route.source ?? "unknown";
     const runtime =
       route.runtime ??
@@ -440,7 +439,7 @@ export class PostgresStore implements Store {
         route.workspacePath ?? null,
       ],
     );
-    return { ...route, title, source, runtime, metadata };
+    return { ...route, source, runtime, metadata };
   }
   async getSession(sessionId: string): Promise<SessionRoute | null> {
     const result = await this.pool.query(
@@ -474,7 +473,7 @@ export class PostgresStore implements Store {
     };
     const metadataJson = JSON.stringify(metadata);
     await this.pool.query(
-      "UPDATE sessions SET project_id=$2, repository_id=$3, project_runtime_id=$4, runtime_session_id=$5, config_revision=$6, status=$7, last_active_at=$8, title=COALESCE(NULLIF(NULLIF($9::varchar, '新会话'), 'New Chat'), title), metadata=$10::jsonb, source=COALESCE($11, source), runtime=COALESCE($12, runtime), updated_at=now() WHERE session_id=$1 AND deleted_at = 0",
+      "UPDATE sessions SET project_id=$2, repository_id=$3, project_runtime_id=$4, runtime_session_id=$5, config_revision=$6, status=$7, last_active_at=$8, metadata=$9::jsonb, source=COALESCE($10, source), runtime=COALESCE($11, runtime), updated_at=now() WHERE session_id=$1 AND deleted_at = 0",
       [
         route.sessionId,
         route.projectId,
@@ -484,7 +483,6 @@ export class PostgresStore implements Store {
         route.configRevision,
         route.status,
         route.lastActiveAt,
-        route.title ?? null,
         metadataJson,
         route.source ?? null,
         route.runtime ?? null,
@@ -494,6 +492,13 @@ export class PostgresStore implements Store {
   async updateSessionTitle(sessionId: string, title: string): Promise<boolean> {
     const result = await this.pool.query(
       "UPDATE sessions SET title=$2, updated_at=now() WHERE session_id=$1 AND deleted_at = 0",
+      [sessionId, title],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+  async setTitleIfEmpty(sessionId: string, title: string): Promise<boolean> {
+    const result = await this.pool.query(
+      "UPDATE sessions SET title=$2, updated_at=now() WHERE session_id=$1 AND title IS NULL AND deleted_at = 0",
       [sessionId, title],
     );
     return (result.rowCount ?? 0) > 0;
@@ -1104,7 +1109,7 @@ function toSessionRoute(row: Record<string, any>): SessionRoute {
   return {
     id: Number(row.id),
     sessionId: row.session_id,
-    title: row.title ?? "新会话",
+    ...(row.title ? { title: row.title } : {}),
     projectId: row.project_id,
     repositoryId: row.repository_id ?? undefined,
     projectRuntimeId: row.project_runtime_id,

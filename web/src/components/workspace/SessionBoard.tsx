@@ -390,7 +390,7 @@ export function SessionBoard() {
   const handleStartRename = (e: React.MouseEvent, s: SessionRoute) => {
     e.stopPropagation();
     setEditingSessionId(s.sessionId);
-    setEditTitle(s.title || "新会话");
+    setEditTitle(s.title ?? "");
   };
 
   const handleSaveRename = async (

@@ -4,7 +4,7 @@
 CREATE TABLE IF NOT EXISTS sessions (
   id BIGSERIAL PRIMARY KEY,
   session_id VARCHAR(100) NOT NULL,
-  title VARCHAR(255) DEFAULT '新会话',
+  title VARCHAR(255),
   project_id VARCHAR(100) NOT NULL,
   repository_id VARCHAR(100),
   project_runtime_id VARCHAR(100) NOT NULL,

@@ -370,10 +370,9 @@ export class ProjectRuntime {
     const runtimeName = this.runtimeName();
     const route: SessionRoute = {
       sessionId,
-      title:
-        typeof metadata?.title === "string" && metadata.title
-          ? metadata.title
-          : "New Session",
+      ...(typeof metadata?.title === "string" && metadata.title
+        ? { title: metadata.title }
+        : {}),
       projectId: this.project.id,
       ...(primaryRepo?.id ? { repositoryId: primaryRepo.id } : {}),
       projectRuntimeId: `project-runtime:${this.project.id}`,
@@ -402,11 +401,24 @@ export class ProjectRuntime {
     return route;
   }
 
-  renameSession(sessionId: string, title: string): void {
-    const entity = this.sessionManager.get(sessionId);
-    if (entity) {
-      entity.setTitle(title);
+  /** Renames a session at the user's request. */
+  async renameSession(sessionId: string, title: string): Promise<boolean> {
+    const cleanTitle = title.trim().slice(0, 255);
+    if (!(await this.store.updateSessionTitle(sessionId, cleanTitle))) return false;
+    await this.applyTitle(sessionId, cleanTitle);
+    return true;
+  }
+  /** Sets an automatically generated title unless the session got one in the meantime. */
+  async setGeneratedTitle(sessionId: string, title: string): Promise<void> {
+    if (await this.store.setTitleIfEmpty(sessionId, title)) {
+      await this.applyTitle(sessionId, title);
     }
+  }
+  private async applyTitle(sessionId: string, title: string): Promise<void> {
+    this.sessionManager.get(sessionId)?.setTitle(title);
+    const route = await this.store.getSession(sessionId);
+    if (route) await this.emit(route, "session.renamed", "gateway", { title });
+    this.logger.info("session renamed", { sessionId, title });
   }
 
   async cleanupSession(

@@ -16,6 +16,7 @@ import {
 } from "../channels/wecom.ts";
 import type { SessionManager } from "../session/index.ts";
 import { MemoryInbox } from "./inbox.ts";
+import { SessionTitleGenerator } from "./titles.ts";
 
 export interface CreateSessionInput {
   projectId?: string;
@@ -40,6 +41,7 @@ export interface CreatedSession {
 /** Transport-neutral application entry point for sessions and inbound messages. */
 export class GatewayService {
   private readonly router: ProjectRouter;
+  private readonly titles: SessionTitleGenerator;
   readonly inbox: MemoryInbox;
   private readonly feishuClient?: FeishuClient;
   private readonly feishuStreamer?: FeishuSessionStreamer;
@@ -61,6 +63,7 @@ export class GatewayService {
   ) {
     this.sessionManager = sessionManager ?? projects.sessionManager;
     this.router = new ProjectRouter(config.routerApiKey, config.routerModel, config.routerBaseUrl);
+    this.titles = new SessionTitleGenerator(config.titles, logger);
     this.inbox = new MemoryInbox((envelope) => this.processInbound(envelope));
     if (config.feishu?.appId && config.feishu?.appSecret) {
       this.feishuClient =
@@ -129,100 +132,28 @@ export class GatewayService {
   async submitTurn(sessionId: string, input: string): Promise<TurnRecord> {
     const route = await this.store.getSession(sessionId);
     if (!route) throw new Error("session_not_found");
-    if (!route.title || route.title === "新会话" || route.title === "New Chat") {
-      this.generateSessionTitle(sessionId, input);
-    }
+    if (!route.title) this.generateSessionTitle(sessionId, input);
     return this.projects.get(route.projectId).turn(sessionId, input);
   }
 
   async renameSession(sessionId: string, title: string): Promise<boolean> {
     const route = await this.store.getSession(sessionId);
     if (!route) return false;
-    const cleanTitle = title.trim().slice(0, 255);
-    const ok = await this.store.updateSessionTitle(sessionId, cleanTitle);
-    if (ok) {
-      route.title = cleanTitle;
-      const project = this.projects.get(route.projectId);
-      project.renameSession(sessionId, cleanTitle);
-      await (project as any).emit(route, "session.renamed", "gateway", { title: cleanTitle });
-      this.logger.info("session renamed", { sessionId, title: cleanTitle });
-    }
-    return ok;
+    return this.projects.get(route.projectId).renameSession(sessionId, title);
   }
 
+  /** Names the session after `query` in the background, unless it gets a title first. */
   generateSessionTitle(sessionId: string, query: string): void {
-    const trimmed = query.trim();
-    if (!trimmed) return;
-
-    queueMicrotask(async () => {
-      try {
-        const apiKey = this.config.routerApiKey?.trim();
-        const baseUrl = (this.config.routerBaseUrl?.trim() || "https://dashscope.aliyuncs.com").replace(/\/+$/, "");
-        let model = this.config.routerModel?.trim() || "qwen-plus";
-        if (model.includes("decision") || !model) {
-          model = "qwen-plus";
-        }
-
-        let newTitle = "";
-        if (apiKey) {
-          let chatEndpoint = baseUrl;
-          if (!chatEndpoint.endsWith("/chat/completions")) {
-            if (chatEndpoint.includes("dashscope")) {
-              const cleanBase = chatEndpoint.replace(/\/compatible-mode(\/v1)?$/, "");
-              chatEndpoint = `${cleanBase}/compatible-mode/v1/chat/completions`;
-            } else if (chatEndpoint.endsWith("/v1")) {
-              chatEndpoint = `${chatEndpoint}/chat/completions`;
-            } else {
-              chatEndpoint = `${chatEndpoint}/v1/chat/completions`;
-            }
-          }
-
-          const res = await fetch(chatEndpoint, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify({
-              model,
-              messages: [
-                {
-                  role: "system",
-                  content: "你是一个会话标题生成器。根据用户的第一句话或问题，提炼一个极其精炼的中文标题（4到10个字）。直接返回标题文本，严禁包含任何标点符号、前缀、引号或解释说明。",
-                },
-                {
-                  role: "user",
-                  content: trimmed.slice(0, 500),
-                },
-              ],
-              temperature: 0.3,
-            }),
-          });
-
-          if (res.ok) {
-            const data: any = await res.json().catch(() => null);
-            const content = data?.choices?.[0]?.message?.content?.trim();
-            if (content) {
-              newTitle = content
-                .replace(/^["'“”‘’#\s*`]+|["'“”‘’#\s*`]+$/g, "")
-                .replace(/[。？！\n\r]/g, "")
-                .slice(0, 50);
-            }
-          }
-        }
-
-        if (!newTitle) {
-          newTitle = trimmed.split("\n")[0]?.replace(/[#*`]/g, "").trim().slice(0, 24) || "新会话";
-        }
-
-        await this.renameSession(sessionId, newTitle);
-      } catch (err: any) {
-        this.logger.warn("failed to generate session title via LLM", {
-          sessionId,
-          error: err.message,
-        });
-      }
-    });
+    void this.titles
+      .generate(query)
+      .then(async (title) => {
+        if (!title) return;
+        const route = await this.store.getSession(sessionId);
+        if (route) await this.projects.get(route.projectId).setGeneratedTitle(sessionId, title);
+      })
+      .catch((error) =>
+        this.logger.warn("failed to set generated session title", { sessionId, error }),
+      );
   }
 
   async acceptInbound(envelope: InboundEnvelope): Promise<{ duplicate: boolean }> {

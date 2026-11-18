@@ -38,6 +38,13 @@ export const routerConfigSchema = z.strictObject({
   baseUrl: z.url().default("https://api.openai.com/v1"),
 });
 
+/** OpenAI-compatible chat model that names sessions; without it titles use the first line. */
+export const titlesConfigSchema = z.strictObject({
+  model: optionalText,
+  apiKey: optionalText,
+  baseUrl: z.url().default("https://api.openai.com/v1"),
+});
+
 export const codexConfigSchema = z
   .object({
     apiKey: optionalText,
@@ -95,6 +102,7 @@ export const hierarchicalAppConfigSchema = z.strictObject({
   storage: storageConfigSchema.prefault({}),
   auth: authConfigSchema.prefault({}),
   router: routerConfigSchema.prefault({}),
+  titles: titlesConfigSchema.prefault({}),
   runtimes: runtimesConfigSchema.prefault({}),
   channels: channelsConfigSchema.prefault({}),
   notifications: z.array(notificationConfigSchema).optional().default([]),
@@ -195,6 +203,7 @@ export type StorageConfig = {
 };
 export type AuthConfig = z.output<typeof authConfigSchema>;
 export type RouterConfig = z.output<typeof routerConfigSchema>;
+export type TitlesConfig = z.output<typeof titlesConfigSchema>;
 export type CodexConfig = z.output<typeof codexConfigSchema>;
 export type FeishuConfig = z.output<typeof feishuConfigSchema>;
 export type WeComConfig = z.output<typeof wecomConfigSchema>;
@@ -205,6 +214,7 @@ export interface AppConfig {
   storage?: StorageConfig;
   auth?: AuthConfig;
   router?: RouterConfig;
+  titles?: TitlesConfig;
   runtimes?: Record<string, Record<string, unknown>> & {
     codex: CodexConfig;
   };
@@ -297,6 +307,7 @@ export async function loadConfig(file = "config.yaml"): Promise<AppConfig> {
     storage,
     auth: data.auth,
     router: data.router,
+    titles: data.titles,
     runtimes: data.runtimes,
     channels: data.channels,
 
