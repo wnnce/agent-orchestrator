@@ -54,7 +54,8 @@ export function bridgeActionsToPiTools(
       name: action.name,
       label: action.name,
       description: action.description,
-      parameters: jsonSchema as any,
+      // Pi accepts plain JSON Schema here; its type expects a TypeBox schema object.
+      parameters: jsonSchema as unknown as ToolDefinition["parameters"],
       execute: async (_toolCallId: string, params: unknown, signal?: AbortSignal) => {
         const currentCtx = getContext();
         const actionContext = currentCtx.createActionContext

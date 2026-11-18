@@ -6,7 +6,7 @@ import { Logger } from "../observability/logger.ts";
 import type { AgentRuntime, RuntimeCapabilities } from "./runtime.ts";
 import { FAKE_CAPABILITIES, FakeRuntime } from "./runtime.ts";
 import { CODEX_CAPABILITIES, CodexRuntime } from "./codex.ts";
-import { PI_CAPABILITIES, PiRuntime } from "./pi/index.ts";
+import { PI_CAPABILITIES, PiRuntime, piRuntimeConfigSchema } from "./pi/index.ts";
 
 /**
  * Metadata describing a registered runtime and its capabilities.
@@ -205,12 +205,13 @@ export function createDefaultRuntimeRegistry(
   registry.register(
     "pi",
     (ctx) => {
-      const runtimeConfig = (ctx.config.runtimes?.pi ?? {}) as any;
       return new PiRuntime(
         ctx.logger,
-        runtimeConfig,
+        piRuntimeConfigSchema.parse(ctx.config.runtimes?.pi ?? {}),
         ctx.globalProject,
         ctx.actionRegistry,
+        undefined,
+        ctx.config.dataDir,
       );
     },
     {

@@ -205,31 +205,43 @@ This immediately empowers Pi Agent with full Orchestrator superpowers:
 
 Thanks to the dynamic runtime configuration architecture, `service.yaml` accepts any native Pi SDK parameters:
 
-### Global Configuration (`service.yaml`)
+### Global Configuration (`config.yaml`)
+
+`runtimes.pi` is validated against `piRuntimeConfigSchema` at startup; unknown keys are rejected.
 
 ```yaml
 runtimes:
   pi:
-    provider: "anthropic" # "anthropic" | "openai" | "deepseek" | "ollama"
-    model: "claude-3-5-sonnet-20241022"
-    apiKey: "${ANTHROPIC_API_KEY}"
-    baseUrl: "https://api.anthropic.com" # Optional custom proxy/gateway
-    thinkingLevel: "off" # "off" | "low" | "medium" | "high"
+    defaultProvider: deepseek
+    defaultModel: deepseek-flash
+    thinkingLevel: medium # off | minimal | low | medium | high | xhigh | max
     tools: ["read", "write", "edit", "bash"]
-    # Pass arbitrary Pi SDK options directly
-    settings:
-      autoCompactContext: true
-      maxTokens: 8192
+    # agentDir: .data/pi/<project>   # default: <storage.dataDir>/pi/<projectId>
+    providers: # mirrors Pi's models.json providers
+      deepseek:
+        baseUrl: https://api.deepseek.com
+        apiKey: "{env:DEEPSEEK_API_KEY}"
+        api: openai-responses
+        models:
+          - id: deepseek-flash
+            contextWindow: 1000000
+            maxTokens: 384000
+            reasoning: true
+    settings: {} # Pi SettingsManager overrides
 ```
 
-### Project-Level Override (`projects/<project-id>.yaml`)
+### Project-Level Override (`projects/<project-id>/project.yaml`)
+
+Projects use the runtime-neutral fields shared with Codex. A configured model that Pi does not know
+is an error rather than a silent fallback.
 
 ```yaml
 runtime:
-  type: "pi"
-  model: "claude-3-7-sonnet"
-  reasoningEffort: "low"
-  # Project-specific custom tools or overrides
+  type: pi
+  model: deepseek-flash # or "provider/model"
+  provider: deepseek # optional; defaults to runtimes.pi.defaultProvider
+  reasoningEffort: high # used as Pi's thinking level when Pi supports the value
+  providers: {} # optional extra providers for this project
 ```
 
 ---

@@ -1,120 +1,46 @@
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { z } from "zod";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { RuntimeContext } from "../runtime.ts";
 
-/**
- * Model definition for Pi Agent, mirroring Pi's models.json model item.
- */
-export interface PiModelDefinition {
-  id: string;
-  name?: string | undefined;
-  contextWindow?: number | undefined;
-  maxTokens?: number | undefined;
-  reasoning?: boolean | undefined;
-  input?: ("text" | "image")[] | undefined;
-  cost?:
-    | {
-        input?: number | undefined;
-        output?: number | undefined;
-        cacheRead?: number | undefined;
-        cacheWrite?: number | undefined;
-      }
-    | undefined;
-  compat?: Record<string, unknown> | undefined;
-  [key: string]: unknown;
-}
+export const PI_THINKING_LEVELS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
 
-/**
- * Provider definition for Pi Agent, mirroring Pi's models.json provider item.
- */
-export interface PiProviderConfig {
-  baseUrl?: string | undefined;
-  apiKey?: string | undefined;
-  api?: string | undefined;
-  headers?: Record<string, string> | undefined;
-  models?: PiModelDefinition[] | undefined;
-  [key: string]: unknown;
-}
+/** A provider entry, mirroring a provider in Pi's models.json. */
+export const piProviderConfigSchema = z
+  .object({
+    baseUrl: z.string().optional(),
+    apiKey: z.string().optional(),
+    api: z.string().optional(),
+    headers: z.record(z.string(), z.string()).optional(),
+    models: z.array(z.object({ id: z.string() }).passthrough()).optional(),
+  })
+  .passthrough();
 
-/**
- * Configuration options for the in-process Pi Agent runtime adapter.
- */
-export interface PiRuntimeConfig {
-  /**
-   * Default model identifier or pattern (e.g. "deepseek-flash", "deepseek/deepseek-flash").
-   */
-  defaultModel?: string | undefined;
+/** `runtimes.pi` in the service YAML. */
+export const piRuntimeConfigSchema = z.strictObject({
+  /** Provider used when a project names a model without one. */
+  defaultProvider: z.string().optional(),
+  /** Model used when a project does not set `runtime.model`. */
+  defaultModel: z.string().optional(),
+  providers: z.record(z.string(), piProviderConfigSchema).optional(),
+  thinkingLevel: z.enum(PI_THINKING_LEVELS).optional(),
+  /** Built-in tools to enable; defaults to read, write, edit and bash. */
+  tools: z.array(z.string()).optional(),
+  /** Pi's config directory (models.json, auth.json, sessions); defaults to <dataDir>/pi/<project>. */
+  agentDir: z.string().optional(),
+  /** Pi settings overrides. */
+  settings: z.record(z.string(), z.unknown()).optional(),
+});
 
-  /**
-   * Default provider identifier (e.g. "deepseek").
-   */
-  defaultProvider?: string | undefined;
-
-  /**
-   * Native Pi Agent providers map, mirroring Pi's models.json providers structure.
-   */
-  providers?: Record<string, PiProviderConfig> | undefined;
-
-  /**
-   * Optional path to an external models.json file to inherit.
-   */
-  modelsPath?: string | undefined;
-
-  /**
-   * LLM Provider identifier for single-provider shorthand.
-   */
-  provider?: string | undefined;
-
-  /**
-   * Model identifier for single-provider shorthand.
-   */
-  model?: string | undefined;
-
-  /**
-   * Provider API Key. Injected in-memory without temporary files on disk.
-   */
-  apiKey?: string | undefined;
-
-  /**
-   * Custom API endpoint URL for OpenAI/Anthropic proxies, gateways, or self-hosted runtimes.
-   */
-  baseUrl?: string | undefined;
-
-  /**
-   * API wire protocol (e.g. "openai-responses", "openai-completions").
-   */
-  api?: string | undefined;
-
-  /**
-   * Optional custom request headers.
-   */
-  headers?: Record<string, string> | undefined;
-
-  /**
-   * Optional explicit model configurations.
-   */
-  models?: PiModelDefinition[] | undefined;
-
-  /**
-   * Model thinking / reasoning effort level.
-   */
-  thinkingLevel?: ThinkingLevel | undefined;
-
-  /**
-   * Allowlist of active tool names (e.g. ["read", "write", "edit", "bash"]).
-   */
-  tools?: string[] | undefined;
-
-  /**
-   * Directory where persistent configuration and sessions reside.
-   */
-  agentDir?: string | undefined;
-
-  /**
-   * Optional custom SettingsManager overrides.
-   */
-  settings?: Record<string, unknown> | undefined;
-}
+export type PiProviderConfig = z.output<typeof piProviderConfigSchema>;
+export type PiRuntimeConfig = z.output<typeof piRuntimeConfigSchema>;
 
 /**
  * In-memory wrapper tracking a live Pi AgentSession and its turn context.

@@ -165,13 +165,11 @@ function normalizeRawConfig(raw: unknown): unknown {
   delete obj.routerApiKey;
   delete obj.routerBaseUrl;
 
-  // 6. runtimes (codex, pi)
+  // 6. runtimes (codex)
   const runtimes = { ...(obj.runtimes ?? {}) };
   if (obj.codex !== undefined && runtimes.codex === undefined) runtimes.codex = obj.codex;
-  if (obj.pi !== undefined && runtimes.pi === undefined) runtimes.pi = obj.pi;
   obj.runtimes = runtimes;
   delete obj.codex;
-  delete obj.pi;
 
   // 7. channels (feishu, wecom)
   const channels = { ...(obj.channels ?? {}) };

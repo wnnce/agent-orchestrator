@@ -25,9 +25,16 @@ import type {
 } from "../runtime.ts";
 import { RuntimeSessionNotFoundError } from "../runtime.ts";
 import { PI_CAPABILITIES } from "./capabilities.ts";
-import { PiNormalizer } from "./normalizer.ts";
+import { PiNormalizer, asAssistantMessage, assistantText } from "./normalizer.ts";
 import { bridgeActionsToPiTools } from "./tools.ts";
-import type { PiProviderConfig, PiRuntimeConfig, PiSessionWrapper } from "./types.ts";
+import {
+  PI_THINKING_LEVELS,
+  type PiProviderConfig,
+  type PiRuntimeConfig,
+  type PiSessionWrapper,
+} from "./types.ts";
+
+type ProviderInput = Parameters<ModelRuntime["registerProvider"]>[1];
 
 /**
  * Native in-process AgentRuntime implementation for Pi Agent (@earendil-works/pi-coding-agent).
@@ -38,15 +45,19 @@ export class PiRuntime implements AgentRuntime {
   readonly capabilities: RuntimeCapabilities = PI_CAPABILITIES;
 
   private readonly sessions = new Map<string, PiSessionWrapper>();
-  private defaultModelRuntime?: ModelRuntime | undefined;
+  private models: Promise<ModelRuntime> | undefined;
 
   constructor(
     private readonly logger = new Logger(),
     private readonly config: PiRuntimeConfig = {},
     private readonly globalProject?: ProjectConfig | undefined,
     private readonly actionRegistry?: ActionRegistry | undefined,
-    private readonly modelRuntimeOverride?: ModelRuntime | undefined,
-  ) {}
+    modelRuntime?: ModelRuntime | undefined,
+    /** Service data directory; Pi's agent dir defaults to <dataDir>/pi/<projectId>. */
+    private readonly dataDir = ".data",
+  ) {
+    if (modelRuntime) this.models = Promise.resolve(modelRuntime);
+  }
 
   /**
    * Starts a new in-process Pi AgentSession confined to context.workspacePath.
@@ -190,26 +201,31 @@ export class PiRuntime implements AgentRuntime {
   /**
    * Disposes and frees an individual session and its listeners.
    */
-  async releaseSession(context: RuntimeContext, sessionId: string): Promise<void> {
+  async releaseSession(_context: RuntimeContext, sessionId: string): Promise<void> {
     const wrapper = this.sessions.get(sessionId);
     if (!wrapper) return;
-
-    if (wrapper.unsubscribe) wrapper.unsubscribe();
-    wrapper.session.dispose();
     this.sessions.delete(sessionId);
+    await this.disposeSession(wrapper);
   }
 
   /**
    * Shuts down all active sessions and unloads the runtime adapter.
    */
   async stop(): Promise<void> {
-    for (const [_, wrapper] of this.sessions) {
-      if (wrapper.unsubscribe) wrapper.unsubscribe();
-      try {
-        wrapper.session.dispose();
-      } catch {}
-    }
+    const wrappers = [...this.sessions.values()];
     this.sessions.clear();
+    await Promise.all(wrappers.map((wrapper) => this.disposeSession(wrapper)));
+  }
+
+  /** Stops a running turn before disposing, so nothing keeps working on a released session. */
+  private async disposeSession(wrapper: PiSessionWrapper): Promise<void> {
+    wrapper.unsubscribe?.();
+    try {
+      await wrapper.session.abort();
+      wrapper.session.dispose();
+    } catch (error) {
+      this.logger.warn("failed to dispose pi session", { sessionId: wrapper.sessionId, error });
+    }
   }
 
   // --------------------------------------------------------------------------
@@ -220,7 +236,7 @@ export class PiRuntime implements AgentRuntime {
     context: RuntimeContext,
     existingSessionId?: string,
   ): Promise<PiSessionWrapper> {
-    const agentDir = this.config.agentDir ?? resolve(".data/pi", context.project.id);
+    const agentDir = this.agentDir(context.project);
     await mkdir(agentDir, { recursive: true });
 
     const sessionDir = join(agentDir, "sessions");
@@ -232,11 +248,10 @@ export class PiRuntime implements AgentRuntime {
       ...(this.config.settings ?? {}),
     });
 
-    const modelRuntime = await this.resolveModelRuntime(context);
-    const { model, thinkingLevel, builtinTools } = await this.resolveModelAndTools(
-      context,
-      modelRuntime,
-    );
+    const modelRuntime = await this.modelRuntime(context.project);
+    const model = this.resolveModel(context.project, modelRuntime);
+    const thinkingLevel = this.thinkingLevel(context.project);
+    const builtinTools = this.config.tools ?? ["read", "write", "edit", "bash"];
 
     const wrapperHolder: { wrapper?: PiSessionWrapper } = {};
 
@@ -265,12 +280,8 @@ export class PiRuntime implements AgentRuntime {
 
     // MCP extension handling
     let resourceLoader: DefaultResourceLoader | undefined;
-    const serviceMcpServers = (this.globalProject?.runtime?.mcpServers ??
-      this.globalProject?.agent?.mcpServers ??
-      []) as McpServerConfig[];
-    const projectMcpServers = (context.project.runtime?.mcpServers ??
-      context.project.agent?.mcpServers ??
-      []) as McpServerConfig[];
+    const serviceMcpServers = this.globalProject?.runtime?.mcpServers ?? [];
+    const projectMcpServers = context.project.runtime?.mcpServers ?? [];
     const allMcpServers = [...serviceMcpServers, ...projectMcpServers];
 
     if (allMcpServers.length > 0) {
@@ -333,17 +344,9 @@ export class PiRuntime implements AgentRuntime {
             (wrapper.lastAssistantText ?? "") + event.assistantMessageEvent.delta;
         }
 
-        if (event.type === "message_end" && event.message?.role === "assistant") {
-          const fullText = Array.isArray(event.message.content)
-            ? event.message.content
-                .filter((c: any) => c && c.type === "text" && typeof c.text === "string")
-                .map((c: any) => c.text)
-                .join("")
-            : "";
-          if (fullText) {
-            wrapper.lastAssistantText = fullText;
-          }
-        }
+        const finished = event.type === "message_end" && asAssistantMessage(event.message);
+        if (finished && assistantText(finished))
+          wrapper.lastAssistantText = assistantText(finished);
 
         const canonicalEvents = PiNormalizer.normalize(
           event,
@@ -361,8 +364,8 @@ export class PiRuntime implements AgentRuntime {
             return;
           }
 
-          const lastMsg = event.messages[event.messages.length - 1] as any;
-          if (lastMsg && lastMsg.stopReason === "error") {
+          const lastMsg = asAssistantMessage(event.messages.at(-1));
+          if (lastMsg?.stopReason === "error") {
             wrapper.isTurnEnded = true;
             const error = lastMsg.errorMessage ?? "Turn failed";
             await wrapper.context.onEvent({
@@ -393,7 +396,7 @@ export class PiRuntime implements AgentRuntime {
           });
         } else if (event.type === "auto_retry_end" && !event.success && !wrapper.isTurnEnded) {
           wrapper.isTurnEnded = true;
-          const error = (event as any).finalError ?? "Auto retry failed";
+          const error = event.finalError ?? "Auto retry failed";
           await wrapper.context.onEvent({
             type: "turn.failed",
             sessionId: wrapper.sessionId,
@@ -432,113 +435,66 @@ export class PiRuntime implements AgentRuntime {
     return wrapper;
   }
 
-  private async resolveModelRuntime(context: RuntimeContext): Promise<ModelRuntime> {
-    if (this.modelRuntimeOverride) {
-      return this.modelRuntimeOverride;
-    }
-    if (!this.defaultModelRuntime) {
-      this.defaultModelRuntime = await ModelRuntime.create(
-        this.config.agentDir
-          ? {
-              authPath: join(this.config.agentDir, "auth.json"),
-              modelsPath: join(this.config.agentDir, "models.json"),
-            }
-          : {},
-      );
-    }
-    const runtime = this.defaultModelRuntime;
+  /** Pi's config directory for a project: models.json, auth.json and sessions live there. */
+  private agentDir(project: ProjectConfig): string {
+    return this.config.agentDir ?? resolve(this.dataDir, "pi", project.id);
+  }
 
-    const runtimeConf = (context.project.runtime ?? {}) as Record<string, any>;
-    const combinedProviders: Record<string, PiProviderConfig> = {
-      ...(this.config.providers ?? {}),
-      ...(runtimeConf.providers ?? {}),
+  /** The model registry with the configured providers, built once per runtime. */
+  private modelRuntime(project: ProjectConfig): Promise<ModelRuntime> {
+    this.models ??= this.createModelRuntime(project);
+    return this.models;
+  }
+
+  private async createModelRuntime(project: ProjectConfig): Promise<ModelRuntime> {
+    const agentDir = this.agentDir(project);
+    const runtime = await ModelRuntime.create({
+      authPath: join(agentDir, "auth.json"),
+      modelsPath: join(agentDir, "models.json"),
+    });
+    const providers: Record<string, PiProviderConfig> = {
+      ...this.config.providers,
+      ...(project.runtime?.providers as Record<string, PiProviderConfig> | undefined),
     };
-
-    // Shorthand for single-provider config
-    const singleProvider = runtimeConf.provider ?? this.config.provider;
-    if (singleProvider && !combinedProviders[singleProvider]) {
-      const singleApiKey =
-        typeof runtimeConf.apiKey === "string" ? runtimeConf.apiKey : this.config.apiKey;
-      const singleBaseUrl =
-        typeof runtimeConf.baseUrl === "string" ? runtimeConf.baseUrl : this.config.baseUrl;
-      const singleApi = typeof runtimeConf.api === "string" ? runtimeConf.api : this.config.api;
-      const singleHeaders =
-        runtimeConf.headers && typeof runtimeConf.headers === "object"
-          ? (runtimeConf.headers as Record<string, string>)
-          : this.config.headers;
-      const singleModels = Array.isArray(runtimeConf.models)
-        ? runtimeConf.models
-        : this.config.models;
-
-      if (singleBaseUrl || singleApiKey || singleApi || singleHeaders || singleModels) {
-        combinedProviders[singleProvider] = {
-          ...(singleBaseUrl ? { baseUrl: singleBaseUrl } : {}),
-          ...(singleApiKey ? { apiKey: singleApiKey } : {}),
-          ...(singleApi ? { api: singleApi } : {}),
-          ...(singleHeaders ? { headers: singleHeaders } : {}),
-          ...(singleModels ? { models: singleModels } : {}),
-        };
-      }
+    for (const [providerId, provider] of Object.entries(providers)) {
+      // Entries mirror models.json; Pi validates them when they are registered.
+      runtime.registerProvider(providerId, provider as unknown as ProviderInput);
+      if (provider.apiKey) await runtime.setRuntimeApiKey(providerId, provider.apiKey);
     }
-
-    for (const [providerId, providerDef] of Object.entries(combinedProviders)) {
-      if (providerDef && typeof providerDef === "object") {
-        runtime.registerProvider(providerId, providerDef as any);
-        if (typeof providerDef.apiKey === "string" && providerDef.apiKey) {
-          await runtime.setRuntimeApiKey(providerId, providerDef.apiKey);
-        }
-      }
-    }
-
     return runtime;
   }
 
-  private async resolveModelAndTools(
-    context: RuntimeContext,
-    modelRuntime: ModelRuntime,
-  ): Promise<{
-    model?: Model<any> | undefined;
-    thinkingLevel: ThinkingLevel;
-    builtinTools: string[];
-  }> {
-    const runtimeConf = (context.project.runtime ?? {}) as Record<string, any>;
-    const provider =
-      runtimeConf.defaultProvider ??
-      runtimeConf.provider ??
-      this.config.defaultProvider ??
-      this.config.provider;
-    const modelId =
-      typeof runtimeConf.defaultModel === "string"
-        ? runtimeConf.defaultModel
-        : typeof runtimeConf.model === "string"
-          ? runtimeConf.model
-          : (context.project.agent?.model ?? this.config.defaultModel ?? this.config.model);
-
-    let model: Model<any> | undefined;
-    if (provider && modelId) {
-      model = modelRuntime.getModel(String(provider), modelId);
-    } else if (modelId) {
-      const allModels = modelRuntime.getModels();
-      model = allModels.find((m) => m.id === modelId || `${m.provider}/${m.id}` === modelId);
-    }
-
+  /**
+   * The model for a project: `runtime.model` (optionally "provider/model") or the configured
+   * default. A model that is configured but unknown is an error; with none configured Pi
+   * picks its own default.
+   */
+  private resolveModel(project: ProjectConfig, models: ModelRuntime): Model<any> | undefined {
+    const modelId = project.runtime?.model ?? this.config.defaultModel;
+    if (!modelId) return undefined;
+    const providerId =
+      typeof project.runtime?.provider === "string"
+        ? project.runtime.provider
+        : this.config.defaultProvider;
+    const model = providerId
+      ? models.getModel(providerId, modelId)
+      : models.getModels().find((m) => m.id === modelId || `${m.provider}/${m.id}` === modelId);
     if (!model) {
-      const available = await modelRuntime.getAvailable();
-      if (available.length > 0) {
-        model = available[0];
-      }
+      const available = models.getModels().map((m) => `${m.provider}/${m.id}`);
+      throw new Error(
+        `Pi model ${providerId ? `${providerId}/` : ""}${modelId} is not configured; known models: ${available.join(", ") || "none"}`,
+      );
     }
+    return model;
+  }
 
-    const rawThinking =
-      runtimeConf.thinkingLevel ??
-      runtimeConf.reasoningEffort ??
-      this.config.thinkingLevel ??
-      "medium";
-    const thinkingLevel: ThinkingLevel = normalizeThinkingLevel(rawThinking);
-
-    const builtinTools = this.config.tools ?? ["read", "write", "edit", "bash"];
-
-    return { model, thinkingLevel, builtinTools };
+  /** The project's `reasoningEffort` when Pi supports it, else the configured level. */
+  private thinkingLevel(project: ProjectConfig): ThinkingLevel {
+    const requested = project.runtime?.reasoningEffort;
+    if (requested && (PI_THINKING_LEVELS as readonly string[]).includes(requested)) {
+      return requested as ThinkingLevel;
+    }
+    return this.config.thinkingLevel ?? "medium";
   }
 }
 
@@ -546,18 +502,4 @@ export class PiRuntime implements AgentRuntime {
 function isNothingToCompact(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes("Nothing to compact") || message.includes("Already compacted");
-}
-
-function normalizeThinkingLevel(level: unknown): ThinkingLevel {
-  switch (level) {
-    case "off":
-    case "low":
-    case "medium":
-    case "high":
-      return level;
-    case "minimal":
-      return "low";
-    default:
-      return "medium";
-  }
 }

@@ -1,5 +1,24 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { RuntimeEvent } from "../runtime.ts";
+
+/** The assistant message an event carries, if it carries one. */
+export function asAssistantMessage(message: unknown): AssistantMessage | undefined {
+  const candidate = message as Partial<AssistantMessage> | undefined;
+  return candidate?.role === "assistant" && Array.isArray(candidate.content)
+    ? (candidate as AssistantMessage)
+    : undefined;
+}
+
+/** The text blocks of an assistant message, joined. */
+export function assistantText(message: AssistantMessage): string {
+  return message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
+}
+
+/** An item id that stays the same across a message's streaming updates and its end event. */
+function messageItemId(message: AssistantMessage): string {
+  return `msg_${message.timestamp}`;
+}
 
 /**
  * Normalizes Pi Agent native session events into Agent Orchestrator canonical domain events.
@@ -18,31 +37,23 @@ export class PiNormalizer {
     switch (event.type) {
       // 1. Streaming message deltas (text and thinking/reasoning)
       case "message_update": {
+        const message = asAssistantMessage(event.message);
         const sub = event.assistantMessageEvent;
-        const msg = event.message as any;
-        const itemId = msg?.id ?? `msg_${Date.now()}`;
-
+        if (!message) break;
+        const itemId = messageItemId(message);
         if (sub.type === "text_delta") {
           events.push({
             type: "agent.message.delta",
             sessionId,
             ...(turnId ? { turnId } : {}),
-            payload: {
-              itemId,
-              delta: sub.delta,
-              text: sub.delta,
-            },
+            payload: { itemId, delta: sub.delta },
           });
         } else if (sub.type === "thinking_delta") {
           events.push({
             type: "agent.reasoning.delta",
             sessionId,
             ...(turnId ? { turnId } : {}),
-            payload: {
-              itemId,
-              delta: sub.delta,
-              text: sub.delta,
-            },
+            payload: { itemId, delta: sub.delta },
           });
         }
         break;
@@ -50,44 +61,28 @@ export class PiNormalizer {
 
       // 2. Completed messages (final assistant text and reasoning)
       case "message_end": {
-        const message = event.message as any;
+        const message = asAssistantMessage(event.message);
         if (!message) break;
-        const itemId = message.id ?? `msg_${Date.now()}`;
-
-        if (message.role === "assistant" && Array.isArray(message.content)) {
-          const text = message.content
-            .filter((c: any) => c && c.type === "text" && typeof c.text === "string")
-            .map((c: any) => c.text)
-            .join("");
-
-          if (text) {
-            events.push({
-              type: "agent.message.completed",
-              sessionId,
-              ...(turnId ? { turnId } : {}),
-              payload: {
-                itemId,
-                text,
-              },
-            });
-          }
-
-          const thinking = message.content
-            .filter((c: any) => c && c.type === "thinking" && typeof c.thinking === "string")
-            .map((c: any) => c.thinking)
-            .join("");
-
-          if (thinking) {
-            events.push({
-              type: "agent.reasoning.completed",
-              sessionId,
-              ...(turnId ? { turnId } : {}),
-              payload: {
-                itemId,
-                text: thinking,
-              },
-            });
-          }
+        const itemId = messageItemId(message);
+        const text = assistantText(message);
+        if (text) {
+          events.push({
+            type: "agent.message.completed",
+            sessionId,
+            ...(turnId ? { turnId } : {}),
+            payload: { itemId, text },
+          });
+        }
+        const thinking = message.content
+          .flatMap((block) => (block.type === "thinking" ? [block.thinking] : []))
+          .join("");
+        if (thinking) {
+          events.push({
+            type: "agent.reasoning.completed",
+            sessionId,
+            ...(turnId ? { turnId } : {}),
+            payload: { itemId, text: thinking },
+          });
         }
         break;
       }
@@ -220,7 +215,9 @@ export function extractTextContent(result: unknown): string {
     const obj = result as Record<string, unknown>;
     if (Array.isArray(obj.content)) {
       return obj.content
-        .map((c: any) => (c && typeof c.text === "string" ? c.text : ""))
+        .map((c) =>
+          typeof (c as { text?: unknown })?.text === "string" ? (c as { text: string }).text : "",
+        )
         .filter(Boolean)
         .join("\n");
     }

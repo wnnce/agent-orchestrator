@@ -137,7 +137,7 @@ describe("Pi Agent Native SDK Runtime", () => {
     it("normalizes text and reasoning stream deltas", () => {
       const textEvent: any = {
         type: "message_update",
-        message: { id: "msg_1", role: "assistant" },
+        message: { role: "assistant", content: [], timestamp: 1001 },
         assistantMessageEvent: {
           type: "text_delta",
           delta: "hello stream",
@@ -148,13 +148,13 @@ describe("Pi Agent Native SDK Runtime", () => {
       expect(textNormalized).toHaveLength(1);
       expect(textNormalized[0]!.type).toBe("agent.message.delta");
       expect(textNormalized[0]!.payload).toMatchObject({
-        itemId: "msg_1",
+        itemId: "msg_1001",
         delta: "hello stream",
       });
 
       const thinkEvent: any = {
         type: "message_update",
-        message: { id: "msg_2", role: "assistant" },
+        message: { role: "assistant", content: [], timestamp: 1002 },
         assistantMessageEvent: {
           type: "thinking_delta",
           delta: "thinking step",
@@ -165,7 +165,7 @@ describe("Pi Agent Native SDK Runtime", () => {
       expect(thinkNormalized).toHaveLength(1);
       expect(thinkNormalized[0]!.type).toBe("agent.reasoning.delta");
       expect(thinkNormalized[0]!.payload).toMatchObject({
-        itemId: "msg_2",
+        itemId: "msg_1002",
         delta: "thinking step",
       });
     });
@@ -174,8 +174,8 @@ describe("Pi Agent Native SDK Runtime", () => {
       const msgEndEvent: any = {
         type: "message_end",
         message: {
-          id: "msg_done",
           role: "assistant",
+          timestamp: 1003,
           content: [
             { type: "text", text: "Final answer text" },
             { type: "thinking", thinking: "My thought process" },
@@ -187,12 +187,12 @@ describe("Pi Agent Native SDK Runtime", () => {
       expect(normalized).toHaveLength(2);
       expect(normalized[0]!.type).toBe("agent.message.completed");
       expect(normalized[0]!.payload).toMatchObject({
-        itemId: "msg_done",
+        itemId: "msg_1003",
         text: "Final answer text",
       });
       expect(normalized[1]!.type).toBe("agent.reasoning.completed");
       expect(normalized[1]!.payload).toMatchObject({
-        itemId: "msg_done",
+        itemId: "msg_1003",
         text: "My thought process",
       });
     });
@@ -334,13 +334,14 @@ describe("Pi Agent Native SDK Runtime", () => {
         const runtime = new PiRuntime(
           new Logger(),
           {
-            provider: "mock-provider",
-            model: "mock-model",
+            defaultProvider: "mock-provider",
+            defaultModel: "mock-model",
             thinkingLevel: "off",
           },
           undefined,
           undefined,
           mockModelRuntime,
+          tmpWorkspace,
         );
 
         const context: RuntimeContext = {
@@ -406,13 +407,14 @@ describe("Pi Agent Native SDK Runtime", () => {
         const runtime = new PiRuntime(
           new Logger(),
           {
-            provider: "mock-provider",
-            model: "mock-model",
+            defaultProvider: "mock-provider",
+            defaultModel: "mock-model",
             thinkingLevel: "off",
           },
           undefined,
           undefined,
           mockModelRuntime,
+          tmpWorkspace,
         );
 
         const context: RuntimeContext = {
@@ -450,13 +452,14 @@ describe("Pi Agent Native SDK Runtime", () => {
         const runtime = new PiRuntime(
           new Logger(),
           {
-            provider: "mock-provider",
-            model: "mock-model",
+            defaultProvider: "mock-provider",
+            defaultModel: "mock-model",
             thinkingLevel: "off",
           },
           undefined,
           undefined,
           mockModelRuntime,
+          tmpWorkspace,
         );
 
         const context: RuntimeContext = {
@@ -529,8 +532,8 @@ describe("Pi Agent Native SDK Runtime", () => {
         const runtime = new PiRuntime(
           new Logger(),
           {
-            provider: "failing-provider",
-            model: "failing-model",
+            defaultProvider: "failing-provider",
+            defaultModel: "failing-model",
             thinkingLevel: "off",
             settings: {
               retry: { enabled: false },
@@ -539,6 +542,7 @@ describe("Pi Agent Native SDK Runtime", () => {
           undefined,
           undefined,
           mr,
+          tmpWorkspace,
         );
 
         const context: RuntimeContext = {
@@ -576,30 +580,38 @@ describe("Pi Agent Native SDK Runtime", () => {
     });
 
     it("registers native providers and preserves model metadata without workaround fallbacks", async () => {
-      const runtime = new PiRuntime(new Logger(), {
-        defaultProvider: "deepseek",
-        defaultModel: "deepseek-flash",
-        providers: {
-          deepseek: {
-            baseUrl: "https://sub2api.agoralab.co",
-            apiKey: "sk-test-key",
-            api: "openai-responses",
-            models: [
-              {
-                id: "deepseek-flash",
-                name: "DeepSeek V4 Flash",
-                contextWindow: 1000000,
-                maxTokens: 384000,
-                reasoning: true,
-                compat: {
-                  requiresReasoningContentOnAssistantMessages: true,
-                  thinkingFormat: "deepseek",
+      const dataDir = mkdtempSync(join(tmpdir(), "pi-rt-providers-"));
+      const runtime = new PiRuntime(
+        new Logger(),
+        {
+          defaultProvider: "deepseek",
+          defaultModel: "deepseek-flash",
+          providers: {
+            deepseek: {
+              baseUrl: "https://sub2api.agoralab.co",
+              apiKey: "sk-test-key",
+              api: "openai-responses",
+              models: [
+                {
+                  id: "deepseek-flash",
+                  name: "DeepSeek V4 Flash",
+                  contextWindow: 1000000,
+                  maxTokens: 384000,
+                  reasoning: true,
+                  compat: {
+                    requiresReasoningContentOnAssistantMessages: true,
+                    thinkingFormat: "deepseek",
+                  },
                 },
-              },
-            ],
+              ],
+            },
           },
         },
-      });
+        undefined,
+        undefined,
+        undefined,
+        dataDir,
+      );
 
       const context: RuntimeContext = {
         project: {
@@ -612,7 +624,7 @@ describe("Pi Agent Native SDK Runtime", () => {
         onEvent: () => {},
       };
 
-      const mr = await (runtime as any).resolveModelRuntime(context);
+      const mr = await (runtime as any).modelRuntime(context.project);
       const model = mr.getModel("deepseek", "deepseek-flash");
 
       expect(model).toBeDefined();
@@ -627,6 +639,7 @@ describe("Pi Agent Native SDK Runtime", () => {
       expect(auth?.auth?.apiKey).toBe("sk-test-key");
 
       await runtime.stop();
+      rmSync(dataDir, { recursive: true, force: true });
     });
   });
 });
