@@ -110,6 +110,16 @@ describe("session execution and control", () => {
     await runtime.waitForIdle(sessionId);
     expect((await store.getTurn(second.id))?.status).toBe("completed");
   });
+  test("compaction is rejected while a turn is running", async () => {
+    await runtime.turn(sessionId, "long");
+    await agent.started(1);
+    await expect(runtime.compact(sessionId)).rejects.toThrow(
+      "cannot compact while a turn is running",
+    );
+    await agent.finish(0);
+    await runtime.waitForIdle(sessionId);
+    await runtime.compact(sessionId);
+  });
   test("correlates a terminal event arriving before startTurn returns", async () => {
     agent.early = true;
     const turn = await runtime.turn(sessionId, "instant");

@@ -715,6 +715,9 @@ export class ProjectRuntime {
   }
   async compact(sessionId: string): Promise<void> {
     const route = await this.loadSession(sessionId);
+    const active = this.activeTurns.get(sessionId);
+    if (active && !active.settled)
+      throw new Error("cannot compact while a turn is running");
     await this.runtime.compactSession(
       this.context(this.workspacePath(route), sessionId),
       route.runtimeSessionId ?? "",
