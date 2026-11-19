@@ -7,6 +7,7 @@ import type { AgentRuntime, RuntimeCapabilities } from "./runtime.ts";
 import { FAKE_CAPABILITIES, FakeRuntime } from "./runtime.ts";
 import { CODEX_CAPABILITIES, CodexRuntime } from "./codex.ts";
 import { PI_CAPABILITIES, PiRuntime, piRuntimeConfigSchema } from "./pi/index.ts";
+import { CLAUDE_CAPABILITIES, ClaudeRuntime, claudeRuntimeConfigSchema } from "./claude/index.ts";
 
 /**
  * Metadata describing a registered runtime and its capabilities.
@@ -65,11 +66,7 @@ export class RuntimeRegistry {
   /**
    * Register a runtime factory function or an adapter instance.
    */
-  register(
-    type: string,
-    factory: RuntimeFactory,
-    options?: RuntimeRegistrationOptions,
-  ): this;
+  register(type: string, factory: RuntimeFactory, options?: RuntimeRegistrationOptions): this;
   register(adapter: RuntimeAdapter): this;
   register(
     typeOrAdapter: string | RuntimeAdapter,
@@ -169,11 +166,9 @@ export class RuntimeRegistry {
 }
 
 /**
- * Creates and populates a RuntimeRegistry with default built-in runtimes (codex and fake).
+ * Creates and populates a RuntimeRegistry with the built-in runtimes (fake, codex, pi and claude).
  */
-export function createDefaultRuntimeRegistry(
-  logger = new Logger(),
-): RuntimeRegistry {
+export function createDefaultRuntimeRegistry(logger = new Logger()): RuntimeRegistry {
   const registry = new RuntimeRegistry(logger);
 
   registry.register("fake", () => new FakeRuntime(), {
@@ -184,9 +179,7 @@ export function createDefaultRuntimeRegistry(
   registry.register(
     "codex",
     (ctx) => {
-      const codexBinary = fileURLToPath(
-        import.meta.resolve("@openai/codex/bin/codex.js"),
-      );
+      const codexBinary = fileURLToPath(import.meta.resolve("@openai/codex/bin/codex.js"));
       return new CodexRuntime(
         codexBinary,
         ctx.logger,
@@ -217,6 +210,22 @@ export function createDefaultRuntimeRegistry(
     {
       description: "Pi Agent native TypeScript SDK in-process runtime adapter",
       capabilities: PI_CAPABILITIES,
+    },
+  );
+
+  registry.register(
+    "claude",
+    (ctx) =>
+      new ClaudeRuntime(
+        ctx.logger,
+        claudeRuntimeConfigSchema.parse(ctx.config.runtimes?.claude ?? {}),
+        ctx.globalProject,
+        ctx.actionRegistry,
+        ctx.config.dataDir,
+      ),
+    {
+      description: "Claude Code runtime adapter (Claude Agent SDK)",
+      capabilities: CLAUDE_CAPABILITIES,
     },
   );
 
