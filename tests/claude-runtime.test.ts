@@ -132,7 +132,6 @@ describe("ClaudeRuntime", () => {
       displayName: "Claude",
       description: "test",
       routing: { projectId: "claude-test" },
-      repositories: [],
       runtime: { type: "claude", approvalPolicy: "on-request" },
     };
     queries = [];

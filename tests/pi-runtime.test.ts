@@ -111,13 +111,7 @@ const DUMMY_PROJECT: ProjectConfig = {
     provider: "mock-provider",
     model: "mock-model",
   },
-  repositories: [
-    {
-      id: "main",
-      url: "https://github.com/example/repo.git",
-      baseBranch: "main",
-    },
-  ],
+  repository: { url: "https://github.com/example/repo.git", baseBranch: "main" },
 };
 
 describe("Pi Agent Native SDK Runtime", () => {

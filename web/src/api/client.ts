@@ -116,7 +116,6 @@ export async function createSession(params: {
   projectId?: string;
   title?: string;
   query?: string;
-  repositoryId?: string;
 }): Promise<{ session: SessionRoute; routedProject: string; turn?: any }> {
   const res = await fetch("/sessions", {
     method: "POST",

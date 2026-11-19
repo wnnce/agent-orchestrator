@@ -3,15 +3,14 @@ projects:
       enabled: true
       id: example-project
       displayName: Example Project
-      description: Multi-repo microservice project with isolated Git worktrees and agent configuration.
+      description: Backend service project; each session works in its own Git worktree.
       tags: [backend, microservices]
     routing:
       projectId: example-project
       displayName: Example Project
-      summary: Multi-repo microservice with backend service and API schemas.
-      repositories: [my-org/backend-service, my-org/api-proto]
-      keywords: [backend, service, proto, api]
-      routingHints: [Use this project for backend service and protobuf schema changes.]
+      summary: Backend service.
+      keywords: [backend, service, backend-service]
+      routingHints: [Use this project for backend service changes.]
 
     # Agent & MCP Server Configuration
     runtime:
@@ -27,39 +26,18 @@ projects:
           url: https://mcp.internal.example.com/docs
           auth: env:INTERNAL_MCP_TOKEN
 
-    # Multi-Repository Workspace Configuration
-    # Bases are pre-warmed via git fetch on startup. Sessions get isolated git worktrees.
-    repositories:
-      - id: service
-        url: git@github.com:my-org/backend-service.git
-        baseBranch: main
-        isPrimary: true
-        auth:
-          type: ssh-key
-          keyPath: /secrets/keys/backend-service.id_ed25519
-      - id: proto
-        url: https://github.com/my-org/api-proto.git
-        baseBranch: master
-        isPrimary: false
-        auth:
-          type: token
-          tokenEnv: GITHUB_TOKEN
-
-    # Prompt Configuration (loaded from external Markdown files)
-    promptsDir: ./prompts/example-project
-    prompts:
-      system: ./prompts/example-project/system.md
-      fix: ./prompts/example-project/fix.md
-      analyze: ./prompts/example-project/analyze.md
-      rules: ./prompts/example-project/rules.md
-
-    triggers:
-      - id: hourly-summary
-        implementationKey: prompt
-        schedule: "@every 1h"
-        intervalMs: 3600000
-        config:
-          prompt: Summarize recent project activity.
+    # The project's repository. The base checkout is synced on startup; every session gets
+    # its own git worktree on branch agent/<sessionId>.
+    repository:
+      url: git@github.com:my-org/backend-service.git
+      baseBranch: main
+      # path: repos/backend-service # Use an existing local checkout as the base instead
+      auth:
+        type: ssh-key
+        keyPath: /secrets/keys/backend-service.id_ed25519
+      committer:
+        name: orchestrator-bot
+        email: bot@example.com
 
     # Outbound notifications (inherits global notifications from config.yaml, can override by name)
     # notifications:

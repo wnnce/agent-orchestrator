@@ -684,7 +684,7 @@ describe("Feishu /close Command", () => {
         keywords: ["close-test"],
       },
       runtime: { type: "fake" },
-      repositories: [{ id: "main", url: "", baseBranch: "main", isPrimary: true }],
+      repository: { url: "", baseBranch: "main" },
     };
 
     const config: any = {

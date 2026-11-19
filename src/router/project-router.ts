@@ -6,6 +6,7 @@ import {
   KeywordMatchHandler,
   JevDecisionHandler,
   GlobalWorkspaceFallbackHandler,
+  scoreProjectKeywords,
   type RoutingResult,
   type RoutingContext,
 } from "./chain.ts";
@@ -101,39 +102,7 @@ export class ProjectRouter {
   }
 
   private throwAmbiguousOrNotFound(query: string, projects: ProjectConfig[]): never {
-    const text = query.toLowerCase();
-    const scores = projects
-      .map((project) => {
-        const rawKeywords = [
-          project.id,
-          project.displayName,
-          ...(project.routing.keywords ?? []),
-          ...(project.routing.repositories ?? []),
-        ]
-          .map((k) => k.toLowerCase().trim())
-          .filter(Boolean);
-
-        const tokens = [
-          project.id,
-          project.displayName,
-          project.description,
-          ...(project.routing.keywords ?? []),
-          ...(project.routing.repositories ?? []),
-        ]
-          .join(" ")
-          .toLowerCase()
-          .split(/[\s,.;:!?\/\\|()\[\]{}"'`~@#$%^&*+=<>，。！？（）【】「」《》、]+/)
-          .filter(Boolean);
-
-        const allTerms = Array.from(new Set([...rawKeywords, ...tokens]));
-
-        return {
-          project,
-          score: allTerms.reduce((score, term) => score + (text.includes(term) ? 1 : 0), 0),
-        };
-      })
-      .sort((a, b) => b.score - a.score);
-
+    const scores = scoreProjectKeywords(query, projects);
     const top = scores[0];
     if (top && scores[1] && scores[1].score === top.score && top.score > 0) {
       throw new Error("project routing is ambiguous");

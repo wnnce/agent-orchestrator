@@ -14,12 +14,10 @@ const project: ProjectConfig = {
     projectId: "codex-test",
     displayName: "Codex Test",
     summary: "test",
-    repositories: [],
     keywords: [],
     routingHints: [],
   },
   runtime: { type: "codex", codexHome: "/tmp/codex-test-home" },
-  repositories: [],
 };
 
 test("Codex runtime speaks app-server JSONL", async () => {

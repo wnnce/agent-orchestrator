@@ -31,11 +31,9 @@ function createSampleProject(id: string, runtimeType?: string): ProjectConfig {
       projectId: id,
       displayName: `Project ${id}`,
       summary: `Summary for ${id}`,
-      repositories: [],
       keywords: [id],
     },
     ...(runtimeType ? { runtime: { type: runtimeType } } : {}),
-    repositories: [],
   };
 }
 
@@ -233,14 +231,12 @@ describe("ProjectManager Runtime Extensibility", () => {
         projectId: "custom-project",
         displayName: "Custom Agent Project",
         summary: "Custom Agent Project Summary",
-        repositories: [],
         keywords: ["custom"],
       },
       runtime: {
         type: "third-party",
         sandbox: "workspace-write",
       },
-      repositories: [],
     };
 
     const store = new MemoryStore();
@@ -281,13 +277,11 @@ describe("ProjectManager Runtime Extensibility", () => {
         projectId: "unsupported-proj",
         displayName: "Unsupported Project",
         summary: "Unsupported Project Summary",
-        repositories: [],
         keywords: ["unsupported"],
       },
       runtime: {
         type: "non-existent-agent-type",
       },
-      repositories: [],
     };
 
     const store = new MemoryStore();
@@ -317,20 +311,12 @@ describe("ProjectManager Runtime Extensibility", () => {
         projectId: "runtime-track-proj",
         displayName: "Runtime Track Project",
         summary: "Testing session runtime tracking",
-        repositories: [],
         keywords: ["track"],
       },
       runtime: {
         type: "fake",
       },
-      repositories: [
-        {
-          id: "main",
-          url: "",
-          baseBranch: "main",
-          isPrimary: true,
-        },
-      ],
+      repository: { url: "", baseBranch: "main" },
     };
 
     const store = new MemoryStore();

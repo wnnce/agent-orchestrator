@@ -58,7 +58,6 @@ describe("Codex app-server protocol", () => {
       displayName: "Codex Protocol",
       description: "test",
       routing: { projectId: "codex-protocol" },
-      repositories: [],
       runtime: { type: "codex", codexHome },
     };
     context = { project, workspacePath: root, onEvent: (event) => void events.push(event) };

@@ -8,17 +8,14 @@ import { Logger } from "../src/observability/logger.ts";
 import { MemoryStore } from "../src/persistence/store.ts";
 import { ProjectRuntime } from "../src/project/runtime.ts";
 import { FakeRuntime } from "../src/runtime/runtime.ts";
-import { WorkspaceManager, type SessionWorkspaceInfo } from "../src/workspace/workspace.ts";
+import { WorkspaceManager } from "../src/workspace/workspace.ts";
 
 /** Counts the calls that sync base repositories and create worktrees. */
 class CountingWorkspaces extends WorkspaceManager {
   prepared = 0;
-  override async ensureSessionWorkspaces(
-    project: ProjectConfig,
-    sessionId: string,
-  ): Promise<SessionWorkspaceInfo> {
+  override async ensureSessionWorkspace(project: ProjectConfig, sessionId: string) {
     this.prepared++;
-    return super.ensureSessionWorkspaces(project, sessionId);
+    return super.ensureSessionWorkspace(project, sessionId);
   }
 }
 
@@ -41,7 +38,7 @@ describe("session workspace usage", () => {
       displayName: "Usage",
       description: "test",
       routing: { projectId: "usage" },
-      repositories: [{ id: "main", url: remote, baseBranch: "main", isPrimary: true }],
+      repository: { url: remote, baseBranch: "main" },
       runtime: { type: "fake" },
     };
     store = new MemoryStore();
@@ -71,7 +68,7 @@ describe("session workspace usage", () => {
     const session = await runtime.createSession();
     expect(workspaces.prepared).toBe(1);
     expect(session.workspacePath).toBe(
-      path.join(root, "workspaces", "usage", session.sessionId, "main"),
+      path.join(root, "workspaces", "usage", session.sessionId),
     );
 
     await runtime.turn(session.sessionId, "first");
@@ -91,6 +88,22 @@ describe("session workspace usage", () => {
     await runtime.waitForIdle(session.sessionId);
     expect(workspaces.prepared).toBe(2);
     expect(existsSync(path.join(session.workspacePath!, ".git"))).toBe(true);
+  });
+
+  test("a session from before single-repo projects keeps its worktree one level down", async () => {
+    const session = await runtime.createSession();
+    const sessionDir = session.workspacePath!;
+    const legacyDir = path.join(sessionDir, "main");
+    // Move the worktree into the old <session>/<repositoryId> layout.
+    const base = path.join(root, "bases", "usage");
+    await Bun.$`git -C ${base} worktree move ${sessionDir} ${sessionDir}-tmp`.quiet();
+    await mkdir(sessionDir);
+    await Bun.$`git -C ${base} worktree move ${sessionDir}-tmp ${legacyDir}`.quiet();
+
+    expect(workspaces.sessionPath(runtime.project, session.sessionId)).toBe(legacyDir);
+    expect(workspaces.isSessionReady(runtime.project, session.sessionId)).toBe(true);
+    await workspaces.removeSession(runtime.project, session.sessionId);
+    expect(existsSync(sessionDir)).toBe(false);
   });
 
   test("closing a session whose worktree is gone does not recreate it", async () => {

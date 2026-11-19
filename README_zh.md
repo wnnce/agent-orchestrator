@@ -89,11 +89,11 @@ flowchart TD
 
 ## 核心特性
 
-### 1. 多项目与多代码仓隔离（Multi-Project & Multi-Repo）
+### 1. 多项目隔离（Multi-Project）
 
-- 每个受管项目在 `projects/<project-id>/project.yaml` 中声明代码仓、Git 提交人身份、认证凭证与专有 Prompt。
+- 每个受管项目在 `projects/<project-id>/project.yaml` 中声明它的代码仓、Git 提交人身份与认证凭证。
 - 基础仓库克隆与同步具备防击穿合并机制（Single-Flight），避免多个会话并发请求时重复拉取。
-- 每个会话通过 `ensureSessionWorkspaces` 自动分配专用的 Git Worktree，会话清理时自动释放。
+- 每个会话通过 `ensureSessionWorkspace` 自动分配专用的 Git Worktree，会话清理时自动释放。
 
 ### 2. 标准化 Agent 运行时与领域事件协议
 
@@ -243,19 +243,17 @@ routing:
   summary: 负责订单与支付流程的 Golang 微服务。
   keywords: [order, payment, checkout]
 
-auth:
-  type: token
-  token: "{env:GITHUB_TOKEN}"
-
-agent:
+runtime:
+  type: codex
   model: gpt-5-codex
   reasoningEffort: high
 
-repositories:
-  - id: example-service-repo
-    url: git@github.com:my-org/example-service.git
-    baseBranch: main
-    isPrimary: true
+repository:
+  url: git@github.com:my-org/my-service.git
+  baseBranch: main
+  auth:
+    type: token
+    token: "{env:GITHUB_TOKEN}"
 ```
 
 ---

@@ -78,77 +78,21 @@ WITH_INLINE_COMMENT=foo # comment here
   });
 });
 
-describe("Committer Inheritance", () => {
-  test("repository committer takes precedence over project committer", () => {
-    const project: ProjectConfig = {
-      id: "test-proj",
-      displayName: "Test",
-      description: "Test",
-      committer: {
-        name: "Project Committer",
-        email: "project@example.com",
-      },
-      routing: { projectId: "test-proj" },
-      repositories: [
-        {
-          id: "repo1",
-          url: "",
-          baseBranch: "main",
-          committer: {
-            name: "Repo Committer",
-            email: "repo@example.com",
-          },
-        },
-      ],
-    };
-
-    const committer = resolveCommitter(project, project.repositories[0]);
-    expect(committer.name).toBe("Repo Committer");
-    expect(committer.email).toBe("repo@example.com");
+describe("Committer", () => {
+  test("uses the repository committer", () => {
+    const committer = resolveCommitter({
+      url: "",
+      baseBranch: "main",
+      committer: { name: "Repo Committer", email: "repo@example.com" },
+    });
+    expect(committer).toEqual({ name: "Repo Committer", email: "repo@example.com" });
   });
 
-  test("falls back to project committer if repository committer is not specified", () => {
-    const project: ProjectConfig = {
-      id: "test-proj",
-      displayName: "Test",
-      description: "Test",
-      committer: {
-        name: "Project Committer",
-        email: "project@example.com",
-      },
-      routing: { projectId: "test-proj" },
-      repositories: [
-        {
-          id: "repo1",
-          url: "",
-          baseBranch: "main",
-        },
-      ],
-    };
-
-    const committer = resolveCommitter(project, project.repositories[0]);
-    expect(committer.name).toBe("Project Committer");
-    expect(committer.email).toBe("project@example.com");
-  });
-
-  test("falls back to default committer if neither repo nor project specifies it", () => {
-    const project: ProjectConfig = {
-      id: "test-proj",
-      displayName: "Test",
-      description: "Test",
-      routing: { projectId: "test-proj" },
-      repositories: [
-        {
-          id: "repo1",
-          url: "",
-          baseBranch: "main",
-        },
-      ],
-    };
-
-    const committer = resolveCommitter(project, project.repositories[0]);
-    expect(committer.name).toBe("Agent Orchestrator");
-    expect(committer.email).toBe("agent-orchestrator@localhost");
+  test("falls back to the default committer", () => {
+    expect(resolveCommitter({ url: "", baseBranch: "main" })).toEqual({
+      name: "Agent Orchestrator",
+      email: "agent-orchestrator@localhost",
+    });
   });
 });
 
@@ -187,23 +131,19 @@ fake-test-key-content
       displayName: "Secure Project",
       description: "Project with secret key",
       routing: { projectId: "sec-proj" },
-      repositories: [
-        {
-          id: "sec-repo",
-          url: "",
-          baseBranch: "main",
+      repository: {
+        url: "",
+        baseBranch: "main",
           auth: {
             type: "ssh-key",
             key: rawKey,
           },
-        },
-      ],
+      },
     };
 
-    const repo = project.repositories[0]!;
-    const keyInfo = await manager.ensureAuthKeyFile(project, repo, repo.auth!);
+    const keyInfo = await manager.ensureAuthKeyFile(project, project.repository!.auth!);
     expect(keyInfo).toBeDefined();
-    expect(keyInfo!.keyPath).toContain("sec-repo.id_key");
+    expect(keyInfo!.keyPath).toContain("sec-proj.id_key");
 
     // Check file content
     const saved = await Bun.file(keyInfo!.keyPath).text();
@@ -224,21 +164,17 @@ fake-test-key-content
       displayName: "Base64 Project",
       description: "Project with base64 key",
       routing: { projectId: "b64-proj" },
-      repositories: [
-        {
-          id: "b64-repo",
-          url: "",
-          baseBranch: "main",
+      repository: {
+        url: "",
+        baseBranch: "main",
           auth: {
             type: "ssh-key",
             key: base64Key,
           },
-        },
-      ],
+      },
     };
 
-    const repo = project.repositories[0]!;
-    const keyInfo = await manager.ensureAuthKeyFile(project, repo, repo.auth!);
+    const keyInfo = await manager.ensureAuthKeyFile(project, project.repository!.auth!);
     expect(keyInfo).toBeDefined();
 
     const saved = await Bun.file(keyInfo!.keyPath).text();
@@ -251,24 +187,17 @@ fake-test-key-content
       displayName: "Missing Env",
       description: "Project with unfulfilled env",
       routing: { projectId: "missing-env-proj" },
-      repositories: [
-        {
-          id: "missing-repo",
-          url: "",
-          baseBranch: "main",
+      repository: {
+        url: "",
+        baseBranch: "main",
           auth: {
             type: "ssh-key",
             key: "{env:UNDEFINED_DEPLOY_KEY}",
           },
-        },
-      ],
+      },
     };
 
-    const result = await manager.ensureAuthKeyFile(
-      project,
-      project.repositories[0]!,
-      project.repositories[0]!.auth!,
-    );
+    const result = await manager.ensureAuthKeyFile(project, project.repository!.auth!);
     expect(result).toBeUndefined();
   });
 
@@ -284,25 +213,24 @@ fake-test-key-content
       `id: custom-proj
 displayName: Custom
 description: Custom project
-committer:
-  name: "{env:PROJECT_AUTHOR}"
-  email: alice@example.com
-auth:
-  type: token
-  token: "{env:PROJECT_TOKEN}"
 routing:
   projectId: custom-proj
-repositories:
-  - id: repo1
-    url: ./repo1
-    baseBranch: main
+repository:
+  url: ./repo1
+  baseBranch: main
+  committer:
+    name: "{env:PROJECT_AUTHOR}"
+    email: alice@example.com
+  auth:
+    type: token
+    token: "{env:PROJECT_TOKEN}"
 `,
     );
 
     const loaded = await loadProjects(projDir);
     expect(loaded.length).toBe(1);
-    expect(loaded[0]!.committer?.name).toBe("Alice");
-    expect(loaded[0]!.auth?.token).toBe("my-secret-token");
+    expect(loaded[0]!.repository?.committer?.name).toBe("Alice");
+    expect(loaded[0]!.repository?.auth?.token).toBe("my-secret-token");
     expect(loaded[0]!.env?.PROJECT_TOKEN).toBe("my-secret-token");
   });
 
@@ -317,10 +245,9 @@ displayName: MCP Project
 description: MCP project test
 routing:
   projectId: mcp-proj
-repositories:
-  - id: repo1
-    url: ./repo1
-    baseBranch: main
+repository:
+  url: ./repo1
+  baseBranch: main
 agent:
   mcpServers:
     - name: github

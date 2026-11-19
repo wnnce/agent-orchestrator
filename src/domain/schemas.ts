@@ -16,11 +16,12 @@ export const repoAuthConfigSchema = z.object({
   tokenEnv: z.string().optional(),
 });
 
-export const repositoryConfigSchema = z.object({
-  id: z.string().min(1),
+/** A project's repository. An empty `url` gives each session a plain directory without git. */
+export const repositoryConfigSchema = z.strictObject({
   url: z.string(),
   baseBranch: z.string().min(1),
-  isPrimary: z.boolean().optional(),
+  /** A local checkout to use as the base repository, relative to the project directory. */
+  path: z.string().min(1).optional(),
   auth: repoAuthConfigSchema.optional(),
   committer: gitIdentitySchema.optional(),
 });
@@ -60,7 +61,6 @@ export const routingDescriptionSchema = z.object({
   projectId: z.string().min(1),
   displayName: z.string().optional(),
   summary: z.string().optional(),
-  repositories: z.array(z.string()).optional().default([]),
   keywords: z.array(z.string()).optional().default([]),
   jiraProjectKeys: z.array(z.string()).optional().default([]),
   routingHints: z.array(z.string()).optional().default([]),
@@ -123,8 +123,7 @@ export const projectConfigSchema = z
     (val) => {
       if (typeof val === "object" && val !== null && !Array.isArray(val)) {
         const obj = { ...(val as Record<string, unknown>) };
-        const parent = (obj.project ?? obj.meta ?? obj.metadata ?? obj.info) as
-          Record<string, unknown> | undefined;
+        const parent = obj.project as Record<string, unknown> | undefined;
         if (parent && typeof parent === "object" && !Array.isArray(parent)) {
           if (obj.id === undefined && parent.id !== undefined)
             obj.id = parent.id;
@@ -156,7 +155,7 @@ export const projectConfigSchema = z
       }
       return val;
     },
-    z.object({
+    z.strictObject({
       id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
       revision: z.number().int().positive().optional(),
       displayName: z.string().min(1),
@@ -188,10 +187,8 @@ export const projectConfigSchema = z
         .passthrough()
         .optional(),
       agent: projectAgentConfigSchema.optional(),
-      committer: gitIdentitySchema.optional(),
-      auth: repoAuthConfigSchema.optional(),
       env: z.record(z.string(), z.string()).optional(),
-      repositories: z.array(repositoryConfigSchema),
+      repository: repositoryConfigSchema.optional(),
       credentials: z.record(z.string(), z.string()).optional(),
       notifications: z.array(notificationConfigSchema).optional(),
       notifyOnTurnCompleted: z.boolean().optional(),
@@ -204,17 +201,6 @@ export const projectConfigSchema = z
         path: ["routing", "projectId"],
         message: "routing.projectId must match id",
       });
-    }
-    const repoIds = new Set<string>();
-    for (const repo of project.repositories) {
-      if (repoIds.has(repo.id)) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["repositories"],
-          message: `duplicate repository id: ${repo.id}`,
-        });
-      }
-      repoIds.add(repo.id);
     }
   })
   .transform(foldAgentIntoRuntime);

@@ -37,14 +37,7 @@ describe("Session Archive & Workspace Release (> 1 hour)", () => {
         summary: "test",
         keywords: ["archive"],
       },
-      repositories: [
-        {
-          id: "main",
-          url: repoDir,
-          baseBranch: "main",
-          isPrimary: true,
-        },
-      ],
+      repository: { url: repoDir, baseBranch: "main" },
       runtime: {
         type: "fake",
         idleTimeoutMs: 1800_000, // 30 mins
@@ -74,12 +67,12 @@ describe("Session Archive & Workspace Release (> 1 hour)", () => {
     eventHub.subscribeAll((e) => emittedEvents.push(e));
 
     // 1. Create session
-    const session = await runtime.createSession("main");
+    const session = await runtime.createSession();
     expect(session.status).toBe("active");
 
     // Verify workspace exists on disk
     const sessionWorkdir = path.join(workspaceRoot, "archive-proj", session.sessionId);
-    expect(await Bun.file(path.join(sessionWorkdir, "main", "README.md")).exists()).toBe(true);
+    expect(await Bun.file(path.join(sessionWorkdir, "README.md")).exists()).toBe(true);
 
     // 2. Perform a turn while active
     const turn1 = await runtime.turn(session.sessionId, "First question");
@@ -99,7 +92,7 @@ describe("Session Archive & Workspace Release (> 1 hour)", () => {
     expect(updated?.status).toBe("archived");
 
     // 6. Verify workspace directory has been removed/cleaned up
-    expect(await Bun.file(path.join(sessionWorkdir, "main", "README.md")).exists()).toBe(false);
+    expect(await Bun.file(path.join(sessionWorkdir, "README.md")).exists()).toBe(false);
 
     // 7. Verify session.archived event was emitted
     const archiveEvent = emittedEvents.find((e) => e.type === ("session.archived" as any));

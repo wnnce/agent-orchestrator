@@ -74,19 +74,14 @@ export function ProjectInfoView() {
             <div className="p-4 space-y-3">
               <div>
                 <span className="text-[11px] uppercase tracking-wider text-[var(--text-muted)] font-mono block">
-                  Git Repositories
+                  Git Repository
                 </span>
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  {activeProject?.repositories && activeProject.repositories.length > 0 ? (
-                    activeProject.repositories.map((repo) => (
-                      <span
-                        key={repo}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-[var(--radius-xs)] font-mono text-xs bg-[var(--bg-surface)] border border-[var(--border-default)] text-[var(--text-primary)]"
-                      >
-                        <GitBranch className="w-3 h-3 text-[var(--text-muted)]" />
-                        {repo}
-                      </span>
-                    ))
+                  {activeProject?.repository ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-[var(--radius-xs)] font-mono text-xs bg-[var(--bg-surface)] border border-[var(--border-default)] text-[var(--text-primary)] break-all">
+                      <GitBranch className="w-3 h-3 text-[var(--text-muted)]" />
+                      {activeProject.repository}
+                    </span>
                   ) : (
                     <span className="text-xs text-[var(--text-muted)]">None configured</span>
                   )}

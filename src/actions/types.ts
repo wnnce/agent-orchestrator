@@ -59,7 +59,6 @@ export interface UpdateTaskStateOptions {
 export interface DispatchTaskParams {
   readonly title: string;
   readonly prompt: string;
-  readonly repositoryId?: string | undefined;
   readonly metadata?: Record<string, unknown> | undefined;
 }
 

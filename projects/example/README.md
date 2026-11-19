@@ -12,7 +12,7 @@ This template provides reference configurations, tasks, skills, environment file
    ```
 2. Edit `projects/my-service/project.yaml`:
    - Set `project.enabled` to `true` (or omit it).
-   - Update `project.id`, `displayName`, `description`, and `repositories`.
+   - Update `project.id`, `displayName`, `description`, and `repository`.
 3. Configure environment variables:
    ```bash
    cp projects/my-service/.env.example projects/my-service/.env

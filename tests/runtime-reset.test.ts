@@ -42,7 +42,7 @@ describe("runtime session binding", () => {
       displayName: "Reset",
       description: "test",
       routing: { projectId: "reset" },
-      repositories: [{ id: "main", url: "", baseBranch: "main" }],
+      repository: { url: "", baseBranch: "main" },
       runtime: { type: "fake" },
     };
     runtime = new ProjectRuntime(

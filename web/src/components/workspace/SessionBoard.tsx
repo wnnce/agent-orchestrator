@@ -3,7 +3,6 @@ import { toast } from "sonner";
 import {
   Plus,
   Search,
-  GitBranch,
   Clock,
   ArrowRight,
   Trash2,
@@ -215,17 +214,6 @@ function SessionCard({
           <span className="truncate max-w-[100px]">{s.projectId}</span>
         </span>
 
-        {/* Repository Badge */}
-        {s.repositoryId && (
-          <span
-            title={`代码库: ${s.repositoryId}`}
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[var(--radius-xs)] font-mono bg-[var(--bg-surface)] border border-[var(--border-default)] text-[var(--text-secondary)]"
-          >
-            <GitBranch className="w-2.5 h-2.5 text-[var(--text-muted)]" />
-            <span className="truncate max-w-[90px]">{s.repositoryId}</span>
-          </span>
-        )}
-
         {/* Channel Origin Badge */}
         {channel === "feishu" && (
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[var(--radius-xs)] font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
@@ -337,7 +325,6 @@ export function SessionBoard() {
         (s.title && s.title.toLowerCase().includes(q)) ||
         s.sessionId.toLowerCase().includes(q) ||
         (s.projectId && s.projectId.toLowerCase().includes(q)) ||
-        (s.repositoryId && s.repositoryId.toLowerCase().includes(q)) ||
         (s.status && s.status.toLowerCase().includes(q)) ||
         (s.externalChannel && s.externalChannel.toLowerCase().includes(q))
     );

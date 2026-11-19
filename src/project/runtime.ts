@@ -116,7 +116,6 @@ export class ProjectRuntime {
     const agentRunner: AgentSessionRunner = {
       createSession: async (task) => {
         const sessionRoute = await this.createSession(
-          undefined,
           {
             title: `Task: ${task.name}`,
             taskKey: task.taskKey,
@@ -215,7 +214,6 @@ export class ProjectRuntime {
       },
       onDispatchTask: async (dispatchParams) => {
         const sessionRoute = await this.createSession(
-          dispatchParams.repositoryId,
           {
             title: dispatchParams.title,
             sourceSessionId: params.sessionId,
@@ -318,30 +316,16 @@ export class ProjectRuntime {
    * session as a scheduled-task session (`"task"`).
    */
   async createSession(
-    repositoryId?: string,
     metadata?: Record<string, unknown>,
     source = "api",
   ): Promise<SessionRoute> {
-    if (
-      this.project.repositories.length === 0 &&
-      this.project.id !== GLOBAL_PROJECT_ID
-    )
+    if (!this.project.repository && this.project.id !== GLOBAL_PROJECT_ID)
       throw new Error(`project ${this.project.id} has no repository`);
     const sessionId = `ses_${randomUUID()}`;
-    const workspaceInfo = await this.workspaces.ensureSessionWorkspaces(
+    const workspacePath = await this.workspaces.ensureSessionWorkspace(
       this.project,
       sessionId,
     );
-    const primaryRepo =
-      (repositoryId
-        ? this.project.repositories.find((r) => r.id === repositoryId)
-        : undefined) ??
-      this.project.repositories.find((r) => r.isPrimary) ??
-      this.project.repositories[0];
-    const workspacePath =
-      (primaryRepo && workspaceInfo.repoPaths.get(primaryRepo.id)) ||
-      workspaceInfo.primaryPath ||
-      workspaceInfo.sessionRoot;
 
     const taskKey =
       typeof metadata?.taskKey === "string" ? metadata.taskKey : undefined;
@@ -355,7 +339,6 @@ export class ProjectRuntime {
         ? { title: metadata.title }
         : {}),
       projectId: this.project.id,
-      ...(primaryRepo?.id ? { repositoryId: primaryRepo.id } : {}),
       projectRuntimeId: `project-runtime:${this.project.id}`,
       runtimeSessionId: runtimeSession.id,
       runtime: runtimeName,
@@ -371,12 +354,10 @@ export class ProjectRuntime {
     await this.emit(route, "session.started", "gateway", {
       runtimeSessionId: runtimeSession.id,
       workspacePath,
-      repositoryId: primaryRepo?.id,
     });
     this.logger.info("session created", {
       projectId: this.project.id,
       sessionId,
-      repositoryId: primaryRepo?.id,
       runtimeSessionId: runtimeSession.id,
     });
     return route;
@@ -871,9 +852,7 @@ export class ProjectRuntime {
    * before that was stored get it computed. Never touches git.
    */
   private workspacePath(route: SessionRoute): string {
-    if (route.workspacePath) return route.workspacePath;
-    const info = this.workspaces.resolveSessionWorkspace(this.project, route.sessionId);
-    return (route.repositoryId && info.repoPaths.get(route.repositoryId)) || info.primaryPath;
+    return route.workspacePath ?? this.workspaces.sessionPath(this.project, route.sessionId);
   }
   /** Recreates the session's worktrees when they are missing, e.g. after the data dir was cleaned. */
   private async ensureWorkspace(route: SessionRoute): Promise<string> {
@@ -882,7 +861,7 @@ export class ProjectRuntime {
         projectId: this.project.id,
         sessionId: route.sessionId,
       });
-      await this.workspaces.ensureSessionWorkspaces(this.project, route.sessionId);
+      await this.workspaces.ensureSessionWorkspace(this.project, route.sessionId);
     }
     return this.workspacePath(route);
   }

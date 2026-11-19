@@ -419,11 +419,10 @@ export class PostgresStore implements Store {
     const metadata = { ...(route.metadata ?? {}), runtime };
     const metadataJson = JSON.stringify(metadata);
     await this.pool.query(
-      "INSERT INTO sessions(session_id, project_id, repository_id, project_runtime_id, runtime_session_id, config_revision, status, source, runtime, external_channel, external_conversation_id, external_thread_id, last_active_at, created_at, updated_at, deleted_at, title, metadata, workspace_path) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,now(),now(),0,$14,$15::jsonb,$16)",
+      "INSERT INTO sessions(session_id, project_id, project_runtime_id, runtime_session_id, config_revision, status, source, runtime, external_channel, external_conversation_id, external_thread_id, last_active_at, created_at, updated_at, deleted_at, title, metadata, workspace_path) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now(),now(),0,$13,$14::jsonb,$15)",
       [
         route.sessionId,
         route.projectId,
-        route.repositoryId ?? null,
         route.projectRuntimeId,
         route.runtimeSessionId,
         route.configRevision,
@@ -473,11 +472,10 @@ export class PostgresStore implements Store {
     };
     const metadataJson = JSON.stringify(metadata);
     await this.pool.query(
-      "UPDATE sessions SET project_id=$2, repository_id=$3, project_runtime_id=$4, runtime_session_id=$5, config_revision=$6, status=$7, last_active_at=$8, metadata=$9::jsonb, source=COALESCE($10, source), runtime=COALESCE($11, runtime), updated_at=now() WHERE session_id=$1 AND deleted_at = 0",
+      "UPDATE sessions SET project_id=$2, project_runtime_id=$3, runtime_session_id=$4, config_revision=$5, status=$6, last_active_at=$7, metadata=$8::jsonb, source=COALESCE($9, source), runtime=COALESCE($10, runtime), updated_at=now() WHERE session_id=$1 AND deleted_at = 0",
       [
         route.sessionId,
         route.projectId,
-        route.repositoryId ?? null,
         route.projectRuntimeId,
         route.runtimeSessionId,
         route.configRevision,
@@ -1111,7 +1109,6 @@ function toSessionRoute(row: Record<string, any>): SessionRoute {
     sessionId: row.session_id,
     ...(row.title ? { title: row.title } : {}),
     projectId: row.project_id,
-    repositoryId: row.repository_id ?? undefined,
     projectRuntimeId: row.project_runtime_id,
     runtimeSessionId: row.runtime_session_id,
     runtime: row.runtime ?? row.metadata?.runtime ?? "unknown",

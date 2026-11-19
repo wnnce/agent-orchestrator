@@ -15,7 +15,6 @@ const project = (runtime: Record<string, unknown> = {}): ProjectConfig => ({
   displayName: "P",
   description: "test",
   routing: { projectId: "p" },
-  repositories: [],
   env: { PROJECT_FLAG: "1" },
   runtime: { type: "claude", ...runtime },
 });

@@ -51,7 +51,7 @@ describe("session titles", () => {
       displayName: "Titles",
       description: "test",
       routing: { projectId: "titles" },
-      repositories: [{ id: "main", url: "", baseBranch: "main" }],
+      repository: { url: "", baseBranch: "main" },
       runtime: { type: "fake" },
     };
     runtime = new ProjectRuntime(

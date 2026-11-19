@@ -20,7 +20,8 @@ export interface ProjectRouting {
   projectId: string;
   displayName?: string;
   summary?: string;
-  repositories?: string[];
+  /** The project's repository URL. */
+  repository?: string;
   keywords?: string[];
   routingHints?: string[];
 }
@@ -29,7 +30,6 @@ export interface SessionRoute {
   sessionId: string;
   title?: string;
   projectId: string;
-  repositoryId?: string;
   projectRuntimeId?: string;
   runtimeSessionId?: string | null;
   configRevision?: number;

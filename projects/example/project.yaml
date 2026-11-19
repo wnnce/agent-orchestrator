@@ -9,18 +9,9 @@ routing:
   projectId: example
   displayName: Example Service
   summary: Example project template for orchestrator tasks, skills, and configurations.
-  repositories: [example-service]
-  keywords: [example, demo, template]
+  keywords: [example, demo, template, example-service]
   routingHints:
     - Example project template for demonstration purposes (disabled by default).
-
-committer:
-  name: orchestrator-bot
-  email: bot@example.com
-
-auth:
-  type: token
-  token: "{env:GITHUB_TOKEN}"
 
 # Agent runtime & model configuration
 runtime:
@@ -33,9 +24,13 @@ runtime:
       http_headers:
         Authorization: "Bearer {env:GITHUB_TOKEN}"
 
-# Multi-Repository Workspace Configuration
-repositories:
-  - id: example-service
-    url: git@github.com:example/example-service.git
-    baseBranch: main
-    isPrimary: true
+# The project's repository; each session works in its own git worktree of it.
+repository:
+  url: git@github.com:example/example-service.git
+  baseBranch: main
+  committer:
+    name: orchestrator-bot
+    email: bot@example.com
+  auth:
+    type: token
+    token: "{env:GITHUB_TOKEN}"

@@ -10,10 +10,6 @@ export const dispatchAgentTaskSchema = z.object({
     .string()
     .min(1, "prompt is required")
     .describe("Initial prompt/instruction for the dispatched Agent session"),
-  repository_id: z
-    .string()
-    .optional()
-    .describe("Optional target repository ID within the project (e.g. 'shortlink')"),
   metadata: z
     .record(z.string(), z.unknown())
     .optional()
@@ -45,7 +41,6 @@ export const dispatchAgentTaskAction: ActionDefinition<
     const result = await context.dispatchTask({
       title: params.title,
       prompt: params.prompt,
-      repositoryId: params.repository_id,
       metadata: params.metadata,
     });
     return {

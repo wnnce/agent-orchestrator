@@ -698,7 +698,7 @@ describe("Task Real-World Scenarios Simulation", () => {
         displayName: "Hybrid Project",
         description: "Integration test for mixed task types",
         routing: { projectId: "hybrid-proj" },
-        repositories: [{ id: "main", url: "", baseBranch: "main", isPrimary: true }],
+        repository: { url: "", baseBranch: "main" },
         projectDir: tmpDir,
       };
 
@@ -832,7 +832,7 @@ Analyze system status.
         displayName: "Custom Executor Project",
         description: "Tests project-level custom executor auto-discovery",
         routing: { projectId: "custom-exec-proj" },
-        repositories: [{ id: "main", url: "", baseBranch: "main", isPrimary: true }],
+        repository: { url: "", baseBranch: "main" },
         projectDir: tmpDir,
       };
 

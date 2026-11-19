@@ -53,10 +53,9 @@ describe("resolveGitAuthEnv", () => {
   });
 });
 
-describe("WorkspaceManager multi-repo and worktree isolation", () => {
+describe("WorkspaceManager worktree isolation", () => {
   let tempDir: string;
-  let repo1Dir: string;
-  let repo2Dir: string;
+  let remoteDir: string;
   let sessionRootDir: string;
   let baseRootDir: string;
   let manager: WorkspaceManager;
@@ -75,53 +74,32 @@ describe("WorkspaceManager multi-repo and worktree isolation", () => {
     return stdout.trim();
   }
 
+  async function commit(file: string, content: string): Promise<void> {
+    await writeFile(path.join(remoteDir, file), content);
+    await git(["add", file], remoteDir);
+    await git(["commit", "-m", `add ${file}`], remoteDir);
+  }
+
   beforeEach(async () => {
     tempDir = path.join("/tmp", `workspace-test-${crypto.randomUUID()}`);
-    repo1Dir = path.join(tempDir, "remote-backend");
-    repo2Dir = path.join(tempDir, "remote-proto");
-    sessionRootDir = path.join(tempDir, "projects");
+    remoteDir = path.join(tempDir, "remote");
+    sessionRootDir = path.join(tempDir, "sessions");
     baseRootDir = path.join(tempDir, "bases");
 
-    await mkdir(repo1Dir, { recursive: true });
-    await mkdir(repo2Dir, { recursive: true });
-
-    // Initialize remote-backend
-    await git(["init", "-b", "main"], repo1Dir);
-    await git(["config", "user.name", "Tester"], repo1Dir);
-    await git(["config", "user.email", "test@example.com"], repo1Dir);
-    await writeFile(path.join(repo1Dir, "backend.txt"), "hello backend");
-    await git(["add", "backend.txt"], repo1Dir);
-    await git(["commit", "-m", "initial backend commit"], repo1Dir);
-
-    // Initialize remote-proto
-    await git(["init", "-b", "master"], repo2Dir);
-    await git(["config", "user.name", "Tester"], repo2Dir);
-    await git(["config", "user.email", "test@example.com"], repo2Dir);
-    await writeFile(path.join(repo2Dir, "schema.proto"), "syntax = proto3;");
-    await git(["add", "schema.proto"], repo2Dir);
-    await git(["commit", "-m", "initial proto commit"], repo2Dir);
+    await mkdir(remoteDir, { recursive: true });
+    await git(["init", "-b", "main"], remoteDir);
+    await git(["config", "user.name", "Tester"], remoteDir);
+    await git(["config", "user.email", "test@example.com"], remoteDir);
+    await commit("backend.txt", "hello backend");
 
     manager = new WorkspaceManager(sessionRootDir, baseRootDir);
-
     testProject = {
-      id: "multi-project",
-      displayName: "Multi Project",
-      description: "Testing multi-repo worktrees",
-      routing: { projectId: "multi-project" },
-      repositories: [
-        {
-          id: "service",
-          url: repo1Dir,
-          baseBranch: "main",
-          isPrimary: true,
-        },
-        {
-          id: "proto",
-          url: repo2Dir,
-          baseBranch: "master",
-          isPrimary: false,
-        },
-      ],
+      id: "service",
+      displayName: "Service",
+      description: "Testing worktrees",
+      projectDir: path.join(tempDir, "project"),
+      routing: { projectId: "service" },
+      repository: { url: remoteDir, baseBranch: "main" },
     };
   });
 
@@ -129,82 +107,64 @@ describe("WorkspaceManager multi-repo and worktree isolation", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  test("syncAllBases clones and pre-warms all base repositories", async () => {
-    await manager.syncAllBases(testProject);
-
-    const baseServicePath = manager.getBasePath(testProject, testProject.repositories[0]!);
-    const baseProtoPath = manager.getBasePath(testProject, testProject.repositories[1]!);
-
-    expect(existsSync(path.join(baseServicePath, ".git"))).toBe(true);
-    expect(existsSync(path.join(baseProtoPath, ".git"))).toBe(true);
+  test("syncBase clones the base repository", async () => {
+    await manager.syncBase(testProject);
+    const basePath = manager.getBasePath(testProject, testProject.repository!);
+    expect(basePath).toBe(path.join(baseRootDir, "service"));
+    expect(existsSync(path.join(basePath, ".git"))).toBe(true);
   });
 
-  test("ensureSessionWorkspaces creates independent git worktrees for each repository", async () => {
+  test("a session works in its own worktree on its own branch", async () => {
     const sessionId = "ses-12345";
-    const info = await manager.ensureSessionWorkspaces(testProject, sessionId);
+    const workspace = await manager.ensureSessionWorkspace(testProject, sessionId);
 
-    expect(info.repoPaths.size).toBe(2);
-    const servicePath = info.repoPaths.get("service")!;
-    const protoPath = info.repoPaths.get("proto")!;
-    expect(info.primaryPath).toBe(servicePath);
-
-    // Verify current branches in session worktrees
-    const serviceBranch = await git(["branch", "--show-current"], servicePath);
-    const protoBranch = await git(["branch", "--show-current"], protoPath);
-
-    expect(serviceBranch).toBe(`agent/${sessionId}`);
-    expect(protoBranch).toBe(`agent/${sessionId}`);
-
-    // Verify files exist in session worktrees
-    const file1 = await Bun.file(path.join(servicePath, "backend.txt")).text();
-    const file2 = await Bun.file(path.join(protoPath, "schema.proto")).text();
-    expect(file1).toBe("hello backend");
-    expect(file2).toBe("syntax = proto3;");
+    expect(workspace).toBe(path.join(sessionRootDir, "service", sessionId));
+    expect(manager.sessionPath(testProject, sessionId)).toBe(workspace);
+    expect(manager.isSessionReady(testProject, sessionId)).toBe(true);
+    expect(await git(["branch", "--show-current"], workspace)).toBe(`agent/${sessionId}`);
+    expect(await Bun.file(path.join(workspace, "backend.txt")).text()).toBe("hello backend");
   });
 
   test("concurrent sessions are completely isolated from each other and base", async () => {
-    const sessionA = "ses-aaa";
-    const sessionB = "ses-bbb";
+    const pathA = await manager.ensureSessionWorkspace(testProject, "ses-aaa");
+    const pathB = await manager.ensureSessionWorkspace(testProject, "ses-bbb");
 
-    const infoA = await manager.ensureSessionWorkspaces(testProject, sessionA);
-    const infoB = await manager.ensureSessionWorkspaces(testProject, sessionB);
-
-    const pathA = infoA.repoPaths.get("service")!;
-    const pathB = infoB.repoPaths.get("service")!;
-
-    // Make and commit a change in session A
     await writeFile(path.join(pathA, "feature-a.txt"), "feature A in session A");
     await git(["add", "feature-a.txt"], pathA);
     await git(["commit", "-m", "add feature A"], pathA);
 
-    // Verify session B and base do NOT see feature-a.txt
     expect(await Bun.file(path.join(pathA, "feature-a.txt")).exists()).toBe(true);
     expect(await Bun.file(path.join(pathB, "feature-a.txt")).exists()).toBe(false);
-
-    const basePath = manager.getBasePath(testProject, testProject.repositories[0]!);
+    const basePath = manager.getBasePath(testProject, testProject.repository!);
     expect(await Bun.file(path.join(basePath, "feature-a.txt")).exists()).toBe(false);
   });
 
-  test("removeSession removes worktrees and session root directory", async () => {
+  test("removeSession removes the worktree and the session directory", async () => {
     const sessionId = "ses-cleanup";
-    const info = await manager.ensureSessionWorkspaces(testProject, sessionId);
-    const servicePath = info.repoPaths.get("service")!;
-
-    expect(existsSync(servicePath)).toBe(true);
+    const workspace = await manager.ensureSessionWorkspace(testProject, sessionId);
+    expect(existsSync(workspace)).toBe(true);
 
     await manager.removeSession(testProject, sessionId);
 
-    // Session directory should be completely gone
-    expect(existsSync(info.sessionRoot)).toBe(false);
+    expect(existsSync(workspace)).toBe(false);
+    const basePath = manager.getBasePath(testProject, testProject.repository!);
+    expect(await git(["worktree", "list"], basePath)).not.toContain(sessionId);
+  });
 
-    // Base worktree list should no longer include the session worktree
-    const basePath = manager.getBasePath(testProject, testProject.repositories[0]!);
-    const worktrees = await git(["worktree", "list"], basePath);
-    expect(worktrees).not.toContain(sessionId);
+  test("a local checkout named by repository.path is used as the base", async () => {
+    const checkout = path.join(testProject.projectDir!, "repo");
+    await mkdir(testProject.projectDir!, { recursive: true });
+    await git(["clone", "-q", remoteDir, checkout], tempDir);
+    const project = { ...testProject, repository: { ...testProject.repository!, path: "repo" } };
+
+    expect(manager.getBasePath(project, project.repository)).toBe(checkout);
+    const workspace = await manager.ensureSessionWorkspace(project, "ses-local");
+    expect(await git(["worktree", "list"], checkout)).toContain(workspace);
+    expect(existsSync(path.join(baseRootDir, "service"))).toBe(false);
   });
 
   test("single-flight coalesces concurrent ensureBase requests", async () => {
-    const repo = testProject.repositories[0]!;
+    const repo = testProject.repository!;
     const [path1, path2, path3] = await Promise.all([
       manager.ensureBase(testProject, repo),
       manager.ensureBase(testProject, repo),
@@ -215,43 +175,26 @@ describe("WorkspaceManager multi-repo and worktree isolation", () => {
     expect(existsSync(path.join(path1, ".git"))).toBe(true);
   });
 
-  test("automatically pulls latest code when new workspace is created", async () => {
-    // 1. Initial session
-    const info1 = await manager.ensureSessionWorkspaces(testProject, "ses-1");
-    const service1 = info1.repoPaths.get("service")!;
-    expect(existsSync(path.join(service1, "new-feature.txt"))).toBe(false);
+  test("a new session starts from the latest upstream commit", async () => {
+    const first = await manager.ensureSessionWorkspace(testProject, "ses-1");
+    expect(existsSync(path.join(first, "new-feature.txt"))).toBe(false);
 
-    // 2. Upstream origin commits a new file
-    await writeFile(path.join(repo1Dir, "new-feature.txt"), "latest upstream code");
-    await git(["add", "new-feature.txt"], repo1Dir);
-    await git(["commit", "-m", "add new feature upstream"], repo1Dir);
+    await commit("new-feature.txt", "latest upstream code");
 
-    // 3. New session should automatically pull and branch from latest upstream commit
-    const info2 = await manager.ensureSessionWorkspaces(testProject, "ses-2");
-    const service2 = info2.repoPaths.get("service")!;
-    expect(existsSync(path.join(service2, "new-feature.txt"))).toBe(true);
-    expect(await Bun.file(path.join(service2, "new-feature.txt")).text()).toBe(
+    const second = await manager.ensureSessionWorkspace(testProject, "ses-2");
+    expect(await Bun.file(path.join(second, "new-feature.txt")).text()).toBe(
       "latest upstream code",
     );
   });
 
-  test("multiple sessions created concurrently wait on single-flight pull without lock contention", async () => {
-    // Commit changes upstream before concurrent creation
-    await writeFile(path.join(repo1Dir, "concurrent.txt"), "concurrent test content");
-    await git(["add", "concurrent.txt"], repo1Dir);
-    await git(["commit", "-m", "commit for concurrent test"], repo1Dir);
-
-    // Create 5 sessions concurrently
+  test("sessions created concurrently all get a worktree of the latest commit", async () => {
+    await commit("concurrent.txt", "concurrent test content");
     const sessionIds = ["ses-c1", "ses-c2", "ses-c3", "ses-c4", "ses-c5"];
-    const results = await Promise.all(
-      sessionIds.map((id) => manager.ensureSessionWorkspaces(testProject, id)),
+    const workspaces = await Promise.all(
+      sessionIds.map((id) => manager.ensureSessionWorkspace(testProject, id)),
     );
-
-    expect(results.length).toBe(5);
-    for (let i = 0; i < 5; i++) {
-      const p = results[i]!.repoPaths.get("service")!;
-      expect(existsSync(p)).toBe(true);
-      expect(existsSync(path.join(p, "concurrent.txt"))).toBe(true);
+    for (const workspace of workspaces) {
+      expect(existsSync(path.join(workspace, "concurrent.txt"))).toBe(true);
     }
   });
 });

@@ -75,7 +75,7 @@ describe("session execution and control", () => {
       displayName: "Execution",
       description: "test",
       routing: { projectId: "execution" },
-      repositories: [{ id: "main", url: "", baseBranch: "main" }],
+      repository: { url: "", baseBranch: "main" },
       runtime: { type: "fake", idleTimeoutMs: 1000, archiveTimeoutMs: 2000 },
     };
     runtime = new ProjectRuntime(
@@ -210,7 +210,7 @@ describe("session execution and control", () => {
     expect(listed.map((s) => s.sessionId)).toContain(dispatched.sessionId);
   });
   test("start cleans up task sessions abandoned by a previous run", async () => {
-    const task = await runtime.createSession(undefined, { taskKey: "execution:nightly" }, "task");
+    const task = await runtime.createSession({ taskKey: "execution:nightly" }, "task");
     await runtime.sessionManager.remove(task.sessionId);
     await runtime.start();
     expect((await store.getSession(task.sessionId))?.status).toBe("closed");

@@ -52,43 +52,38 @@ export class SessionStickyHandler implements RoutingHandler {
  * Tier 2: Keyword & Repository Match Handler
  * Matches project identifiers, keywords, and repository names directly in memory.
  */
+/**
+ * Scores each project by how many of its identifiers and keywords appear in the query, best
+ * first. Terms are the project id, display name and keywords, plus every word of those and of
+ * the description.
+ */
+export function scoreProjectKeywords(
+  query: string,
+  projects: readonly ProjectConfig[],
+): Array<{ project: ProjectConfig; score: number }> {
+  const text = query.toLowerCase();
+  return projects
+    .map((project) => {
+      const phrases = [project.id, project.displayName, ...(project.routing.keywords ?? [])];
+      const words = [...phrases, project.description]
+        .join(" ")
+        .toLowerCase()
+        .split(/[\s,.;:!?\/\\|()\[\]{}"'`~@#$%^&*+=<>，。！？（）【】「」《》、]+/);
+      const terms = new Set(
+        [...phrases.map((p) => p.toLowerCase().trim()), ...words].filter(Boolean),
+      );
+      let score = 0;
+      for (const term of terms) if (text.includes(term)) score++;
+      return { project, score };
+    })
+    .sort((a, b) => b.score - a.score);
+}
+
 export class KeywordMatchHandler implements RoutingHandler {
   readonly name = "keyword-match";
 
   async handle(context: RoutingContext): Promise<RoutingResult | null> {
-    const text = context.query.toLowerCase();
-    const scores = context.projects
-      .map((project) => {
-        const rawKeywords = [
-          project.id,
-          project.displayName,
-          ...(project.routing.keywords ?? []),
-          ...(project.routing.repositories ?? []),
-        ]
-          .map((k) => k.toLowerCase().trim())
-          .filter(Boolean);
-
-        const tokens = [
-          project.id,
-          project.displayName,
-          project.description,
-          ...(project.routing.keywords ?? []),
-          ...(project.routing.repositories ?? []),
-        ]
-          .join(" ")
-          .toLowerCase()
-          .split(/[\s,.;:!?\/\\|()\[\]{}"'`~@#$%^&*+=<>，。！？（）【】「」《》、]+/)
-          .filter(Boolean);
-
-        const allTerms = Array.from(new Set([...rawKeywords, ...tokens]));
-
-        return {
-          project,
-          score: allTerms.reduce((score, term) => score + (text.includes(term) ? 1 : 0), 0),
-        };
-      })
-      .sort((a, b) => b.score - a.score);
-
+    const scores = scoreProjectKeywords(context.query, context.projects);
     const top = scores[0];
     if (!top || top.score === 0) return null;
 

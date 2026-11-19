@@ -12,13 +12,11 @@ const baseProject = {
     projectId: "project-a",
     displayName: "Project A",
     summary: "A project",
-    repositories: ["org/repo"],
     keywords: ["project-a"],
     routingHints: [],
   },
   runtime: { type: "codex", sandbox: "workspace-write" },
-  repositories: [{ id: "main", url: "https://github.com/org/repo.git", baseBranch: "main" }],
-  prompts: { default: "You are the agent." },
+  repository: { url: "https://github.com/org/repo.git", baseBranch: "main" },
 };
 
 test("project schema rejects routing identity mismatches", () => {
@@ -28,18 +26,6 @@ test("project schema rejects routing identity mismatches", () => {
       routing: { ...baseProject.routing, projectId: "other-project" },
     }),
   ).toThrow("routing.projectId must match id");
-});
-
-test("project schema rejects duplicate repository ids", () => {
-  expect(() =>
-    projectConfigSchema.parse({
-      ...baseProject,
-      repositories: [
-        { id: "repo-1", url: "https://github.com/org/repo-1.git", baseBranch: "main" },
-        { id: "repo-1", url: "https://github.com/org/repo-2.git", baseBranch: "main" },
-      ],
-    }),
-  ).toThrow("duplicate repository id: repo-1");
 });
 
 test("project schema rejects invalid MCP server definitions", () => {
@@ -63,7 +49,7 @@ test("project schema rejects invalid MCP server definitions", () => {
   ).toThrow("MCP server needs url or command");
 });
 
-test("project schema accepts multi-repo configuration with auth", () => {
+test("project schema accepts a repository with auth and committer", () => {
   const parsed = projectConfigSchema.parse({
     ...baseProject,
     agent: {
@@ -73,28 +59,35 @@ test("project schema accepts multi-repo configuration with auth", () => {
         { name: "db", command: "mcp-server-postgres", args: ["--url", "pg://localhost"] },
       ],
     },
-    repositories: [
-      {
-        id: "backend",
-        url: "git@github.com:org/backend.git",
-        baseBranch: "main",
-        isPrimary: true,
-        auth: { type: "ssh-key", keyPath: "/keys/id_ed25519" },
-      },
-      {
-        id: "frontend",
-        url: "https://github.com/org/frontend.git",
-        baseBranch: "main",
-        auth: { type: "token", tokenEnv: "GITHUB_TOKEN" },
-      },
-    ],
-    promptsDir: "./prompts/project-a",
+    repository: {
+      url: "git@github.com:org/backend.git",
+      baseBranch: "main",
+      path: "repos/backend",
+      auth: { type: "ssh-key", keyPath: "/keys/id_ed25519" },
+      committer: { name: "bot", email: "bot@example.com" },
+    },
   });
-  expect(parsed.repositories).toHaveLength(2);
-  expect(parsed.repositories[0]?.isPrimary).toBe(true);
-  expect(parsed.repositories[0]?.auth?.type).toBe("ssh-key");
-  expect(parsed.repositories[1]?.auth?.tokenEnv).toBe("GITHUB_TOKEN");
+  expect(parsed.repository?.path).toBe("repos/backend");
+  expect(parsed.repository?.auth?.type).toBe("ssh-key");
+  expect(parsed.repository?.committer?.name).toBe("bot");
   expect(parsed.runtime?.model).toBe("gpt-5-codex");
+});
+
+test("project schema rejects fields from before single-repository projects", () => {
+  for (const removed of [
+    { repositories: [{ id: "main", url: "", baseBranch: "main" }] },
+    { committer: { name: "bot" } },
+    { auth: { type: "token", token: "t" } },
+    { prompts: { system: "system.md" } },
+  ]) {
+    expect(() => projectConfigSchema.parse({ ...baseProject, ...removed })).toThrow();
+  }
+  expect(() =>
+    projectConfigSchema.parse({
+      ...baseProject,
+      repository: { ...baseProject.repository, id: "main", isPrimary: true },
+    }),
+  ).toThrow();
 });
 
 test("loadProjects successfully loads from projects directory and ignores disabled projects", async () => {
@@ -120,11 +113,9 @@ project:
   displayName: Custom Meta
   description: Testing nested meta
   tags: [test, meta]
-repositories:
-  - id: repo1
-    url: https://github.com/test/repo1.git
-    baseBranch: main
-    isPrimary: true
+repository:
+  url: https://github.com/test/repo1.git
+  baseBranch: main
 `;
   const parsed = projectConfigSchema.parse(
     YAML.parse(yamlWithProjectMeta),
@@ -142,10 +133,7 @@ test("project schema successfully loads projects.example.yaml", async () => {
   expect(projects).toHaveLength(1);
   const p = projects[0]!;
   expect(p.id).toBe("example-project");
-  expect(p.repositories).toHaveLength(2);
-  expect(p.repositories[0]?.id).toBe("service");
-  expect(p.repositories[0]?.isPrimary).toBe(true);
-  expect(p.repositories[1]?.id).toBe("proto");
+  expect(p.repository?.url).toBe("git@github.com:my-org/backend-service.git");
   expect(p.runtime?.model).toBe("gpt-5-codex");
 });
 

@@ -49,7 +49,7 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
         projectId: "proj_delay",
         displayName: "Delayed Trigger Project",
       },
-      repositories: [{ id: "main", url: localRepo, isPrimary: true, baseBranch: "main" }],
+      repository: { url: localRepo, baseBranch: "main" },
     };
   });
 

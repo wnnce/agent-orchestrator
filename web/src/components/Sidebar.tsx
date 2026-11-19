@@ -81,11 +81,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         p.summary?.toLowerCase().includes(term);
 
       const projectSessions = groupedSessions.get(p.projectId) || [];
-      const matchSession = projectSessions.some(
-        (s) =>
-          s.sessionId.toLowerCase().includes(term) ||
-          s.repositoryId?.toLowerCase().includes(term),
-      );
+      const matchSession = projectSessions.some((s) => s.sessionId.toLowerCase().includes(term));
 
       return matchProject || matchSession;
     });
@@ -308,11 +304,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                     minute: "2-digit",
                                   })}
                                 </span>
-                                {s.repositoryId && (
-                                  <span className="ml-auto text-[var(--text-secondary)] font-mono text-[9px] truncate max-w-[80px]">
-                                    [{s.repositoryId}]
-                                  </span>
-                                )}
                               </div>
                             </div>
 

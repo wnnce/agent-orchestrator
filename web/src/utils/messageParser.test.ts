@@ -246,7 +246,7 @@ test("session lifecycle events (session.started, etc.) do NOT create fake assist
     {
       sequence: 1,
       type: "session.started",
-      payload: { repositoryId: "main" },
+      payload: { workspacePath: "/work" },
     },
     {
       sequence: 2,

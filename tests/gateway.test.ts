@@ -14,20 +14,12 @@ const sampleProject: ProjectConfig = {
     projectId: "test-proj",
     displayName: "Test Project",
     summary: "Test Summary",
-    repositories: ["sample/repo"],
     keywords: ["test", "sample"],
   },
   runtime: {
     type: "fake",
   },
-  repositories: [
-    {
-      id: "main",
-      url: "",
-      baseBranch: "main",
-      isPrimary: true,
-    },
-  ],
+  repository: { url: "", baseBranch: "main" },
 };
 
 function createTestGateway(customConfig?: Partial<AppConfig>) {
@@ -180,12 +172,10 @@ describe("Gateway with Hono", () => {
       // Check GET /sessions hides scheduled-task sessions but lists dispatched ones
       const projectRuntime = projectManager.get("test-proj");
       const taskSession = await projectRuntime.createSession(
-        undefined,
         { taskKey: "test-proj:cron-test" },
         "task",
       );
       const dispatchedSession = await projectRuntime.createSession(
-        undefined,
         { sourceSessionId: sessionId, dispatch: { taskKey: "spoofed" } },
         "dispatch",
       );

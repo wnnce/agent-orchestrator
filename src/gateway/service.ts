@@ -23,7 +23,6 @@ export interface CreateSessionInput {
   title?: string;
   query?: string;
   submitQuery?: boolean;
-  repositoryId?: string;
   source?: string;
   external?: {
     channel: string;
@@ -116,7 +115,6 @@ export class GatewayService {
         );
     const source = input.source ?? input.external?.channel ?? "web";
     let route = await project.createSession(
-      input.repositoryId,
       explicitTitle ? { title: explicitTitle } : undefined,
       source,
     );

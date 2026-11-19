@@ -18,14 +18,7 @@ function makeProject(id: string, projectDir: string): ProjectConfig {
     description: `Test project ${id}`,
     projectDir,
     routing: { projectId: id, keywords: [id] },
-    repositories: [
-      {
-        id: "main",
-        url: `file://${projectDir}/repo`,
-        isPrimary: true,
-        baseBranch: "main",
-      },
-    ],
+    repository: { url: `file://${projectDir}/repo`, baseBranch: "main" },
   };
 }
 

@@ -89,11 +89,11 @@ flowchart TD
 
 ## Key Features
 
-### 1. Multi-Project & Multi-Repo Workspaces
+### 1. Multi-Project Workspaces
 
-- Each managed project defines its repositories, git committers, credentials, and custom prompts under `projects/<project-id>/project.yaml`.
-- Base repositories are automatically cloned and synchronized via single-flight locking, preventing concurrent fetch collisions.
-- Every session generates a dedicated Git worktree (`ensureSessionWorkspaces`) and prunes on teardown.
+- Each managed project defines its repository, git committer and credentials under `projects/<project-id>/project.yaml`.
+- The base repository is automatically cloned and synchronized via single-flight locking, preventing concurrent fetch collisions.
+- Every session gets a dedicated Git worktree (`ensureSessionWorkspace`) that is pruned on teardown.
 
 ### 2. Standardized Agent Runtime & Canonical Protocol
 
@@ -243,19 +243,17 @@ routing:
   summary: Golang microservice for order processing.
   keywords: [order, payment, checkout]
 
-auth:
-  type: token
-  token: "{env:GITHUB_TOKEN}"
-
-agent:
+runtime:
+  type: codex
   model: gpt-5-codex
   reasoningEffort: high
 
-repositories:
-  - id: my-service-repo
-    url: git@github.com:my-org/my-service.git
-    baseBranch: main
-    isPrimary: true
+repository:
+  url: git@github.com:my-org/my-service.git
+  baseBranch: main
+  auth:
+    type: token
+    token: "{env:GITHUB_TOKEN}"
 ```
 
 ---

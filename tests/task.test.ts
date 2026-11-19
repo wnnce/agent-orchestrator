@@ -466,7 +466,6 @@ describe("ProjectRuntime Task Integration", () => {
       displayName: "Demo",
       description: "Demo project",
       routing: { projectId: "demo" },
-      repositories: [],
     };
     const runtime = new ProjectRuntime(
       project,
@@ -511,7 +510,7 @@ Full state:
       displayName: "Test Project",
       description: "Integration test",
       routing: { projectId: "test-proj" },
-      repositories: [{ id: "main", url: "", baseBranch: "main" }],
+      repository: { url: "", baseBranch: "main" },
       projectDir: tmpDir,
     };
 
@@ -606,7 +605,7 @@ Sync daily updates.
       displayName: "Gateway Project",
       description: "Gateway test",
       routing: { projectId: "gw-proj" },
-      repositories: [{ id: "main", url: "", baseBranch: "main" }],
+      repository: { url: "", baseBranch: "main" },
       projectDir: tmpDir,
       runtime: { type: "fake" },
     };

@@ -35,16 +35,8 @@ const mockProjects: ProjectConfig[] = [
       displayName: "短链服务",
       summary: "短链生成与重定向服务",
       keywords: ["短链", "url", "redirect", "shortlink"],
-      repositories: ["shortlink-web", "shortlink-api"],
     },
-    repositories: [
-      {
-        id: "shortlink-api",
-        url: "https://github.com/example/shortlink-api.git",
-        baseBranch: "main",
-        isPrimary: true,
-      },
-    ],
+    repository: { url: "https://github.com/example/shortlink-api.git", baseBranch: "main" },
   },
   {
     id: "payment",
@@ -56,16 +48,8 @@ const mockProjects: ProjectConfig[] = [
       displayName: "聚合支付中台",
       summary: "支付通道与对账中心",
       keywords: ["支付", "pay", "wechat", "alipay"],
-      repositories: ["payment-core"],
     },
-    repositories: [
-      {
-        id: "payment-core",
-        url: "https://github.com/example/payment-core.git",
-        baseBranch: "master",
-        isPrimary: true,
-      },
-    ],
+    repository: { url: "https://github.com/example/payment-core.git", baseBranch: "master" },
   },
 ];
 
@@ -172,7 +156,6 @@ describe("3-Tier Decision Chain Router & Global Fallback", () => {
           description: "Service A",
           projectDir: "/tmp/a",
           routing: { projectId: "service-a", summary: "A", keywords: ["common", "service"] },
-          repositories: [],
         },
         {
           id: "service-b",
@@ -180,7 +163,6 @@ describe("3-Tier Decision Chain Router & Global Fallback", () => {
           description: "Service B",
           projectDir: "/tmp/b",
           routing: { projectId: "service-b", summary: "B", keywords: ["common", "service"] },
-          repositories: [],
         },
       ];
 
@@ -431,11 +413,8 @@ describe("3-Tier Decision Chain Router & Global Fallback", () => {
         path.join(testDir, "bases"),
       );
 
-      const info = await workspaces.ensureSessionWorkspaces(globalProject, "ses_global_test");
-
-      expect(info.sessionRoot).toBe(globalProjectsDir);
-      expect(info.primaryPath).toBe(globalProjectsDir);
-      expect(info.repoPaths.size).toBe(0); // No git worktree
+      const workspace = await workspaces.ensureSessionWorkspace(globalProject, "ses_global_test");
+      expect(workspace).toBe(globalProjectsDir);
 
       // Check AGENTS.md was created in global workspace
       const agentsMdPath = path.join(globalProjectsDir, "AGENTS.md");

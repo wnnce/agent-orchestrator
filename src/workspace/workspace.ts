@@ -1,6 +1,6 @@
 import path from "node:path";
 import { mkdir, rm, chmod } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import type { ProjectConfig, RepositoryConfig, RepoAuthConfig } from "../domain/types.ts";
 import { GLOBAL_PROJECT_ID, DEFAULT_GLOBAL_PROMPT } from "../project/global.ts";
 import { Logger } from "../observability/logger.ts";
@@ -24,19 +24,12 @@ function sshCommand(keyPath: string): string {
   return `ssh -i "${keyPath}" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new`;
 }
 
-export function resolveCommitter(
-  project: ProjectConfig,
-  repo?: RepositoryConfig,
-): { name: string; email: string } {
+export function resolveCommitter(repo?: RepositoryConfig): { name: string; email: string } {
   const name =
-    repo?.committer?.name?.trim() ||
-    project.committer?.name?.trim() ||
-    process.env.GIT_AUTHOR_NAME?.trim() ||
-    "Agent Orchestrator";
+    repo?.committer?.name?.trim() || process.env.GIT_AUTHOR_NAME?.trim() || "Agent Orchestrator";
 
   const email =
     repo?.committer?.email?.trim() ||
-    project.committer?.email?.trim() ||
     process.env.GIT_AUTHOR_EMAIL?.trim() ||
     "agent-orchestrator@localhost";
 
@@ -101,18 +94,16 @@ async function refExists(repoPath: string, ref: string): Promise<boolean> {
   );
 }
 
-export interface SessionWorkspaceInfo {
-  sessionRoot: string;
-  repoPaths: Map<string, string>;
-  primaryPath: string;
-}
-
 /**
- * Manages base repositories and per-session git worktrees.
+ * Manages each project's base repository and the per-session git worktrees made from it.
  *
- * Path lookups (`resolveSessionWorkspace`, `isSessionReady`) never touch git. Only
- * `syncAllBases` (service start) and `ensureSessionWorkspaces` (session creation, or a missing
- * worktree) fetch base repositories and run the project's `scripts/sync.sh`.
+ * A project has at most one repository. A session works in its own worktree of it, on branch
+ * `agent/<sessionId>`; the global project and projects without a repository share one directory.
+ * A repository with an empty `url` gives each session a plain directory without git.
+ *
+ * Path lookups (`sessionPath`, `isSessionReady`) never run git. Only `syncBase` (service start)
+ * and `ensureSessionWorkspace` (session creation, or a missing worktree) fetch the base
+ * repository and run the project's `scripts/sync.sh`.
  */
 export class WorkspaceManager {
   private readonly sessionRoot: string;
@@ -155,7 +146,6 @@ export class WorkspaceManager {
 
   async ensureAuthKeyFile(
     project: ProjectConfig,
-    repo: RepositoryConfig,
     auth: RepoAuthConfig,
   ): Promise<{ keyPath: string; sshCommand: string } | undefined> {
     if (auth.type !== "ssh-key") return undefined;
@@ -189,9 +179,8 @@ export class WorkspaceManager {
     }
     if (!keyContent.endsWith("\n")) keyContent += "\n";
 
-    const projectSecretsDir = path.join(this.secretsRoot, safe(project.id));
-    await mkdir(projectSecretsDir, { recursive: true, mode: 0o700 });
-    const keyFilePath = path.join(projectSecretsDir, `${safe(repo.id)}.id_key`);
+    await mkdir(this.secretsRoot, { recursive: true, mode: 0o700 });
+    const keyFilePath = path.join(this.secretsRoot, `${safe(project.id)}.id_key`);
     await Bun.write(keyFilePath, keyContent);
     await chmod(keyFilePath, 0o600);
 
@@ -233,64 +222,34 @@ export class WorkspaceManager {
     }
   }
 
+  /**
+   * The base repository that session worktrees are made from: the repository's `path` (relative
+   * to the project directory) when set, else `<data>/bases/<projectId>`.
+   */
   getBasePath(project: ProjectConfig, repository: RepositoryConfig): string {
-    if (project.projectDir) {
-      const localRepoInProject = path.resolve(project.projectDir, "repos", repository.id);
-      if (existsSync(path.join(localRepoInProject, ".git"))) {
-        return localRepoInProject;
-      }
-      if (repository.url && !isRemoteUrl(repository.url)) {
-        const directLocal = path.resolve(project.projectDir, repository.url);
-        if (existsSync(path.join(directLocal, ".git"))) {
-          return directLocal;
-        }
-      }
+    if (repository.path) {
+      return path.resolve(project.projectDir ?? process.cwd(), repository.path);
     }
-    return path.join(this.baseRoot, safe(project.id), safe(repository.id));
+    return path.join(this.baseRoot, safe(project.id));
   }
 
-  getSessionRoot(project: ProjectConfig, sessionId: string): string {
-    return path.join(this.sessionRoot, safe(project.id), safe(sessionId));
+  /** The session's working directory. Never runs git. */
+  sessionPath(project: ProjectConfig, sessionId: string): string {
+    if (usesSharedWorkspace(project)) return sharedWorkspacePath(project);
+    const root = path.join(this.sessionRoot, safe(project.id), safe(sessionId));
+    if (existsSync(path.join(root, ".git"))) return root;
+    return legacyWorktreePath(root) ?? root;
   }
 
-  getSessionRepoPath(
-    project: ProjectConfig,
-    sessionId: string,
-    repository: RepositoryConfig,
-  ): string {
-    return path.join(this.getSessionRoot(project, sessionId), safe(repository.id));
-  }
-
-  /** Computes where a session's workspace lives without touching the filesystem. */
-  resolveSessionWorkspace(project: ProjectConfig, sessionId: string): SessionWorkspaceInfo {
-    if (usesSharedWorkspace(project)) {
-      const sharedPath = sharedWorkspacePath(project);
-      return { sessionRoot: sharedPath, repoPaths: new Map(), primaryPath: sharedPath };
-    }
-    const sessionRoot = this.getSessionRoot(project, sessionId);
-    const repoPaths = new Map<string, string>();
-    for (const repo of project.repositories) {
-      repoPaths.set(repo.id, this.getSessionRepoPath(project, sessionId, repo));
-    }
-    const primary = project.repositories.find((r) => r.isPrimary) ?? project.repositories[0];
-    return {
-      sessionRoot,
-      repoPaths,
-      primaryPath: (primary && repoPaths.get(primary.id)) || sessionRoot,
-    };
-  }
-
-  /** Whether every repository of the session already has its worktree on disk. */
+  /** Whether the session's worktree is on disk. */
   isSessionReady(project: ProjectConfig, sessionId: string): boolean {
-    if (usesSharedWorkspace(project)) return existsSync(sharedWorkspacePath(project));
-    return project.repositories.every((repo) => {
-      const repoPath = this.getSessionRepoPath(project, sessionId, repo);
-      return existsSync(repo.url ? path.join(repoPath, ".git") : repoPath);
-    });
+    const workspace = this.sessionPath(project, sessionId);
+    if (usesSharedWorkspace(project) || !project.repository?.url) return existsSync(workspace);
+    return existsSync(path.join(workspace, ".git"));
   }
 
   async ensureBase(project: ProjectConfig, repository: RepositoryConfig): Promise<string> {
-    const key = `${safe(project.id)}/${safe(repository.id)}`;
+    const key = safe(project.id);
     const existing = this.inFlightBases.get(key);
     if (existing) return existing;
 
@@ -309,11 +268,9 @@ export class WorkspaceManager {
     return await this.withWorktreeLock(basePath, async () => {
       await mkdir(path.dirname(basePath), { recursive: true, mode: 0o750 });
 
-      const effectiveAuth = repository.auth ?? project.auth;
-      const authKeyInfo = effectiveAuth
-        ? await this.ensureAuthKeyFile(project, repository, effectiveAuth)
-        : undefined;
-      const authEnv = resolveGitAuthEnv(effectiveAuth, authKeyInfo?.keyPath);
+      const auth = repository.auth;
+      const authKeyInfo = auth ? await this.ensureAuthKeyFile(project, auth) : undefined;
+      const authEnv = resolveGitAuthEnv(auth, authKeyInfo?.keyPath);
 
       if (!repository.url) {
         await mkdir(basePath, { recursive: true });
@@ -321,7 +278,7 @@ export class WorkspaceManager {
       }
 
       if (existsSync(path.join(basePath, ".git"))) {
-        // A project with scripts/sync.sh keeps its base repositories up to date itself.
+        // A project with scripts/sync.sh keeps its base repository up to date itself.
         const hasSyncScript =
           project.projectDir && existsSync(path.join(project.projectDir, "scripts", "sync.sh"));
         if (!hasSyncScript) await this.pullBase(project, repository, basePath, authEnv);
@@ -342,17 +299,15 @@ export class WorkspaceManager {
       }
 
       // Worktrees share the base repository's config, so identity and auth are set once here.
-      const committer = resolveCommitter(project, repository);
+      const committer = resolveCommitter(repository);
       await run("git", ["config", "user.name", committer.name], basePath);
       await run("git", ["config", "user.email", committer.email], basePath);
       if (authKeyInfo) {
         await run("git", ["config", "core.sshCommand", authKeyInfo.sshCommand], basePath);
-      } else if (effectiveAuth?.type === "token") {
+      } else if (auth?.type === "token") {
         const token =
-          effectiveAuth.token ??
-          (effectiveAuth.tokenEnv
-            ? (project.env?.[effectiveAuth.tokenEnv] ?? process.env[effectiveAuth.tokenEnv])
-            : undefined);
+          auth.token ??
+          (auth.tokenEnv ? (project.env?.[auth.tokenEnv] ?? process.env[auth.tokenEnv]) : undefined);
         if (token) {
           await run(
             "git",
@@ -387,85 +342,91 @@ export class WorkspaceManager {
     } catch (error) {
       this.logger.warn("failed to update base repository; using cached copy", {
         projectId: project.id,
-        repositoryId: repository.id,
         error,
       });
     }
   }
 
-  /** Service start: run scripts/sync.sh and bring every base repository up to date. */
-  async syncAllBases(project: ProjectConfig): Promise<void> {
+  /** Service start: run scripts/sync.sh and bring the base repository up to date. */
+  async syncBase(project: ProjectConfig): Promise<void> {
     await this.runLifecycleScript(project, "sync");
-    for (const repo of project.repositories) {
-      await this.ensureBase(project, repo);
-    }
+    if (project.repository) await this.ensureBase(project, project.repository);
   }
 
   /**
-   * Creates the session's workspace: syncs base repositories and adds one worktree per
-   * repository on branch `agent/<sessionId>`. Existing worktrees are kept as they are.
+   * Creates the session's workspace and returns its path: syncs the base repository and adds a
+   * worktree on branch `agent/<sessionId>`. An existing worktree is kept as it is.
    */
-  async ensureSessionWorkspaces(
-    project: ProjectConfig,
-    sessionId: string,
-  ): Promise<SessionWorkspaceInfo> {
-    const info = this.resolveSessionWorkspace(project, sessionId);
+  async ensureSessionWorkspace(project: ProjectConfig, sessionId: string): Promise<string> {
+    const workspace = this.sessionPath(project, sessionId);
     if (usesSharedWorkspace(project)) {
-      await mkdir(info.primaryPath, { recursive: true, mode: 0o750 });
-      const agentsMdPath = path.join(info.primaryPath, "AGENTS.md");
+      await mkdir(workspace, { recursive: true, mode: 0o750 });
+      const agentsMdPath = path.join(workspace, "AGENTS.md");
       if (!existsSync(agentsMdPath)) await Bun.write(agentsMdPath, DEFAULT_GLOBAL_PROMPT);
-      return info;
+      return workspace;
     }
 
+    const repository = project.repository!;
     await this.runLifecycleScript(project, "sync");
-    await mkdir(info.sessionRoot, { recursive: true, mode: 0o750 });
-    const branchName = `agent/${safe(sessionId)}`;
-
-    for (const repo of project.repositories) {
-      const repoPath = info.repoPaths.get(repo.id)!;
-      const basePath = await this.ensureBase(project, repo);
-      if (!repo.url) {
-        await mkdir(repoPath, { recursive: true });
-        continue;
-      }
-      await this.withWorktreeLock(basePath, async () => {
-        if (existsSync(path.join(repoPath, ".git"))) return;
-        await mkdir(path.dirname(repoPath), { recursive: true, mode: 0o750 });
-        const originRef = `origin/${repo.baseBranch}`;
-        const startPoint = (await refExists(basePath, originRef)) ? originRef : repo.baseBranch;
-        await run("git", ["worktree", "add", "-B", branchName, repoPath, startPoint], basePath);
-      });
+    const basePath = await this.ensureBase(project, repository);
+    if (!repository.url) {
+      await mkdir(workspace, { recursive: true, mode: 0o750 });
+      return workspace;
     }
-    return info;
+    await this.withWorktreeLock(basePath, async () => {
+      if (existsSync(path.join(workspace, ".git"))) return;
+      await mkdir(path.dirname(workspace), { recursive: true, mode: 0o750 });
+      const originRef = `origin/${repository.baseBranch}`;
+      const startPoint = (await refExists(basePath, originRef))
+        ? originRef
+        : repository.baseBranch;
+      const branchName = `agent/${safe(sessionId)}`;
+      await run("git", ["worktree", "add", "-B", branchName, workspace, startPoint], basePath);
+    });
+    return workspace;
   }
 
   async removeSession(project: ProjectConfig, sessionId: string): Promise<void> {
     if (usesSharedWorkspace(project)) return;
-    for (const repo of project.repositories) {
-      const repoPath = this.getSessionRepoPath(project, sessionId, repo);
-      if (!repo.url || !existsSync(repoPath)) continue;
-      const basePath = this.getBasePath(project, repo);
+    const repository = project.repository!;
+    const workspace = this.sessionPath(project, sessionId);
+    if (repository.url && existsSync(workspace)) {
+      const basePath = this.getBasePath(project, repository);
       await this.withWorktreeLock(basePath, async () => {
         try {
-          await run("git", ["worktree", "remove", "--force", repoPath], basePath);
+          await run("git", ["worktree", "remove", "--force", workspace], basePath);
           await run("git", ["worktree", "prune"], basePath);
         } catch (error) {
           this.logger.warn("failed to remove session worktree", {
             projectId: project.id,
             sessionId,
-            repositoryId: repo.id,
             error,
           });
         }
       });
     }
-    await rm(this.getSessionRoot(project, sessionId), { recursive: true, force: true });
+    await rm(path.join(this.sessionRoot, safe(project.id), safe(sessionId)), {
+      recursive: true,
+      force: true,
+    });
   }
 }
 
 /** The global project and repository-less projects share one directory instead of worktrees. */
 function usesSharedWorkspace(project: ProjectConfig): boolean {
-  return project.id === GLOBAL_PROJECT_ID || project.repositories.length === 0;
+  return project.id === GLOBAL_PROJECT_ID || !project.repository;
+}
+
+/**
+ * Sessions created while projects could have several repositories keep their worktree one level
+ * down, in `<session>/<repositoryId>`.
+ */
+function legacyWorktreePath(sessionRoot: string): string | undefined {
+  if (!existsSync(sessionRoot)) return undefined;
+  const entry = readdirSync(sessionRoot, { withFileTypes: true }).find(
+    (e) => e.isDirectory() && existsSync(path.join(sessionRoot, e.name, ".git")),
+  );
+  return entry && path.join(sessionRoot, entry.name);
 }
 
 function sharedWorkspacePath(project: ProjectConfig): string {

@@ -85,13 +85,11 @@ describe("Event Stream Optimization: Delta skipping & in-memory sequence", () =>
     id: "stream-opt-proj",
     displayName: "Stream Opt Project",
     description: "Test project for delta event bypass",
-    repositories: [],
     routing: {
       projectId: "stream-opt-proj",
       displayName: "Stream Opt Project",
       summary: "Test project for delta event bypass",
       keywords: ["test"],
-      repositories: ["main"],
     },
   };
 
@@ -114,7 +112,7 @@ describe("Event Stream Optimization: Delta skipping & in-memory sequence", () =>
     store = new MemoryStore();
     eventHub = new MemoryEventHub(store);
     runtime = new ProjectRuntime(
-      { ...project, repositories: [{ id: "main", url: repo, baseBranch: "main" }] },
+      { ...project, repository: { url: repo, baseBranch: "main" } },
       store,
       new StreamingFakeRuntime(),
       new WorkspaceManager(path.join(root, "workspaces")),

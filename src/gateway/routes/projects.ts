@@ -9,7 +9,12 @@ export function createProjectsRouter(deps: ProjectsRouteDeps): Hono {
   const router = new Hono();
 
   router.get("/projects", (c) => {
-    return c.json({ projects: deps.projects.list().map((project) => project.routing) });
+    return c.json({
+      projects: deps.projects.list().map((project) => ({
+        ...project.routing,
+        ...(project.repository?.url ? { repository: project.repository.url } : {}),
+      })),
+    });
   });
 
   router.get("/projects/:projectId/skills", async (c) => {

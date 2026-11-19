@@ -27,11 +27,12 @@ export interface RepoAuthConfig {
   tokenEnv?: string;
 }
 
+/** A project's repository. An empty `url` gives each session a plain directory without git. */
 export interface RepositoryConfig {
-  id: string;
   url: string;
   baseBranch: string;
-  isPrimary?: boolean;
+  /** A local checkout to use as the base repository, relative to the project directory. */
+  path?: string;
   auth?: RepoAuthConfig;
   committer?: GitIdentity;
 }
@@ -56,7 +57,6 @@ export interface ProjectRoutingDescription {
   projectId: string;
   displayName?: string;
   summary?: string;
-  repositories?: string[];
   keywords?: string[];
   jiraProjectKeys?: string[];
   routingHints?: string[];
@@ -97,10 +97,8 @@ export interface ProjectConfig {
   project?: ProjectMetaConfig;
   routing: ProjectRoutingDescription;
   runtime?: ProjectRuntimeConfig;
-  committer?: GitIdentity;
-  auth?: RepoAuthConfig;
   env?: Record<string, string>;
-  repositories: RepositoryConfig[];
+  repository?: RepositoryConfig;
   credentials?: Record<string, string>;
   notifications?: NotificationConfig[];
   notifyOnTurnCompleted?: boolean | undefined;
@@ -164,7 +162,6 @@ export interface SessionRoute extends BaseEntity {
   sessionId: string;
   title?: string;
   projectId: string;
-  repositoryId?: string;
   projectRuntimeId: string;
   runtimeSessionId: string | null;
   runtime?: string;

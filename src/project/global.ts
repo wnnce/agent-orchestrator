@@ -49,13 +49,11 @@ export function createGlobalProjectConfig(
       summary:
         "Global read-only workspace to view all projects, code, and configuration",
       keywords: [],
-      repositories: [],
     },
     runtime: {
       type: runtimeType,
       sandbox: "read-only",
       approvalPolicy: "never",
     },
-    repositories: [],
   };
 }

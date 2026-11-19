@@ -456,7 +456,6 @@ describe("Builtin Actions Execution", () => {
       {
         title: "Fix Issue #105: 502 Error",
         prompt: "Locate and fix the bug in redirect logic",
-        repository_id: "shortlink",
         metadata: { issue_id: 105 },
       },
       ctx,
@@ -469,7 +468,6 @@ describe("Builtin Actions Execution", () => {
     expect(dispatchedParams).toEqual({
       title: "Fix Issue #105: 502 Error",
       prompt: "Locate and fix the bug in redirect logic",
-      repositoryId: "shortlink",
       metadata: { issue_id: 105 },
     });
   });

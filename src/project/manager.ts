@@ -57,9 +57,9 @@ export class ProjectManager {
 
     for (const project of this.projects) {
       try {
-        await workspaces.syncAllBases(project);
+        await workspaces.syncBase(project);
       } catch (error) {
-        this.logger.error("failed to sync base repositories", {
+        this.logger.error("failed to sync base repository", {
           projectId: project.id,
           error: (error as Error).message,
         });

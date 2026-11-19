@@ -17,12 +17,11 @@ const project: ProjectConfig = {
     projectId: "alpha",
     displayName: "Alpha",
     summary: "Alpha repository for issue and API work",
-    repositories: ["alpha/repo"],
     keywords: ["alpha", "api"],
     routingHints: [],
   },
   runtime: { type: "fake", approvalPolicy: "on-request", sandbox: "workspace-write" },
-  repositories: [{ id: "main", url: "", baseBranch: "main" }],
+  repository: { url: "", baseBranch: "main" },
 };
 
 describe("project routing", () => {
@@ -89,7 +88,7 @@ describe("fake project runtime", () => {
     }
     store = new MemoryStore();
     runtime = new ProjectRuntime(
-      { ...project, repositories: [{ id: "main", url: repo, baseBranch: "main" }] },
+      { ...project, repository: { url: repo, baseBranch: "main" } },
       store,
       new FakeRuntime(),
       new WorkspaceManager(path.join(root, "workspaces")),

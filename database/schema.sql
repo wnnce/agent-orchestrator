@@ -6,7 +6,6 @@ CREATE TABLE IF NOT EXISTS sessions (
   session_id VARCHAR(100) NOT NULL,
   title VARCHAR(255),
   project_id VARCHAR(100) NOT NULL,
-  repository_id VARCHAR(100),
   project_runtime_id VARCHAR(100) NOT NULL,
   runtime_session_id VARCHAR(100),
   config_revision INTEGER NOT NULL DEFAULT 1,
