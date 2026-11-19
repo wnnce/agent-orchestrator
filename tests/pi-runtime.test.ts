@@ -310,7 +310,7 @@ describe("Pi Agent Native SDK Runtime", () => {
         project: DUMMY_PROJECT,
         workspacePath: "/tmp",
         sessionId: "ses_test",
-        currentTurnId: "turn_test",
+        turnId: "turn_test",
       }));
 
       expect(tools).toHaveLength(1);

@@ -137,13 +137,18 @@ export class SkillManager {
     }
   }
 
-  static async syncSkillsToCodex(
-    codexHome: string,
+  /**
+   * Links the project's skills (and those inherited from `inheritedProject`) into
+   * `<homeDir>/skills`, the layout both Codex and Claude Code read, and removes stale links.
+   * Entries that are not symlinks belong to the runtime and are left alone.
+   */
+  static async linkSkills(
+    homeDir: string,
     project: ProjectConfig,
     inheritedProject?: ProjectConfig,
   ): Promise<void> {
-    const codexSkillsDir = path.join(codexHome, "skills");
-    await mkdir(codexSkillsDir, { recursive: true, mode: 0o755 });
+    const skillsDir = path.join(homeDir, "skills");
+    await mkdir(skillsDir, { recursive: true, mode: 0o755 });
 
     const inherited =
       inheritedProject && inheritedProject.id !== project.id
@@ -155,12 +160,11 @@ export class SkillManager {
     const skills = [...skillsById.values()];
     const validSkillIds = new Set(skills.map((s) => s.id));
 
-    // 1. Clean up stale or orphan symlinks in codexHome/skills
+    // 1. Clean up stale or orphan symlinks
     try {
-      const existingEntries = await readdir(codexSkillsDir, { withFileTypes: true });
+      const existingEntries = await readdir(skillsDir, { withFileTypes: true });
       for (const entry of existingEntries) {
-        if (entry.name === ".system") continue;
-        const targetPath = path.join(codexSkillsDir, entry.name);
+        const targetPath = path.join(skillsDir, entry.name);
 
         try {
           const s = await lstat(targetPath);
@@ -179,7 +183,7 @@ export class SkillManager {
         }
       }
     } catch (error) {
-      this.logger.warn("failed to clean up codex skills directory", {
+      this.logger.warn("failed to clean up runtime skills directory", {
         projectId: project.id,
         error: (error as Error).message,
       });
@@ -187,7 +191,7 @@ export class SkillManager {
 
     // 2. Ensure symlink exists for every valid project skill
     for (const skill of skills) {
-      const linkPath = path.join(codexSkillsDir, skill.id);
+      const linkPath = path.join(skillsDir, skill.id);
       try {
         const linkStat = await lstat(linkPath).catch(() => null);
         if (linkStat) {
@@ -208,14 +212,14 @@ export class SkillManager {
         }
 
         await symlink(skill.dirPath, linkPath, "dir");
-        this.logger.info("linked project skill to Codex runtime", {
+        this.logger.info("linked project skill into runtime home", {
           projectId: project.id,
           skillId: skill.id,
           source: skill.dirPath,
           target: linkPath,
         });
       } catch (error) {
-        this.logger.error("failed to symlink project skill to Codex runtime", {
+        this.logger.error("failed to link project skill into runtime home", {
           projectId: project.id,
           skillId: skill.id,
           error: (error as Error).message,

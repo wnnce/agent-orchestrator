@@ -1,21 +1,15 @@
 import { z } from "zod";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { ActionRegistry } from "../../actions/registry.ts";
-import { createActionContext } from "../../actions/context.ts";
-import type { ProjectConfig } from "../../domain/types.ts";
-import type { RuntimeContext } from "../runtime.ts";
+import {
+  type ActionCallSite,
+  actionContextFor,
+  actionResultText,
+  actionScopeFor,
+} from "../action-bridge.ts";
 
-/**
- * Accessor providing current dynamic execution context for tool invocations.
- */
-export type ActionBridgeContextGetter = () => {
-  project: ProjectConfig;
-  workspacePath: string;
-  sessionId: string;
-  currentTurnId?: string | undefined;
-  taskKey?: string | undefined;
-  createActionContext?: RuntimeContext["createActionContext"] | undefined;
-};
+/** Reads the session's current call site when a tool runs. */
+export type ActionBridgeContextGetter = () => ActionCallSite;
 
 /**
  * Converts a Zod or raw object schema into standard JSON Schema suitable for Pi SDK.
@@ -43,9 +37,7 @@ export function bridgeActionsToPiTools(
   actionRegistry: ActionRegistry,
   getContext: ActionBridgeContextGetter,
 ): ToolDefinition[] {
-  const ctx = getContext();
-  const scope = ctx.taskKey ? "task" : "conversation";
-  const actions = actionRegistry.list(scope);
+  const actions = actionRegistry.list(actionScopeFor(getContext().taskKey));
 
   return actions.map((action) => {
     const jsonSchema = actionToJsonSchema(action.parameters);
@@ -57,26 +49,10 @@ export function bridgeActionsToPiTools(
       // Pi accepts plain JSON Schema here; its type expects a TypeBox schema object.
       parameters: jsonSchema as unknown as ToolDefinition["parameters"],
       execute: async (_toolCallId: string, params: unknown, signal?: AbortSignal) => {
-        const currentCtx = getContext();
-        const actionContext = currentCtx.createActionContext
-          ? currentCtx.createActionContext({
-              turnId: currentCtx.currentTurnId,
-              signal,
-            })
-          : createActionContext({
-              projectId: currentCtx.project.id,
-              sessionId: currentCtx.sessionId,
-              turnId: currentCtx.currentTurnId,
-              taskKey: currentCtx.taskKey,
-              workspacePath: currentCtx.workspacePath,
-              signal,
-            });
-
+        const actionContext = actionContextFor(getContext(), signal);
         const result = await actionRegistry.execute(action.name, params, actionContext);
-        const text = JSON.stringify(result.success ? (result.data ?? {}) : { error: result.error });
-
         return {
-          content: [{ type: "text" as const, text }],
+          content: [{ type: "text" as const, text: actionResultText(result) }],
           isError: !result.success,
           details: result.success ? result.data : { error: result.error },
         };

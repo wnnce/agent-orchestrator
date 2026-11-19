@@ -101,7 +101,7 @@ Be careful.`;
     expect(s2?.description).toBe("Second Skill Description");
   });
 
-  test("SkillManager.syncSkillsToCodex creates symlinks and cleans up stale ones", async () => {
+  test("SkillManager.linkSkills creates symlinks and cleans up stale ones", async () => {
     const projDir = path.join(testBaseDir, "proj-sync");
     const skillsDir = path.join(projDir, ".skills");
     const codexHome = path.join(testBaseDir, "codex-home");
@@ -115,7 +115,7 @@ Be careful.`;
     const project = makeProject("proj-sync", projDir);
 
     // Initial sync
-    await SkillManager.syncSkillsToCodex(codexHome, project);
+    await SkillManager.linkSkills(codexHome, project);
 
     const linkPath = path.join(codexHome, "skills", "active-skill");
     expect(existsSync(linkPath)).toBe(true);
@@ -135,7 +135,7 @@ Be careful.`;
     );
 
     // Second sync: should prune active-skill symlink and add another-skill symlink
-    await SkillManager.syncSkillsToCodex(codexHome, project);
+    await SkillManager.linkSkills(codexHome, project);
 
     expect(existsSync(linkPath)).toBe(false);
     const newLinkPath = path.join(codexHome, "skills", "another-skill");
@@ -163,8 +163,8 @@ Be careful.`;
     const proj1 = makeProject("p1", proj1Dir);
     const proj2 = makeProject("p2", proj2Dir);
 
-    await SkillManager.syncSkillsToCodex(codexHome1, proj1);
-    await SkillManager.syncSkillsToCodex(codexHome2, proj2);
+    await SkillManager.linkSkills(codexHome1, proj1);
+    await SkillManager.linkSkills(codexHome2, proj2);
 
     const p1Skills = await SkillManager.listProjectSkills(proj1);
     const p2Skills = await SkillManager.listProjectSkills(proj2);
@@ -206,7 +206,7 @@ Be careful.`;
 
     const globalProject = makeProject("global", globalDir);
     const project = makeProject("project", projectDir);
-    await SkillManager.syncSkillsToCodex(codexHome, project, globalProject);
+    await SkillManager.linkSkills(codexHome, project, globalProject);
 
     const readTarget = async (id: string) =>
       path.resolve(

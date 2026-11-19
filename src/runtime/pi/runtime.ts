@@ -261,7 +261,7 @@ export class PiRuntime implements AgentRuntime {
         project: context.project,
         workspacePath: context.workspacePath,
         sessionId: wrapperHolder.wrapper?.sessionId ?? existingSessionId ?? "",
-        currentTurnId: wrapperHolder.wrapper?.currentTurnId,
+        turnId: wrapperHolder.wrapper?.currentTurnId,
         taskKey: context.taskKey,
         createActionContext: context.createActionContext,
       }));

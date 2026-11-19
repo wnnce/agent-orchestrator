@@ -13,7 +13,8 @@ import type {
   RuntimeTurn,
 } from "./runtime.ts";
 import { RuntimeSessionNotFoundError } from "./runtime.ts";
-import { defaultActionRegistry, ActionRegistry, createActionContext } from "../actions/index.ts";
+import { defaultActionRegistry, ActionRegistry } from "../actions/index.ts";
+import { actionContextFor, actionResultText, actionScopeFor } from "./action-bridge.ts";
 import { normalizeCodexNotification, notificationThreadId } from "./codex-normalizer.ts";
 import { CodexConnection } from "./codex/connection.ts";
 import { prepareCodexHome } from "./codex/home.ts";
@@ -372,7 +373,7 @@ export class CodexRuntime implements AgentRuntime {
     if (runtime?.model) params.model = runtime.model;
 
     // Expose orchestrator actions as Codex dynamic tools (task and conversation scopes differ).
-    const tools = this.actionRegistry.toCodexTools(context.taskKey ? "task" : "conversation");
+    const tools = this.actionRegistry.toCodexTools(actionScopeFor(context.taskKey));
     if (tools.length > 0) params.dynamicTools = tools;
     return params;
   }
@@ -384,16 +385,22 @@ export class CodexRuntime implements AgentRuntime {
     params: DynamicToolCallParams,
   ): Promise<void> {
     const context = this.contexts.get(params.threadId);
-    const actionContext = context?.createActionContext
-      ? context.createActionContext({ turnId: params.turnId })
-      : createActionContext({
-          projectId: context?.project.id ?? "unknown",
-          sessionId: params.threadId,
-          turnId: params.turnId,
-          taskKey: context?.taskKey,
-          workspacePath: context?.workspacePath ?? process.cwd(),
-          logger: this.logger,
-        });
+    if (!context) {
+      this.logger.warn("rejecting Codex tool call for a thread nobody is attached to", {
+        threadId: params.threadId,
+      });
+      connection.respondError(requestId, -32602, `unknown thread ${params.threadId}`);
+      return;
+    }
+    const actionContext = actionContextFor({
+      project: context.project,
+      workspacePath: context.workspacePath,
+      sessionId: params.threadId,
+      turnId: params.turnId,
+      taskKey: context.taskKey,
+      createActionContext: context.createActionContext,
+      logger: this.logger,
+    });
     this.logger.info("running Codex dynamic tool call", {
       threadId: params.threadId,
       tool: params.tool,
@@ -411,12 +418,12 @@ export class CodexRuntime implements AgentRuntime {
         contentItems: [
           {
             type: "inputText",
-            text: JSON.stringify(result.success ? (result.data ?? {}) : { error: result.error }),
+            text: actionResultText(result),
           },
         ],
       };
       connection.respond(requestId, response);
-      await context?.onEvent({
+      await context.onEvent({
         type: "tool.called",
         sessionId: params.threadId,
         turnId: params.turnId,
