@@ -38,8 +38,8 @@ describe("Session Archive & Workspace Release (> 1 hour)", () => {
         keywords: ["archive"],
       },
       repository: { url: repoDir, baseBranch: "main" },
-      runtime: {
-        type: "fake",
+      runtime: { type: "fake" },
+      session: {
         idleTimeoutMs: 1800_000, // 30 mins
         archiveTimeoutMs: 3600_000, // 1 hour
       },

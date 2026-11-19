@@ -76,7 +76,8 @@ describe("session execution and control", () => {
       description: "test",
       routing: { projectId: "execution" },
       repository: { url: "", baseBranch: "main" },
-      runtime: { type: "fake", idleTimeoutMs: 1000, archiveTimeoutMs: 2000 },
+      runtime: { type: "fake" },
+      session: { idleTimeoutMs: 1000, archiveTimeoutMs: 2000 },
     };
     runtime = new ProjectRuntime(
       project,

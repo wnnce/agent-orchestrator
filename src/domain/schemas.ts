@@ -176,8 +176,6 @@ export const projectConfigSchema = z
           sandbox: z
             .enum(["read-only", "workspace-write", "danger-full-access"])
             .optional(),
-          idleTimeoutMs: z.number().int().positive().optional(),
-          archiveTimeoutMs: z.number().int().positive().optional(),
           cwdRoot: z.string().min(1).optional(),
           codexHome: z.string().min(1).optional(),
           mcpServers: z.array(mcpServerConfigSchema).optional(),
@@ -185,6 +183,12 @@ export const projectConfigSchema = z
           baseConfigPath: z.string().optional(),
         })
         .passthrough()
+        .optional(),
+      session: z
+        .strictObject({
+          idleTimeoutMs: z.number().int().positive().optional(),
+          archiveTimeoutMs: z.number().int().positive().optional(),
+        })
         .optional(),
       agent: projectAgentConfigSchema.optional(),
       env: z.record(z.string(), z.string()).optional(),

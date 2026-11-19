@@ -1077,9 +1077,8 @@ export class ProjectRuntime {
 
   private async manageSessionLifecycles(): Promise<void> {
     if (this.stopping) return;
-    const idleTimeout = this.project.runtime?.idleTimeoutMs ?? 30 * 60_000;
-    const archiveTimeout =
-      this.project.runtime?.archiveTimeoutMs ?? 60 * 60_000;
+    const idleTimeout = this.project.session?.idleTimeoutMs ?? 30 * 60_000;
+    const archiveTimeout = this.project.session?.archiveTimeoutMs ?? 60 * 60_000;
     for (const stored of await this.store.listSessions(this.project.id)) {
       const id = stored.sessionId;
       if (

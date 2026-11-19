@@ -68,14 +68,20 @@ export interface ProjectRuntimeConfig {
   reasoningEffort?: string;
   approvalPolicy?: "never" | "on-request" | "on-failure" | "untrusted";
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
-  idleTimeoutMs?: number;
-  archiveTimeoutMs?: number;
   cwdRoot?: string;
   codexHome?: string;
   mcpServers?: McpServerConfig[];
   config?: Record<string, unknown>;
   baseConfigPath?: string;
   [key: string]: unknown;
+}
+
+/** How long a project's sessions stay open. */
+export interface ProjectSessionConfig {
+  /** Inactivity after which a session's runtime is released (default 30 minutes). */
+  idleTimeoutMs?: number;
+  /** Inactivity after which a session is archived and its worktree removed (default 1 hour). */
+  archiveTimeoutMs?: number;
 }
 
 export interface ProjectMetaConfig {
@@ -97,6 +103,7 @@ export interface ProjectConfig {
   project?: ProjectMetaConfig;
   routing: ProjectRoutingDescription;
   runtime?: ProjectRuntimeConfig;
+  session?: ProjectSessionConfig;
   env?: Record<string, string>;
   repository?: RepositoryConfig;
   credentials?: Record<string, string>;

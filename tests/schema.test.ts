@@ -73,6 +73,17 @@ test("project schema accepts a repository with auth and committer", () => {
   expect(parsed.runtime?.model).toBe("gpt-5-codex");
 });
 
+test("session lifecycle settings live in the session section", () => {
+  const parsed = projectConfigSchema.parse({
+    ...baseProject,
+    session: { idleTimeoutMs: 1000, archiveTimeoutMs: 2000 },
+  });
+  expect(parsed.session).toEqual({ idleTimeoutMs: 1000, archiveTimeoutMs: 2000 });
+  expect(() =>
+    projectConfigSchema.parse({ ...baseProject, session: { idleTimeout: 1000 } }),
+  ).toThrow();
+});
+
 test("project schema rejects fields from before single-repository projects", () => {
   for (const removed of [
     { repositories: [{ id: "main", url: "", baseBranch: "main" }] },
