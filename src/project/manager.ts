@@ -39,12 +39,11 @@ export class ProjectManager {
   ) {
     this.eventHub = eventHub ?? new MemoryEventHub(store, sessionManager);
     const globalProjectsDir = path.resolve(process.cwd(), "projects");
-    const defaultRuntimeType =
-      this.projects[0]?.runtime?.type ?? "codex";
-    this.globalProject = createGlobalProjectConfig(
-      globalProjectsDir,
-      defaultRuntimeType,
-    );
+    this.globalProject = createGlobalProjectConfig(globalProjectsDir, this.defaultRuntime);
+  }
+
+  private get defaultRuntime(): string {
+    return this.config.defaultRuntime ?? "codex";
   }
 
   getRuntimeRegistry(): RuntimeRegistry {
@@ -65,8 +64,7 @@ export class ProjectManager {
         });
       }
 
-      const runtimeType =
-        project.runtime?.type ?? "codex";
+      const runtimeType = project.runtime?.type ?? this.defaultRuntime;
       this.logger.info("starting project runtime", {
         projectId: project.id,
         runtime: runtimeType,
@@ -111,7 +109,7 @@ export class ProjectManager {
     project: ProjectConfig,
     sharedWorkspaces?: WorkspaceManager,
   ): ProjectRuntime {
-    const runtimeType = project.runtime?.type ?? "codex";
+    const runtimeType = project.runtime?.type ?? this.defaultRuntime;
     const projectMcpServers = project.runtime?.mcpServers ?? [];
     const runtimeConfigEntry = (this.config.runtimes?.[runtimeType] ??
       (runtimeType === "codex" ? this.config.codex : undefined)) as

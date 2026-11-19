@@ -93,6 +93,14 @@ describe("Codex app-server protocol", () => {
     expect(session.id).toBe("thread-test");
   });
 
+  test("a read-only session gets the read-only sandbox", async () => {
+    await runtime.startSession({ ...context, readOnly: true });
+    const start = await waitFor(async () =>
+      (await received()).find((m) => m.method === "thread/start"),
+    );
+    expect(start.params.sandbox).toBe("read-only");
+  });
+
   test("a server stopped and started again keeps working", async () => {
     await runtime.startSession(context);
     await runtime.stop();

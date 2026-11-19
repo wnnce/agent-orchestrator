@@ -48,6 +48,11 @@ export interface RuntimeContext {
   project: ProjectConfig;
   workspacePath: string;
   taskKey?: string;
+  /**
+   * The agent may only read: no file edits and no shell commands (the global project). Each
+   * runtime enforces it with its own means, e.g. a read-only sandbox or read-only tools.
+   */
+  readOnly?: boolean;
   onEvent: (event: RuntimeEvent) => Promise<void> | void;
   createActionContext?: (params: {
     turnId?: string | undefined;

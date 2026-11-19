@@ -8,6 +8,7 @@ import { WorkspaceManager } from "../src/workspace/workspace.ts";
 import { ArtifactStore } from "../src/artifacts/store.ts";
 import { Logger } from "../src/observability/logger.ts";
 import type { ProjectConfig } from "../src/domain/types.ts";
+import { createGlobalProjectConfig } from "../src/project/global.ts";
 
 class ControlledRuntime extends FakeRuntime {
   starts: Array<{ context: RuntimeContext; session: string; id: string; input: string }> = [];
@@ -59,6 +60,33 @@ class ControlledRuntime extends FakeRuntime {
     this.released.push(id);
   }
 }
+
+describe("global project", () => {
+  test("its sessions run read-only", async () => {
+    const root = await mkdtemp("/tmp/session-global-");
+    const store = new MemoryStore();
+    const agent = new ControlledRuntime();
+    const runtime = new ProjectRuntime(
+      createGlobalProjectConfig(path.join(root, "projects"), "fake"),
+      store,
+      agent,
+      new WorkspaceManager(path.join(root, "workspaces")),
+      new ArtifactStore(path.join(root, "artifacts"), store),
+      undefined,
+      new Logger({ sink: () => {} }),
+    );
+    try {
+      const session = await runtime.createSession();
+      await runtime.turn(session.sessionId, "what projects are there?");
+      await agent.started(1);
+      expect(agent.starts[0]!.context.readOnly).toBe(true);
+      await agent.finish(0);
+    } finally {
+      await runtime.stop();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("session execution and control", () => {
   let root: string;

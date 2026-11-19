@@ -2,6 +2,9 @@
 # Agent Orchestrator Service Configuration
 # ==========================================
 
+# Runtime for the global project and for projects that do not set runtime.type
+defaultRuntime: codex
+
 # 1. HTTP server network settings
 server:
   host: 0.0.0.0

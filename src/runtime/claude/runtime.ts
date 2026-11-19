@@ -136,6 +136,7 @@ export class ClaudeRuntime implements AgentRuntime {
           configDir,
           sessionId,
           resume,
+          readOnly: context.readOnly,
           actionServer:
             this.actionRegistry &&
             createActionServer(this.actionRegistry, context.taskKey, () => ({

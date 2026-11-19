@@ -36,6 +36,9 @@ import {
 
 type ProviderInput = Parameters<ModelRuntime["registerProvider"]>[1];
 
+/** Built-in tools of a read-only session. */
+export const PI_READ_ONLY_TOOLS = ["read", "grep", "find", "ls"];
+
 /**
  * Native in-process AgentRuntime implementation for Pi Agent (@earendil-works/pi-coding-agent).
  */
@@ -251,7 +254,9 @@ export class PiRuntime implements AgentRuntime {
     const modelRuntime = await this.modelRuntime(context.project);
     const model = this.resolveModel(context.project, modelRuntime);
     const thinkingLevel = this.thinkingLevel(context.project);
-    const builtinTools = this.config.tools ?? ["read", "write", "edit", "bash"];
+    const builtinTools = context.readOnly
+      ? PI_READ_ONLY_TOOLS
+      : (this.config.tools ?? ["read", "write", "edit", "bash"]);
 
     const wrapperHolder: { wrapper?: PiSessionWrapper } = {};
 

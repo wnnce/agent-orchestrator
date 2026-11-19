@@ -96,6 +96,8 @@ export const channelsConfigSchema = z.strictObject({
 });
 
 export const hierarchicalAppConfigSchema = z.strictObject({
+  /** Runtime for the global project and for projects that do not set runtime.type. */
+  defaultRuntime: z.string().min(1).default("codex"),
   server: serverConfigSchema.prefault({}),
   logging: loggingConfigSchema.prefault({}),
   storage: storageConfigSchema.prefault({}),
@@ -206,6 +208,8 @@ export type FeishuConfig = z.output<typeof feishuConfigSchema>;
 export type WeComConfig = z.output<typeof wecomConfigSchema>;
 
 export interface AppConfig {
+  /** Runtime for the global project and for projects that do not set runtime.type. */
+  defaultRuntime?: string;
   server?: ServerConfig;
   logging?: LoggingConfig;
   storage?: StorageConfig;
@@ -299,6 +303,7 @@ export async function loadConfig(file = "config.yaml"): Promise<AppConfig> {
   };
 
   return {
+    defaultRuntime: data.defaultRuntime,
     server: data.server,
     logging: data.logging,
     storage,

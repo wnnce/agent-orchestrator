@@ -85,7 +85,7 @@ export class CodexRuntime implements AgentRuntime {
         threadId: runtimeSessionId,
         cwd: context.workspacePath,
         approvalPolicy: context.project.runtime?.approvalPolicy ?? "never",
-        sandbox: context.project.runtime?.sandbox ?? "danger-full-access",
+        sandbox: sandboxFor(context),
       });
     } catch (error) {
       // app-server reports an unknown thread only through its error message.
@@ -367,7 +367,7 @@ export class CodexRuntime implements AgentRuntime {
     const params: Record<string, unknown> = {
       cwd: context.workspacePath,
       approvalPolicy: runtime?.approvalPolicy ?? "never",
-      sandbox: runtime?.sandbox ?? "danger-full-access",
+      sandbox: sandboxFor(context),
       serviceName: "agent-orchestrator",
     };
     if (runtime?.model) params.model = runtime.model;
@@ -449,4 +449,11 @@ export class CodexRuntime implements AgentRuntime {
       }
     }
   }
+}
+
+/** A read-only session always gets Codex's read-only sandbox, whatever the project asks for. */
+function sandboxFor(context: RuntimeContext): string {
+  return context.readOnly
+    ? "read-only"
+    : (context.project.runtime?.sandbox ?? "danger-full-access");
 }

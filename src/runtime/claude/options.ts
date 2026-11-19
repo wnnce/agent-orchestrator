@@ -15,6 +15,9 @@ import {
 /** Name of the in-process MCP server that exposes orchestrator actions. */
 export const ACTION_SERVER_NAME = "orchestrator";
 
+/** Built-in tools of a read-only session. */
+export const CLAUDE_READ_ONLY_TOOLS = ["Read", "Grep", "Glob"];
+
 /** Host variables Claude Code needs to run; everything else in the service's env stays private. */
 const INHERITED_ENV = [
   "PATH",
@@ -52,6 +55,8 @@ export interface QueryOptionsParams {
   configDir: string;
   sessionId: string;
   resume: boolean;
+  /** Only Claude Code's read-only tools are offered. */
+  readOnly?: boolean | undefined;
   actionServer?: SdkMcpServerConfig | undefined;
   canUseTool: CanUseTool;
   stderr: (data: string) => void;
@@ -83,7 +88,9 @@ export function buildQueryOptions(params: QueryOptionsParams): Options {
     permissionMode,
     allowDangerouslySkipPermissions: permissionMode === "bypassPermissions",
     canUseTool: params.canUseTool,
-    tools: config.tools ?? { type: "preset", preset: "claude_code" },
+    tools: params.readOnly
+      ? CLAUDE_READ_ONLY_TOOLS
+      : (config.tools ?? { type: "preset", preset: "claude_code" }),
     mcpServers,
     systemPrompt: {
       type: "preset",

@@ -50,10 +50,6 @@ export function createGlobalProjectConfig(
         "Global read-only workspace to view all projects, code, and configuration",
       keywords: [],
     },
-    runtime: {
-      type: runtimeType,
-      sandbox: "read-only",
-      approvalPolicy: "never",
-    },
+    runtime: { type: runtimeType },
   };
 }

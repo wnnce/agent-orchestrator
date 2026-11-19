@@ -393,6 +393,32 @@ describe("Pi Agent Native SDK Runtime", () => {
       }
     });
 
+    it("offers only read-only tools to a read-only session", async () => {
+      const tmpWorkspace = mkdtempSync(join(tmpdir(), "pi-rt-readonly-"));
+      try {
+        const runtime = new PiRuntime(
+          new Logger({ sink: () => {} }),
+          { defaultProvider: "mock-provider", defaultModel: "mock-model", thinkingLevel: "off" },
+          undefined,
+          undefined,
+          await createMockModelRuntime(),
+          tmpWorkspace,
+        );
+        const context: RuntimeContext = {
+          project: DUMMY_PROJECT,
+          workspacePath: tmpWorkspace,
+          readOnly: true,
+          onEvent: () => {},
+        };
+        const session = await runtime.startSession(context);
+        const wrapper = (runtime as any).sessions.get(session.id);
+        expect(wrapper.session.getActiveToolNames().sort()).toEqual(["find", "grep", "ls", "read"]);
+        await runtime.stop();
+      } finally {
+        rmSync(tmpWorkspace, { recursive: true, force: true });
+      }
+    });
+
     it("handles turn interruption cleanly", async () => {
       const tmpWorkspace = mkdtempSync(join(tmpdir(), "pi-rt-interrupt-"));
       try {

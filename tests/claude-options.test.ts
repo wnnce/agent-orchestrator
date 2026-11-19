@@ -149,6 +149,22 @@ describe("Claude Code options", () => {
     }
   });
 
+  test("a read-only session offers only read-only tools", () => {
+    const readOnly = buildQueryOptions({
+      project: project(),
+      config: { apiKey: "sk-test", tools: ["Bash"] },
+      workspacePath: "/work",
+      configDir: "/cfg",
+      sessionId: "s",
+      resume: false,
+      readOnly: true,
+      canUseTool: async () => ({ behavior: "deny", message: "no" }),
+      stderr: () => {},
+    });
+    expect(readOnly.tools).toEqual(["Read", "Grep", "Glob"]);
+    expect(options().tools).toEqual({ type: "preset", preset: "claude_code" });
+  });
+
   test("the service config rejects unknown keys", () => {
     expect(() => claudeRuntimeConfigSchema.parse({ apikey: "typo" })).toThrow();
   });

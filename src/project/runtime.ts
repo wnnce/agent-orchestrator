@@ -874,6 +874,7 @@ export class ProjectRuntime {
       project: this.project,
       workspacePath,
       ...(taskKey ? { taskKey } : {}),
+      ...(this.project.id === GLOBAL_PROJECT_ID ? { readOnly: true } : {}),
       onEvent: (event) => this.onRuntimeEvent(sessionId, event),
       createActionContext: (params) =>
         this.createActionContext({

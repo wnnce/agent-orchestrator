@@ -70,6 +70,13 @@ feishu:
     ]);
   });
 
+  test("defaultRuntime defaults to codex and can be set", async () => {
+    await writeFile(file, "server:\n  port: 7070\n");
+    expect((await loadConfig(file)).defaultRuntime).toBe("codex");
+    await writeFile(file, "defaultRuntime: claude\n");
+    expect((await loadConfig(file)).defaultRuntime).toBe("claude");
+  });
+
   test("loads global notifications from service YAML", async () => {
     await writeFile(
       file,
