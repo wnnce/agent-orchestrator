@@ -283,9 +283,10 @@ export class WorkspaceManager {
           project.projectDir && existsSync(path.join(project.projectDir, "scripts", "sync.sh"));
         if (!hasSyncScript) await this.pullBase(project, repository, basePath, authEnv);
       } else {
-        // First run: scripts/init.sh may prepare the repository; otherwise clone it.
-        const ranInit = await this.runLifecycleScript(project, "init");
-        if (!existsSync(path.join(basePath, ".git")) && !ranInit) {
+        // First run: scripts/init.sh may prepare the repository. It is a hook, not a guarantee,
+        // so the repository is cloned here whenever it is still missing afterwards.
+        await this.runLifecycleScript(project, "init");
+        if (!existsSync(path.join(basePath, ".git"))) {
           const resolvedUrl = isRemoteUrl(repository.url)
             ? repository.url
             : path.resolve(project.projectDir ?? process.cwd(), repository.url);

@@ -163,6 +163,20 @@ describe("WorkspaceManager worktree isolation", () => {
     expect(existsSync(path.join(baseRootDir, "service"))).toBe(false);
   });
 
+  test("the base is cloned when scripts/init.sh runs but does not produce it", async () => {
+    const scripts = path.join(testProject.projectDir!, "scripts");
+    await mkdir(scripts, { recursive: true });
+    await writeFile(path.join(scripts, "init.sh"), "#!/usr/bin/env bash\nmkdir -p repos\nexit 0\n");
+    const project = {
+      ...testProject,
+      repository: { ...testProject.repository!, path: "repos/service" },
+    };
+
+    const workspace = await manager.ensureSessionWorkspace(project, "ses-init");
+    expect(existsSync(path.join(testProject.projectDir!, "repos", "service", ".git"))).toBe(true);
+    expect(await Bun.file(path.join(workspace, "backend.txt")).text()).toBe("hello backend");
+  });
+
   test("single-flight coalesces concurrent ensureBase requests", async () => {
     const repo = testProject.repository!;
     const [path1, path2, path3] = await Promise.all([
