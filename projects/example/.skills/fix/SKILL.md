@@ -1,3 +1,8 @@
+---
+name: fix
+description: Workflow for fixing a bug - reproduce it with a failing test, make the minimal fix, then run the test suites.
+---
+
 # Bug Fixing & Implementation Workflow
 
 1. Understand the problem and write failing reproduction tests.

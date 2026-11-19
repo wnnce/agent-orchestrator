@@ -101,8 +101,6 @@ export interface ProjectConfig {
   auth?: RepoAuthConfig;
   env?: Record<string, string>;
   repositories: RepositoryConfig[];
-  prompts?: Record<string, string>;
-  promptsDir?: string;
   credentials?: Record<string, string>;
   notifications?: NotificationConfig[];
   notifyOnTurnCompleted?: boolean | undefined;

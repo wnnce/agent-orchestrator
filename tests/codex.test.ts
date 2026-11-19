@@ -20,7 +20,6 @@ const project: ProjectConfig = {
   },
   runtime: { type: "codex", codexHome: "/tmp/codex-test-home" },
   repositories: [],
-  prompts: {},
 };
 
 test("Codex runtime speaks app-server JSONL", async () => {

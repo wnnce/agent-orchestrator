@@ -192,8 +192,6 @@ export const projectConfigSchema = z
       auth: repoAuthConfigSchema.optional(),
       env: z.record(z.string(), z.string()).optional(),
       repositories: z.array(repositoryConfigSchema),
-      prompts: z.record(z.string(), z.string()).optional(),
-      promptsDir: z.string().optional(),
       credentials: z.record(z.string(), z.string()).optional(),
       notifications: z.array(notificationConfigSchema).optional(),
       notifyOnTurnCompleted: z.boolean().optional(),

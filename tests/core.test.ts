@@ -23,7 +23,6 @@ const project: ProjectConfig = {
   },
   runtime: { type: "fake", approvalPolicy: "on-request", sandbox: "workspace-write" },
   repositories: [{ id: "main", url: "", baseBranch: "main" }],
-  prompts: {},
 };
 
 describe("project routing", () => {

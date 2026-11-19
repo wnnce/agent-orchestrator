@@ -13,7 +13,6 @@ import {
   DEFAULT_GLOBAL_PROMPT,
   createGlobalProjectConfig,
 } from "../src/project/global.ts";
-import { PromptManager } from "../src/project/prompts.ts";
 import { WorkspaceManager } from "../src/workspace/workspace.ts";
 import { GatewayService } from "../src/gateway/service.ts";
 import { MemoryStore } from "../src/persistence/store.ts";
@@ -448,25 +447,6 @@ describe("3-Tier Decision Chain Router & Global Fallback", () => {
       // removeSession should not delete the projects directory
       await workspaces.removeSession(globalProject, "ses_global_test");
       expect(existsSync(globalProjectsDir)).toBe(true);
-    });
-
-    test("PromptManager loads DEFAULT_GLOBAL_PROMPT for _global_ and supports custom override", async () => {
-      const globalProjectsDir = path.join(testDir, "custom-global-projects");
-      await mkdir(globalProjectsDir, { recursive: true });
-
-      const globalProject = createGlobalProjectConfig(globalProjectsDir);
-      const promptManager = new PromptManager();
-
-      // Default prompt when no custom file exists
-      const defaultLoaded = await promptManager.load(globalProject, "system");
-      expect(defaultLoaded).toContain("Global Overview Assistant");
-
-      // Custom global.md file override
-      const customPrompt = "# 自定义全局助手提示词\n欢迎来到全景分析模式";
-      await writeFile(path.join(globalProjectsDir, "global.md"), customPrompt, "utf-8");
-
-      const customLoaded = await promptManager.load(globalProject, "system");
-      expect(customLoaded).toBe(customPrompt);
     });
 
     test("GatewayService routes unmatched user query to _global_ workspace in read-only mode", async () => {
