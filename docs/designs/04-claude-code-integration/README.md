@@ -105,7 +105,12 @@ void this.consume(query); // for await (const message of query) { ... }
 - 这时上报 `runtime.disconnected`，并把这个会话从会话表里删掉。
 - `ProjectRuntime` 收到事件后会让正在进行的 turn 失败，并清除这个会话的绑定状态；下一个 turn 会自动走 `resumeSession`，这条路径已经存在，不需要新增逻辑。
 
-**turn 的边界**：在流式输入模式下，每条用户输入处理完会收到一条 `result` 消息。`ClaudeSession` 同一时间只允许一个活跃 turn，这和 `ProjectRuntime` 的排队语义一致。如果 `result` 到达时没有活跃 turn（比如 `/compact` 产生的 `result`），就只交给压缩逻辑处理，不产生 turn 事件。
+**turn 的边界**：
+
+- 在流式输入模式下，每条用户输入处理完会收到一条 `result` 消息。
+- `ProjectRuntime` 每个会话只有一个 pump，turn 严格串行：新消息先进 `pendingTurns` 排队（`turn.queued`），上一个 turn 结束才会调用下一个 `startTurn`。所以 `ClaudeSession` 不会在 turn 进行中收到第二个 `startTurn`，不需要自己排队。
+- turn 进行中能到达 runtime 的输入只有 steer（4.6）和压缩（4.6）。
+- 如果 `result` 到达时没有活跃 turn（比如 `/compact` 产生的 `result`），就只交给压缩逻辑处理，不产生 turn 事件。
 
 ### 4.3 SDK 选项
 
@@ -220,7 +225,7 @@ canUseTool: (toolName, input, { toolUseID, signal, title, decisionReason }) =>
 - SDK 没有单独的压缩方法，压缩的方式就是把 `/compact` 当作用户输入发过去，这也是 Claude Code 自己的做法。
 - `compactSession` 发出 `/compact`，然后等待**下一条 `result` 消息**。
 - `compact_boundary` 消息会被转成 `compaction.completed`，携带 `pre_tokens` / `post_tokens`。
-- 如果当前有活跃 turn，`ProjectRuntime` 不会调用压缩，这里不需要额外处理并发。
+- 现在 `ProjectRuntime.compact()` **没有**检查活跃 turn。对 Claude 来说，`/compact` 只是一条普通输入，turn 进行中发出去会和当前 turn 的 `result` 混在一起。所以要在 `ProjectRuntime.compact()` 里加一个通用检查：有活跃 turn 时直接报错，和 `steer` 在没有活跃 turn 时报错的写法对称。这是所有运行时都需要的修复，不放在 Claude 适配器里单独处理。
 - 自动压缩（`trigger: "auto"`）产生的 `compact_boundary` 同样会转成 `compaction.completed`。
 
 ### 4.7 Action 桥接与 Skills
@@ -347,22 +352,24 @@ runtime:
 
 在临时目录里写一个最小脚本，用真实的 CLI 依次确认下面这些问题。结论写回本文档对应的小节：
 
-1. 同一个 query 里连续两次输入，是否各产生一条 `result` 消息。
-2. 在 turn 进行中 `push` 一条 `priority: "now"` 的消息，是否会合并到当前 turn（4.6）。
-3. 输入 `/compact` 是否会产生 `compact_boundary` 和一条 `result` 消息（4.6）。
-4. `getSessionInfo` 能不能找到隔离配置目录里的会话；resume 一个不存在的 id 时，具体会发生什么（4.8）。
-5. `CLAUDE_CONFIG_DIR/skills` 下的 skills 是否会被加载（4.7）。
-6. `dev-orchestrator` 容器里能否正常使用 SDK 自带的可执行文件（optional dependency 区分 glibc 和 musl 两个版本）。
+1. 在 turn 进行中 `push` 一条 `priority: "now"` 的消息，是否会合并到当前 turn，并且只产生一条 `result`（4.6）。
+2. 输入 `/compact` 是否会产生 `compact_boundary` 和一条 `result` 消息（4.6）。
+3. `getSessionInfo` 能不能找到隔离配置目录里的会话；resume 一个不存在的 id 时，具体会发生什么（4.8）。
+4. `CLAUDE_CONFIG_DIR/skills` 下的 skills 是否会被加载（4.7）。
+5. `dev-orchestrator` 容器里能否正常使用 SDK 自带的可执行文件（optional dependency 区分 glibc 和 musl 两个版本）。
+
+不需要验证“连续输入”的情况：turn 由 `ProjectRuntime` 串行调度，下一条输入一定在上一条的 `result` 之后才会发出（4.2）。
 
 ### 第二阶段：实现
 
 建议按下面的顺序拆成几个提交：
 
-1. `refactor: share action context creation and skill sync between runtimes`：提取 `action-bridge.ts`，`syncSkillsToCodex` 改名为 `syncSkillsTo`。
-2. `build: add claude agent sdk`：安装依赖，同步更新 `bun.lock`。
-3. `feat: add claude code runtime`：`src/runtime/claude/` 和注册代码。
-4. `feat: route claude code permission prompts through approvals`：`canUseTool` 和待审批表。
-5. `docs: document claude runtime configuration`：更新 `config.example.yaml` 和本文档的状态。
+1. `fix: reject compaction while a turn is running`：`ProjectRuntime.compact()` 在有活跃 turn 时报错，补测试（4.6）。
+2. `refactor: share action context creation and skill sync between runtimes`：提取 `action-bridge.ts`，`syncSkillsToCodex` 改名为 `syncSkillsTo`。
+3. `build: add claude agent sdk`：安装依赖，同步更新 `bun.lock`。
+4. `feat: add claude code runtime`：`src/runtime/claude/` 和注册代码。
+5. `feat: route claude code permission prompts through approvals`：`canUseTool` 和待审批表。
+6. `docs: document claude runtime configuration`：更新 `config.example.yaml` 和本文档的状态。
 
 ### 测试
 
