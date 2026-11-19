@@ -160,11 +160,12 @@ storage:
   projectsDir: projects
   databaseUrl: "" # 留空使用纯内存存储，生产环境可配置 postgres://...
 
-runtimes:
-  codex:
-    apiKey: "your-codex-or-openai-api-key"
-    baseUrl: "https://api.openai.com/v1"
+defaultRuntime: codex # codex | claude | pi
 ```
+
+Agent 运行时不在这里配置。每个运行时都读取自己的配置，和直接使用它的 CLI 一样：Codex 读
+`~/.codex`，Claude Code 读 `~/.claude`，Pi 读 `~/.pi/agent`。登录和 provider 配置都在那里完成，
+详见 [docs/references/runtime-setup.md](docs/references/runtime-setup.md)。
 
 配置 PostgreSQL 时，需要在服务启动前显式初始化新数据库：
 
@@ -223,7 +224,7 @@ docker compose up -d --build
 | `storage.databaseUrl`     | `string`  | 空         | PostgreSQL 连接串，留空自动启用纯内存存储  |
 | `auth.token`              | `string`  | 空         | 网关 API Bearer Token，留空则免鉴权        |
 | `router.model`            | `string`  | 空         | 用于大模型零样本意图分流的模型名           |
-| `runtimes.codex.apiKey`   | `string`  | 空         | 传递给 Codex App Server 的认证密钥         |
+| `defaultRuntime`          | `string`  | `codex`    | 未写 `runtime.type` 的项目使用的运行时     |
 | `channels.feishu.enabled` | `boolean` | `false`    | 是否启用飞书事件接收与互动卡片流式适配     |
 | `channels.wecom.enabled`  | `boolean` | `false`    | 是否启用企业微信智能机器人适配器           |
 | `notifications`           | `array`   | `[]`       | 全局出站通知端点（Telegram、Webhooks）     |

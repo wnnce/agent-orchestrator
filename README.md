@@ -159,11 +159,13 @@ storage:
   projectsDir: projects
   databaseUrl: "" # Leave empty for in-memory store, or provide postgres://...
 
-runtimes:
-  codex:
-    apiKey: "your-codex-or-openai-api-key"
-    baseUrl: "https://api.openai.com/v1"
+defaultRuntime: codex # codex | claude | pi
 ```
+
+Agent runtimes are not configured here. Each one reads its own configuration, the same as when
+you use its CLI directly: Codex from `~/.codex`, Claude Code from `~/.claude`, Pi from
+`~/.pi/agent`. Log in or configure providers there; see
+[docs/references/runtime-setup.md](docs/references/runtime-setup.md).
 
 When PostgreSQL is configured, initialize a new database explicitly before starting the service:
 
@@ -223,7 +225,7 @@ The application image incorporates:
 | `storage.databaseUrl`     | `string`  | PostgreSQL connection URL. Empty uses In-Memory store                 |
 | `auth.token`              | `string`  | Gateway API bearer token. Empty disables authentication               |
 | `router.model`            | `string`  | Optional model name for zero-shot LLM intent routing                  |
-| `runtimes.codex.apiKey`   | `string`  | API Key passed to Codex App Server sessions                           |
+| `defaultRuntime`          | `string`  | Runtime for projects without `runtime.type` (default: `codex`)        |
 | `channels.feishu.enabled` | `boolean` | Enable Feishu event receiver and interactive card streamer            |
 | `channels.wecom.enabled`  | `boolean` | Enable WeChat Work intelligent bot streaming adapter                  |
 | `notifications`           | `array`   | Global outbound notification endpoints (Telegram, Webhooks)           |
