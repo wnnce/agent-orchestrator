@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ProjectConfig } from "../src/domain/types.ts";
 import { Logger } from "../src/observability/logger.ts";
@@ -7,13 +7,14 @@ import { CodexRuntime } from "../src/runtime/codex.ts";
 import type { RuntimeContext, RuntimeEvent } from "../src/runtime/runtime.ts";
 
 /**
- * A scripted app-server. It records every message it receives in received.jsonl (in its cwd,
- * which is CODEX_HOME), fails `initialize` once when fail-init exists, and after turn/start asks
+ * A scripted app-server. It records every message it receives in `<dir>/received.jsonl`, fails
+ * `initialize` once when `<dir>/fail-init` exists, and after turn/start asks
  * the client three questions: a command approval for its thread, an MCP elicitation, and a file
  * change approval for a thread nobody is attached to.
  */
-const FAKE_SERVER = `#!/usr/bin/env bun
+const fakeServer = (dir: string) => `#!/usr/bin/env bun
 import { appendFileSync, existsSync, rmSync } from "node:fs";
+process.chdir(${JSON.stringify(dir)});
 import { createInterface } from "node:readline";
 const send = (message) => console.log(JSON.stringify(message));
 createInterface({ input: process.stdin }).on("line", (line) => {
@@ -41,24 +42,25 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 
 describe("Codex app-server protocol", () => {
   let root: string;
-  let codexHome: string;
+  let serverDir: string;
   let runtime: CodexRuntime;
   let events: RuntimeEvent[];
   let context: RuntimeContext;
 
   beforeEach(async () => {
     root = await mkdtemp("/tmp/codex-protocol-");
-    codexHome = path.join(root, "home");
+    serverDir = path.join(root, "server");
+    await mkdir(serverDir);
     const script = path.join(root, "fake-codex");
-    await writeFile(script, FAKE_SERVER, { mode: 0o755 });
-    runtime = new CodexRuntime(script, new Logger({ sink: () => {} }), { apiKey: "test-key" });
+    await writeFile(script, fakeServer(serverDir), { mode: 0o755 });
+    runtime = new CodexRuntime(script, new Logger({ sink: () => {} }));
     events = [];
     const project: ProjectConfig = {
       id: "codex-protocol",
       displayName: "Codex Protocol",
       description: "test",
       routing: { projectId: "codex-protocol" },
-      runtime: { type: "codex", codexHome },
+      runtime: { type: "codex" },
     };
     context = { project, workspacePath: root, onEvent: (event) => void events.push(event) };
   });
@@ -69,7 +71,7 @@ describe("Codex app-server protocol", () => {
   });
 
   async function received(): Promise<Array<Record<string, any>>> {
-    const file = Bun.file(path.join(codexHome, "received.jsonl"));
+    const file = Bun.file(path.join(serverDir, "received.jsonl"));
     if (!(await file.exists())) return [];
     return (await file.text())
       .trim()
@@ -87,7 +89,7 @@ describe("Codex app-server protocol", () => {
   }
 
   test("a failed handshake does not leave a half-started server behind", async () => {
-    await Bun.write(path.join(codexHome, "fail-init"), "");
+    await Bun.write(path.join(serverDir, "fail-init"), "");
     await expect(runtime.startSession(context)).rejects.toThrow("init failed");
     const session = await runtime.startSession(context);
     expect(session.id).toBe("thread-test");

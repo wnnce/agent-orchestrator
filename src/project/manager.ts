@@ -1,9 +1,4 @@
-import type {
-  McpServerConfig,
-  NotificationConfig,
-  ProjectConfig,
-  ProjectRuntimeConfig,
-} from "../domain/types.ts";
+import type { NotificationConfig, ProjectConfig } from "../domain/types.ts";
 import type { Store } from "../persistence/store.ts";
 import { ArtifactStore } from "../artifacts/store.ts";
 import { WorkspaceManager } from "../workspace/workspace.ts";
@@ -110,34 +105,10 @@ export class ProjectManager {
     sharedWorkspaces?: WorkspaceManager,
   ): ProjectRuntime {
     const runtimeType = project.runtime?.type ?? this.defaultRuntime;
-    const projectMcpServers = project.runtime?.mcpServers ?? [];
-    const runtimeConfigEntry = (this.config.runtimes?.[runtimeType] ??
-      (runtimeType === "codex" ? this.config.codex : undefined)) as
-      | { mcpServers?: McpServerConfig[] }
-      | undefined;
-    const mcpServers = mergeMcpServers(
-      (runtimeConfigEntry?.mcpServers ??
-        this.config.codex?.mcpServers ??
-        []) as McpServerConfig[],
-      projectMcpServers,
-    );
-    const runtimeConfig: ProjectRuntimeConfig = {
-      ...project.runtime,
-      type: runtimeType,
-      approvalPolicy: project.runtime?.approvalPolicy ?? "never",
-      sandbox: project.runtime?.sandbox ?? "danger-full-access",
-      mcpServers,
-    };
-
-    const effectiveNotifications = mergeNotifications(
-      this.config.notifications ?? [],
-      project.notifications,
-    );
-
     const effective: ProjectConfig = {
       ...project,
-      runtime: runtimeConfig,
-      notifications: effectiveNotifications,
+      runtime: { ...project.runtime, type: runtimeType },
+      notifications: mergeNotifications(this.config.notifications ?? [], project.notifications),
     };
     const workspaceRoot = `${this.config.dataDir}/projects`;
     const baseRoot = `${this.config.dataDir}/bases`;
@@ -181,16 +152,6 @@ export class ProjectManager {
       actionRegistry,
     );
   }
-}
-
-function mergeMcpServers(
-  globalServers: McpServerConfig[],
-  projectServers: McpServerConfig[],
-): McpServerConfig[] {
-  const merged = new Map<string, McpServerConfig>();
-  for (const server of globalServers) merged.set(server.name, server);
-  for (const server of projectServers) merged.set(server.name, server);
-  return [...merged.values()];
 }
 
 export function mergeNotifications(

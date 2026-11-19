@@ -15,7 +15,7 @@ const baseProject = {
     keywords: ["project-a"],
     routingHints: [],
   },
-  runtime: { type: "codex", sandbox: "workspace-write" },
+  runtime: { type: "codex" },
   repository: { url: "https://github.com/org/repo.git", baseBranch: "main" },
 };
 
@@ -38,27 +38,11 @@ test("project schema rejects invalid MCP server definitions", () => {
       },
     }),
   ).toThrow("MCP server needs url or command");
-
-  expect(() =>
-    projectConfigSchema.parse({
-      ...baseProject,
-      agent: {
-        mcpServers: [{ name: "invalid-agent-mcp" }],
-      },
-    }),
-  ).toThrow("MCP server needs url or command");
 });
 
 test("project schema accepts a repository with auth and committer", () => {
   const parsed = projectConfigSchema.parse({
     ...baseProject,
-    agent: {
-      model: "gpt-5-codex",
-      reasoningEffort: "high",
-      mcpServers: [
-        { name: "db", command: "mcp-server-postgres", args: ["--url", "pg://localhost"] },
-      ],
-    },
     repository: {
       url: "git@github.com:org/backend.git",
       baseBranch: "main",
@@ -70,7 +54,6 @@ test("project schema accepts a repository with auth and committer", () => {
   expect(parsed.repository?.path).toBe("repos/backend");
   expect(parsed.repository?.auth?.type).toBe("ssh-key");
   expect(parsed.repository?.committer?.name).toBe("bot");
-  expect(parsed.runtime?.model).toBe("gpt-5-codex");
 });
 
 test("session lifecycle settings live in the session section", () => {
@@ -148,17 +131,35 @@ test("project schema successfully loads projects.example.yaml", async () => {
   expect(p.runtime?.model).toBe("gpt-5-codex");
 });
 
-test("the older agent section is merged into runtime, runtime winning on conflicts", () => {
+test("a project chooses only its runtime, model, reasoning effort and MCP servers", () => {
   const parsed = projectConfigSchema.parse({
     ...baseProject,
-    runtime: { type: "codex", model: "from-runtime" },
-    agent: { model: "from-agent", reasoningEffort: "high", temperature: 0.2 },
+    runtime: {
+      type: "claude",
+      model: "claude-sonnet-5-5",
+      reasoningEffort: "high",
+      mcpServers: [{ name: "db", command: "mcp-server-postgres" }],
+    },
   });
-  expect(parsed.runtime).toMatchObject({
-    type: "codex",
-    model: "from-runtime",
-    reasoningEffort: "high",
+  expect(parsed.runtime?.model).toBe("claude-sonnet-5-5");
+  // The runtime type may be left to the service's defaultRuntime.
+  expect(projectConfigSchema.parse({ ...baseProject, runtime: { model: "m" } }).runtime).toEqual({
+    model: "m",
   });
-  expect(parsed.runtime).not.toHaveProperty("temperature");
-  expect(parsed).not.toHaveProperty("agent");
+  for (const removed of [
+    { sandbox: "workspace-write" },
+    { approvalPolicy: "never" },
+    { codexHome: "/tmp/codex" },
+    { config: { model_verbosity: "low" } },
+    { providers: {} },
+    { idleTimeoutMs: 1000 },
+    { reasoningEffort: "extreme" },
+  ]) {
+    expect(() =>
+      projectConfigSchema.parse({ ...baseProject, runtime: { type: "codex", ...removed } }),
+    ).toThrow();
+  }
+  expect(() =>
+    projectConfigSchema.parse({ ...baseProject, agent: { model: "gpt-5-codex" } }),
+  ).toThrow();
 });

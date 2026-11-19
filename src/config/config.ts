@@ -7,7 +7,7 @@ import { projectConfigSchema } from "../domain/schemas.ts";
 import type { AppConfig } from "./service.ts";
 
 export { loadConfig, configPathFromArgs } from "./service.ts";
-export type { AppConfig, FeishuConfig, WeComConfig, CodexConfig } from "./service.ts";
+export type { AppConfig, FeishuConfig, WeComConfig } from "./service.ts";
 
 export function parseDotenv(content: string): Record<string, string> {
   const result: Record<string, string> = {};

@@ -619,7 +619,6 @@ Sync daily updates.
       allowUnauthenticated: true,
       logLevel: "info",
       routerBaseUrl: "http://localhost:8317/v1",
-      codex: {},
       feishu: { enabled: false },
     };
 

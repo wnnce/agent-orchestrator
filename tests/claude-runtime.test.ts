@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readlink, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -12,6 +12,7 @@ import type {
 import { z } from "zod";
 import { ActionRegistry } from "../src/actions/registry.ts";
 import { Logger } from "../src/observability/logger.ts";
+import { createGlobalProjectConfig } from "../src/project/global.ts";
 import type { ProjectConfig } from "../src/domain/types.ts";
 import { ClaudeRuntime, type ClaudeQuery } from "../src/runtime/claude/index.ts";
 import { defaultRuntimeRegistry } from "../src/runtime/registry.ts";
@@ -132,7 +133,7 @@ describe("ClaudeRuntime", () => {
       displayName: "Claude",
       description: "test",
       routing: { projectId: "claude-test" },
-      runtime: { type: "claude", approvalPolicy: "on-request" },
+      runtime: { type: "claude" },
     };
     queries = [];
     failInit = false;
@@ -144,18 +145,11 @@ describe("ClaudeRuntime", () => {
         events.push(event);
       },
     };
-    runtime = new ClaudeRuntime(
-      quiet,
-      { apiKey: "sk-test" },
-      undefined,
-      undefined,
-      root,
-      (params) => {
-        const query = new ScriptedQuery(params.options, params.prompt, failInit);
-        queries.push(query);
-        return query;
-      },
-    );
+    runtime = new ClaudeRuntime(quiet, undefined, undefined, root, (params) => {
+      const query = new ScriptedQuery(params.options, params.prompt, failInit);
+      queries.push(query);
+      return query;
+    });
   });
 
   afterEach(async () => {
@@ -315,18 +309,11 @@ describe("ClaudeRuntime", () => {
       parameters: z.object({ text: z.string() }),
       handler: async () => ({ pong: true }),
     });
-    const withActions = new ClaudeRuntime(
-      quiet,
-      { apiKey: "sk-test" },
-      undefined,
-      registry,
-      root,
-      (params) => {
-        const query = new ScriptedQuery(params.options, params.prompt);
-        queries.push(query);
-        return query;
-      },
-    );
+    const withActions = new ClaudeRuntime(quiet, undefined, registry, root, (params) => {
+      const query = new ScriptedQuery(params.options, params.prompt);
+      queries.push(query);
+      return query;
+    });
     await withActions.startSession(context);
     expect(queries[0]!.options.mcpServers?.orchestrator).toMatchObject({ type: "sdk" });
     const canUseTool = queries[0]!.options.canUseTool as CanUseTool;
@@ -337,6 +324,32 @@ describe("ClaudeRuntime", () => {
     expect(decision?.behavior).toBe("allow");
     expect(types()).not.toContain("approval.requested");
     await withActions.stop();
+  });
+
+  test("project and global skills are loaded through generated local plugins", async () => {
+    const globalDir = join(root, "projects");
+    const projectDir = join(globalDir, "claude-test");
+    await mkdir(join(globalDir, ".skills", "shared"), { recursive: true });
+    await mkdir(join(projectDir, ".skills", "deploy"), { recursive: true });
+    const globalProject = createGlobalProjectConfig(globalDir, "claude");
+    const withSkills = new ClaudeRuntime(quiet, globalProject, undefined, root, (params) => {
+      const query = new ScriptedQuery(params.options, params.prompt);
+      queries.push(query);
+      return query;
+    });
+    await withSkills.startSession({ ...context, project: { ...project, projectDir } });
+    await withSkills.startSession({ ...context, project: { ...project, projectDir } });
+
+    const plugins = queries[0]!.options.plugins!;
+    expect(plugins.map((p) => p.path)).toEqual([
+      join(root, "claude-plugins", "claude-test", "global"),
+      join(root, "claude-plugins", "claude-test", "claude-test"),
+    ]);
+    expect(await readlink(join(plugins[0]!.path, "skills"))).toBe(join(globalDir, ".skills"));
+    expect(await readlink(join(plugins[1]!.path, "skills"))).toBe(join(projectDir, ".skills"));
+    const manifest = await Bun.file(join(plugins[1]!.path, ".claude-plugin", "plugin.json")).json();
+    expect(manifest.name).toBe("claude-test");
+    await withSkills.stop();
   });
 
   test("releasing a session ends its Claude Code process", async () => {

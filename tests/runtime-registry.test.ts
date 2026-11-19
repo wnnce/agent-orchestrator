@@ -47,7 +47,6 @@ function createSampleConfig(dataDir: string, artifactDir: string): AppConfig {
     allowUnauthenticated: true,
     routerModel: "gpt-4o",
     routerBaseUrl: "http://localhost:8317/v1",
-    codex: {},
     logLevel: "info",
     feishu: { enabled: false },
   };
@@ -233,10 +232,7 @@ describe("ProjectManager Runtime Extensibility", () => {
         summary: "Custom Agent Project Summary",
         keywords: ["custom"],
       },
-      runtime: {
-        type: "third-party",
-        sandbox: "workspace-write",
-      },
+      runtime: { type: "third-party" },
     };
 
     const store = new MemoryStore();

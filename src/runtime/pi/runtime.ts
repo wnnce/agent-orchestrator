@@ -1,5 +1,3 @@
-import { join, resolve } from "node:path";
-import { mkdir } from "node:fs/promises";
 import {
   createAgentSession,
   createMcpExtension,
@@ -13,7 +11,7 @@ import {
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai/compat";
 import type { ActionRegistry } from "../../actions/registry.ts";
-import type { McpServerConfig, ProjectConfig } from "../../domain/types.ts";
+import type { ProjectConfig } from "../../domain/types.ts";
 import { Logger } from "../../observability/logger.ts";
 import type {
   AgentRuntime,
@@ -24,23 +22,20 @@ import type {
   RuntimeTurn,
 } from "../runtime.ts";
 import { RuntimeSessionNotFoundError } from "../runtime.ts";
+import { projectSkillSources } from "../skills.ts";
 import { PI_CAPABILITIES } from "./capabilities.ts";
 import { PiNormalizer, asAssistantMessage, assistantText } from "./normalizer.ts";
 import { bridgeActionsToPiTools } from "./tools.ts";
-import {
-  PI_THINKING_LEVELS,
-  type PiProviderConfig,
-  type PiRuntimeConfig,
-  type PiSessionWrapper,
-} from "./types.ts";
-
-type ProviderInput = Parameters<ModelRuntime["registerProvider"]>[1];
+import { PI_THINKING_LEVELS, type PiSessionWrapper } from "./types.ts";
 
 /** Built-in tools of a read-only session. */
 export const PI_READ_ONLY_TOOLS = ["read", "grep", "find", "ls"];
 
 /**
- * Native in-process AgentRuntime implementation for Pi Agent (@earendil-works/pi-coding-agent).
+ * Pi Agent (@earendil-works/pi-coding-agent) in process. Pi reads its own configuration from its
+ * agent directory (PI_CODING_AGENT_DIR, by default ~/.pi/agent): settings, models.json, auth.json,
+ * extensions and sessions. A session adds only what the project sets: model, thinking level, MCP
+ * servers, orchestrator actions and skills, and read-only tools for a read-only session.
  */
 export class PiRuntime implements AgentRuntime {
   readonly name = "pi";
@@ -52,12 +47,9 @@ export class PiRuntime implements AgentRuntime {
 
   constructor(
     private readonly logger = new Logger(),
-    private readonly config: PiRuntimeConfig = {},
     private readonly globalProject?: ProjectConfig | undefined,
     private readonly actionRegistry?: ActionRegistry | undefined,
     modelRuntime?: ModelRuntime | undefined,
-    /** Service data directory; Pi's agent dir defaults to <dataDir>/pi/<projectId>. */
-    private readonly dataDir = ".data",
   ) {
     if (modelRuntime) this.models = Promise.resolve(modelRuntime);
   }
@@ -239,24 +231,11 @@ export class PiRuntime implements AgentRuntime {
     context: RuntimeContext,
     existingSessionId?: string,
   ): Promise<PiSessionWrapper> {
-    const agentDir = this.agentDir(context.project);
-    await mkdir(agentDir, { recursive: true });
-
-    const sessionDir = join(agentDir, "sessions");
-    await mkdir(sessionDir, { recursive: true });
-
-    const settingsManager = SettingsManager.inMemory({
-      packages: [],
-      extensions: ["-*"],
-      ...(this.config.settings ?? {}),
-    });
-
-    const modelRuntime = await this.modelRuntime(context.project);
+    const agentDir = getAgentDir();
+    const settingsManager = SettingsManager.create(context.workspacePath, agentDir);
+    const modelRuntime = await this.modelRuntime();
     const model = this.resolveModel(context.project, modelRuntime);
     const thinkingLevel = this.thinkingLevel(context.project);
-    const builtinTools = context.readOnly
-      ? PI_READ_ONLY_TOOLS
-      : (this.config.tools ?? ["read", "write", "edit", "bash"]);
 
     const wrapperHolder: { wrapper?: PiSessionWrapper } = {};
 
@@ -272,63 +251,61 @@ export class PiRuntime implements AgentRuntime {
       }));
     }
 
-    const allTools = [...builtinTools, ...customTools.map((t) => t.name)];
-
-    // Session persistence handling
-    let sessionManager = SessionManager.create(context.workspacePath, sessionDir);
+    let sessionManager = SessionManager.create(context.workspacePath);
     if (existingSessionId) {
-      const stored = await SessionManager.list(context.workspacePath, sessionDir);
+      const stored = await SessionManager.list(context.workspacePath);
       const match = stored.find((s) => s.id === existingSessionId);
       if (!match) throw new RuntimeSessionNotFoundError(existingSessionId);
       sessionManager = SessionManager.open(match.path);
     }
 
-    // MCP extension handling
-    let resourceLoader: DefaultResourceLoader | undefined;
-    const serviceMcpServers = this.globalProject?.runtime?.mcpServers ?? [];
-    const projectMcpServers = context.project.runtime?.mcpServers ?? [];
-    const allMcpServers = [...serviceMcpServers, ...projectMcpServers];
-
-    if (allMcpServers.length > 0) {
-      resourceLoader = new DefaultResourceLoader({
-        cwd: context.workspacePath,
-        agentDir,
-        extensionFactories: [
-          createMcpExtension({
-            loadConfig: () => ({
-              servers: allMcpServers.map((s) => ({
-                name: s.name,
-                config: s.url
-                  ? {
-                      url: s.url,
-                      ...(s.headers || s.http_headers
-                        ? { headers: (s.headers ?? s.http_headers)! }
-                        : {}),
-                    }
-                  : {
-                      command: s.command ?? "bash",
-                      ...(s.args ? { args: s.args } : {}),
-                    },
-                source: "orchestrator",
-                scope: "project" as const,
-              })),
-              errors: [],
-            }),
-          }),
-        ],
-      });
-      await resourceLoader.reload();
-    }
+    const mcpServers = context.project.runtime?.mcpServers ?? [];
+    const resourceLoader = new DefaultResourceLoader({
+      cwd: context.workspacePath,
+      agentDir,
+      settingsManager,
+      additionalSkillPaths: projectSkillSources(context.project, this.globalProject).map(
+        (s) => s.dir,
+      ),
+      extensionFactories:
+        mcpServers.length === 0
+          ? []
+          : [
+              createMcpExtension({
+                loadConfig: () => ({
+                  servers: mcpServers.map((s) => ({
+                    name: s.name,
+                    config: s.url
+                      ? {
+                          url: s.url,
+                          ...(s.headers || s.http_headers
+                            ? { headers: (s.headers ?? s.http_headers)! }
+                            : {}),
+                        }
+                      : {
+                          command: s.command ?? "bash",
+                          ...(s.args ? { args: s.args } : {}),
+                        },
+                    source: "orchestrator",
+                    scope: "project" as const,
+                  })),
+                  errors: [],
+                }),
+              }),
+            ],
+    });
+    await resourceLoader.reload();
 
     const { session } = await createAgentSession({
       cwd: context.workspacePath,
       agentDir,
       modelRuntime,
       ...(model ? { model } : {}),
-      thinkingLevel,
-      tools: allTools,
+      ...(thinkingLevel ? { thinkingLevel } : {}),
+      // Without an allowlist Pi enables its default tools plus the custom (action) tools.
+      ...(context.readOnly ? { tools: PI_READ_ONLY_TOOLS } : {}),
       customTools,
-      ...(resourceLoader ? { resourceLoader } : {}),
+      resourceLoader,
       sessionManager,
       settingsManager,
     });
@@ -440,66 +417,37 @@ export class PiRuntime implements AgentRuntime {
     return wrapper;
   }
 
-  /** Pi's config directory for a project: models.json, auth.json and sessions live there. */
-  private agentDir(project: ProjectConfig): string {
-    return this.config.agentDir ?? resolve(this.dataDir, "pi", project.id);
-  }
-
-  /** The model registry with the configured providers, built once per runtime. */
-  private modelRuntime(project: ProjectConfig): Promise<ModelRuntime> {
-    this.models ??= this.createModelRuntime(project);
+  /** Pi's model registry (models.json and auth.json in its agent directory), built once. */
+  private modelRuntime(): Promise<ModelRuntime> {
+    this.models ??= ModelRuntime.create();
     return this.models;
   }
 
-  private async createModelRuntime(project: ProjectConfig): Promise<ModelRuntime> {
-    const agentDir = this.agentDir(project);
-    const runtime = await ModelRuntime.create({
-      authPath: join(agentDir, "auth.json"),
-      modelsPath: join(agentDir, "models.json"),
-    });
-    const providers: Record<string, PiProviderConfig> = {
-      ...this.config.providers,
-      ...(project.runtime?.providers as Record<string, PiProviderConfig> | undefined),
-    };
-    for (const [providerId, provider] of Object.entries(providers)) {
-      // Entries mirror models.json; Pi validates them when they are registered.
-      runtime.registerProvider(providerId, provider as unknown as ProviderInput);
-      if (provider.apiKey) await runtime.setRuntimeApiKey(providerId, provider.apiKey);
-    }
-    return runtime;
-  }
-
   /**
-   * The model for a project: `runtime.model` (optionally "provider/model") or the configured
-   * default. A model that is configured but unknown is an error; with none configured Pi
-   * picks its own default.
+   * The project's `runtime.model`, as "provider/model" or a model id. A model that is set but
+   * unknown is an error; without one Pi uses its own default from settings.
    */
   private resolveModel(project: ProjectConfig, models: ModelRuntime): Model<any> | undefined {
-    const modelId = project.runtime?.model ?? this.config.defaultModel;
+    const modelId = project.runtime?.model;
     if (!modelId) return undefined;
-    const providerId =
-      typeof project.runtime?.provider === "string"
-        ? project.runtime.provider
-        : this.config.defaultProvider;
-    const model = providerId
-      ? models.getModel(providerId, modelId)
-      : models.getModels().find((m) => m.id === modelId || `${m.provider}/${m.id}` === modelId);
+    const model = models
+      .getModels()
+      .find((m) => `${m.provider}/${m.id}` === modelId || m.id === modelId);
     if (!model) {
       const available = models.getModels().map((m) => `${m.provider}/${m.id}`);
       throw new Error(
-        `Pi model ${providerId ? `${providerId}/` : ""}${modelId} is not configured; known models: ${available.join(", ") || "none"}`,
+        `Pi model ${modelId} is not configured; known models: ${available.join(", ") || "none"}`,
       );
     }
     return model;
   }
 
-  /** The project's `reasoningEffort` when Pi supports it, else the configured level. */
-  private thinkingLevel(project: ProjectConfig): ThinkingLevel {
+  /** The project's `reasoningEffort` when Pi supports that level; otherwise Pi's own default. */
+  private thinkingLevel(project: ProjectConfig): ThinkingLevel | undefined {
     const requested = project.runtime?.reasoningEffort;
-    if (requested && (PI_THINKING_LEVELS as readonly string[]).includes(requested)) {
-      return requested as ThinkingLevel;
-    }
-    return this.config.thinkingLevel ?? "medium";
+    return requested && (PI_THINKING_LEVELS as readonly string[]).includes(requested)
+      ? (requested as ThinkingLevel)
+      : undefined;
   }
 }
 

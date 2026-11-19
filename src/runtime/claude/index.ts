@@ -1,5 +1,4 @@
 export * from "./capabilities.ts";
-export * from "./types.ts";
 export * from "./options.ts";
 export * from "./normalizer.ts";
 export * from "./session.ts";

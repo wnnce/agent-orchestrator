@@ -32,7 +32,6 @@ function createTestGateway(customConfig?: Partial<AppConfig>) {
     allowUnauthenticated: true,
     routerModel: "gpt-4o",
     routerBaseUrl: "http://localhost:8317/v1",
-    codex: {},
     logLevel: "info",
     feishu: { enabled: false },
     ...customConfig,

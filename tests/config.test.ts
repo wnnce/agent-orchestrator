@@ -31,8 +31,6 @@ apiToken: test-api-token
 routerModel: test-router
 routerApiKey: test-router-key
 routerBaseUrl: https://router.example.com/v1
-codex:
-  apiKey: test-codex-key
 feishu:
   enabled: true
   verificationToken: test-verification-token
@@ -52,22 +50,8 @@ feishu:
       routerModel: "test-router",
       routerApiKey: "test-router-key",
       routerBaseUrl: "https://router.example.com/v1",
-      codex: {
-        apiKey: "test-codex-key",
-      },
       feishu: { enabled: true, verificationToken: "test-verification-token" },
     });
-  });
-
-  test("loads global Codex MCP server defaults from service YAML", async () => {
-    await writeFile(
-      file,
-      `runtimes:\n  codex:\n    apiKey: test-key\n    mcpServers:\n      - name: docs\n        url: https://mcp.example.com/docs\n`,
-    );
-    const config = await loadConfig(file);
-    expect(config.codex.mcpServers).toEqual([
-      { name: "docs", url: "https://mcp.example.com/docs" },
-    ]);
   });
 
   test("defaultRuntime defaults to codex and can be set", async () => {
@@ -96,26 +80,6 @@ feishu:
       { name: "feishu-ops", type: "feishu", url: "https://open.feishu.cn/hook/1", enabled: true },
       { name: "wecom-ops", type: "wecom", url: "https://qyapi.weixin.qq.com/hook/2", enabled: true },
     ]);
-  });
-
-  test("accepts arbitrary custom runtime parameters under runtimes/codex", async () => {
-    await writeFile(
-      file,
-      `
-runtimes:
-  codex:
-    apiKey: test-key
-    customOption: 123
-    model_providers:
-      my_provider:
-        base_url: https://example.com/v1
-`,
-    );
-    const config = await loadConfig(file);
-    expect((config.codex as any).customOption).toBe(123);
-    expect((config.codex as any).model_providers.my_provider.base_url).toBe(
-      "https://example.com/v1",
-    );
   });
 
   test("applies defaults and derives the artifact directory", async () => {
@@ -156,7 +120,6 @@ runtimes:
       expect(config.databaseUrl).toBeUndefined();
       expect(config.logLevel).toBe("info");
       expect(config.feishu.enabled).toBe(false);
-      expect(config.codex.apiKey).toBeUndefined();
     } finally {
       for (const [key, value] of Object.entries(previous)) {
         if (value === undefined) delete process.env[key];
@@ -173,6 +136,9 @@ runtimes:
     ["feishu:\n  enabled: true", "feishu.verificationToken"],
     ["unknownOption: true", "Unrecognized key"],
     ["codexBinary: /opt/external/codex", "Unrecognized key"],
+    // Runtimes read their own configuration (~/.codex, ~/.claude, ~/.pi) since design 05.
+    ["runtimes:\n  codex:\n    apiKey: k", "Unrecognized key"],
+    ["codex:\n  apiKey: k", "Unrecognized key"],
   ])("rejects invalid configuration: %s", async (content, field) => {
     await writeFile(file, content);
     await expect(loadConfig(file)).rejects.toThrow(field);
@@ -219,11 +185,6 @@ router:
   apiKey: router-api-key
   baseUrl: https://custom-router.ai/v1
 
-runtimes:
-  codex:
-    apiKey: codex-key
-    model_provider: custom
-
 channels:
   feishu:
     enabled: true
@@ -251,10 +212,6 @@ channels:
       apiKey: "router-api-key",
       baseUrl: "https://custom-router.ai/v1",
     });
-    expect(config.runtimes!.codex).toEqual({
-      apiKey: "codex-key",
-      model_provider: "custom",
-    });
     expect(config.channels!.feishu).toEqual({
       enabled: true,
       verificationToken: "feishu-token",
@@ -273,7 +230,6 @@ channels:
     expect(config.routerModel).toBe("gpt-4o-mini");
     expect(config.routerApiKey).toBe("router-api-key");
     expect(config.routerBaseUrl).toBe("https://custom-router.ai/v1");
-    expect(config.codex.apiKey).toBe("codex-key");
     expect(config.feishu.verificationToken).toBe("feishu-token");
   });
 

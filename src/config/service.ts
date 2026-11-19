@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
 import { z } from "zod";
-import { mcpServerConfigSchema, notificationConfigSchema } from "../domain/schemas.ts";
+import { notificationConfigSchema } from "../domain/schemas.ts";
 import type { NotificationConfig } from "../domain/types.ts";
 
 const optionalText = z
@@ -45,15 +45,6 @@ export const titlesConfigSchema = z.strictObject({
   baseUrl: z.url().default("https://api.openai.com/v1"),
 });
 
-export const codexConfigSchema = z
-  .object({
-    apiKey: optionalText,
-    mcpServers: z.array(mcpServerConfigSchema).optional(),
-    config: z.record(z.string(), z.unknown()).optional(),
-    baseConfigPath: z.string().optional(),
-  })
-  .passthrough();
-
 export const feishuConfigSchema = z
   .strictObject({
     enabled: z.boolean().default(false),
@@ -83,13 +74,6 @@ export const wecomConfigSchema = z
     message: "botId and secret are required when WeCom is enabled",
   });
 
-export const runtimesConfigSchema = z
-  .object({
-    codex: codexConfigSchema.prefault({}),
-  })
-  .catchall(z.record(z.string(), z.unknown()))
-  .prefault({});
-
 export const channelsConfigSchema = z.strictObject({
   feishu: feishuConfigSchema.prefault({}),
   wecom: wecomConfigSchema.prefault({}),
@@ -104,7 +88,6 @@ export const hierarchicalAppConfigSchema = z.strictObject({
   auth: authConfigSchema.prefault({}),
   router: routerConfigSchema.prefault({}),
   titles: titlesConfigSchema.prefault({}),
-  runtimes: runtimesConfigSchema.prefault({}),
   channels: channelsConfigSchema.prefault({}),
   notifications: z.array(notificationConfigSchema).optional().default([]),
 });
@@ -167,13 +150,7 @@ function normalizeRawConfig(raw: unknown): unknown {
   delete obj.routerApiKey;
   delete obj.routerBaseUrl;
 
-  // 6. runtimes (codex)
-  const runtimes = { ...(obj.runtimes ?? {}) };
-  if (obj.codex !== undefined && runtimes.codex === undefined) runtimes.codex = obj.codex;
-  obj.runtimes = runtimes;
-  delete obj.codex;
-
-  // 7. channels (feishu, wecom)
+  // 6. channels (feishu, wecom)
   const channels = { ...(obj.channels ?? {}) };
   if (obj.feishu !== undefined && channels.feishu === undefined) channels.feishu = obj.feishu;
   if (obj.wecom !== undefined && channels.wecom === undefined) channels.wecom = obj.wecom;
@@ -181,7 +158,7 @@ function normalizeRawConfig(raw: unknown): unknown {
   delete obj.feishu;
   delete obj.wecom;
 
-  // 8. notifications: support top-level or channels.notifications fallback
+  // 7. notifications: support top-level or channels.notifications fallback
   if (obj.channels?.notifications !== undefined && obj.notifications === undefined) {
     obj.notifications = obj.channels.notifications;
     delete obj.channels.notifications;
@@ -203,7 +180,6 @@ export type StorageConfig = {
 export type AuthConfig = z.output<typeof authConfigSchema>;
 export type RouterConfig = z.output<typeof routerConfigSchema>;
 export type TitlesConfig = z.output<typeof titlesConfigSchema>;
-export type CodexConfig = z.output<typeof codexConfigSchema>;
 export type FeishuConfig = z.output<typeof feishuConfigSchema>;
 export type WeComConfig = z.output<typeof wecomConfigSchema>;
 
@@ -216,9 +192,6 @@ export interface AppConfig {
   auth?: AuthConfig;
   router?: RouterConfig;
   titles?: TitlesConfig;
-  runtimes?: Record<string, Record<string, unknown>> & {
-    codex: CodexConfig;
-  };
   channels?: {
     feishu: FeishuConfig;
     wecom: WeComConfig;
@@ -238,7 +211,6 @@ export interface AppConfig {
   routerModel?: string | undefined;
   routerApiKey?: string | undefined;
   routerBaseUrl: string;
-  codex: CodexConfig;
   feishu: FeishuConfig;
   wecom?: WeComConfig;
 }
@@ -310,7 +282,6 @@ export async function loadConfig(file = "config.yaml"): Promise<AppConfig> {
     auth: data.auth,
     router: data.router,
     titles: data.titles,
-    runtimes: data.runtimes,
     channels: data.channels,
 
     // Backward-compatible accessors
@@ -326,7 +297,6 @@ export async function loadConfig(file = "config.yaml"): Promise<AppConfig> {
     routerModel: data.router.model,
     routerApiKey: data.router.apiKey,
     routerBaseUrl: data.router.baseUrl,
-    codex: data.runtimes.codex,
     feishu: data.channels.feishu,
     wecom: data.channels.wecom,
     notifications: data.notifications ?? [],

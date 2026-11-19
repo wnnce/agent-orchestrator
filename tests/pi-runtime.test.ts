@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -108,11 +108,23 @@ const DUMMY_PROJECT: ProjectConfig = {
   },
   runtime: {
     type: "pi",
-    provider: "mock-provider",
-    model: "mock-model",
+    model: "mock-provider/mock-model",
   },
   repository: { url: "https://github.com/example/repo.git", baseBranch: "main" },
 };
+
+// Pi keeps settings, models and sessions in its agent directory; never touch the real ~/.pi.
+const piAgentDir = mkdtempSync(join(tmpdir(), "pi-agent-dir-"));
+const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+beforeAll(async () => {
+  process.env.PI_CODING_AGENT_DIR = piAgentDir;
+  await Bun.write(join(piAgentDir, "settings.json"), JSON.stringify({ retry: { enabled: false } }));
+});
+afterAll(() => {
+  if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+  else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+  rmSync(piAgentDir, { recursive: true, force: true });
+});
 
 describe("Pi Agent Native SDK Runtime", () => {
   it("registers pi runtime in defaultRuntimeRegistry with PI_CAPABILITIES", () => {
@@ -325,18 +337,7 @@ describe("Pi Agent Native SDK Runtime", () => {
         const mockModelRuntime = await createMockModelRuntime(["Pi", " Agent", " operational"]);
 
         const events: RuntimeEvent[] = [];
-        const runtime = new PiRuntime(
-          new Logger(),
-          {
-            defaultProvider: "mock-provider",
-            defaultModel: "mock-model",
-            thinkingLevel: "off",
-          },
-          undefined,
-          undefined,
-          mockModelRuntime,
-          tmpWorkspace,
-        );
+        const runtime = new PiRuntime(new Logger(), undefined, undefined, mockModelRuntime);
 
         const context: RuntimeContext = {
           project: DUMMY_PROJECT,
@@ -396,14 +397,7 @@ describe("Pi Agent Native SDK Runtime", () => {
     it("offers only read-only tools to a read-only session", async () => {
       const tmpWorkspace = mkdtempSync(join(tmpdir(), "pi-rt-readonly-"));
       try {
-        const runtime = new PiRuntime(
-          new Logger({ sink: () => {} }),
-          { defaultProvider: "mock-provider", defaultModel: "mock-model", thinkingLevel: "off" },
-          undefined,
-          undefined,
-          await createMockModelRuntime(),
-          tmpWorkspace,
-        );
+        const runtime = new PiRuntime(new Logger({ sink: () => {} }), undefined, undefined, await createMockModelRuntime());
         const context: RuntimeContext = {
           project: DUMMY_PROJECT,
           workspacePath: tmpWorkspace,
@@ -424,18 +418,7 @@ describe("Pi Agent Native SDK Runtime", () => {
       try {
         const mockModelRuntime = await createMockModelRuntime(["long", " run"]);
         const events: RuntimeEvent[] = [];
-        const runtime = new PiRuntime(
-          new Logger(),
-          {
-            defaultProvider: "mock-provider",
-            defaultModel: "mock-model",
-            thinkingLevel: "off",
-          },
-          undefined,
-          undefined,
-          mockModelRuntime,
-          tmpWorkspace,
-        );
+        const runtime = new PiRuntime(new Logger(), undefined, undefined, mockModelRuntime);
 
         const context: RuntimeContext = {
           project: DUMMY_PROJECT,
@@ -469,18 +452,7 @@ describe("Pi Agent Native SDK Runtime", () => {
       try {
         const mockModelRuntime = await createMockModelRuntime(["hello"]);
         const events: RuntimeEvent[] = [];
-        const runtime = new PiRuntime(
-          new Logger(),
-          {
-            defaultProvider: "mock-provider",
-            defaultModel: "mock-model",
-            thinkingLevel: "off",
-          },
-          undefined,
-          undefined,
-          mockModelRuntime,
-          tmpWorkspace,
-        );
+        const runtime = new PiRuntime(new Logger(), undefined, undefined, mockModelRuntime);
 
         const context: RuntimeContext = {
           project: DUMMY_PROJECT,
@@ -549,29 +521,14 @@ describe("Pi Agent Native SDK Runtime", () => {
         await mr.setRuntimeApiKey("failing-provider", "key");
 
         const events: RuntimeEvent[] = [];
-        const runtime = new PiRuntime(
-          new Logger(),
-          {
-            defaultProvider: "failing-provider",
-            defaultModel: "failing-model",
-            thinkingLevel: "off",
-            settings: {
-              retry: { enabled: false },
-            },
-          },
-          undefined,
-          undefined,
-          mr,
-          tmpWorkspace,
-        );
+        const runtime = new PiRuntime(new Logger(), undefined, undefined, mr);
 
         const context: RuntimeContext = {
           project: {
             ...DUMMY_PROJECT,
             runtime: {
               type: "pi",
-              provider: "failing-provider",
-              model: "failing-model",
+              model: "failing-provider/failing-model",
             },
           },
           workspacePath: tmpWorkspace,
@@ -599,67 +556,41 @@ describe("Pi Agent Native SDK Runtime", () => {
       }
     });
 
-    it("registers native providers and preserves model metadata without workaround fallbacks", async () => {
-      const dataDir = mkdtempSync(join(tmpdir(), "pi-rt-providers-"));
-      const runtime = new PiRuntime(
-        new Logger(),
-        {
-          defaultProvider: "deepseek",
-          defaultModel: "deepseek-flash",
+    it("resolves models from Pi's own models.json, and an unknown model is an error", async () => {
+      const tmpWorkspace = mkdtempSync(join(tmpdir(), "pi-rt-models-"));
+      await Bun.write(
+        join(piAgentDir, "models.json"),
+        JSON.stringify({
           providers: {
             deepseek: {
-              baseUrl: "https://sub2api.agoralab.co",
+              baseUrl: "https://llm.example.com",
               apiKey: "sk-test-key",
-              api: "openai-responses",
-              models: [
-                {
-                  id: "deepseek-flash",
-                  name: "DeepSeek V4 Flash",
-                  contextWindow: 1000000,
-                  maxTokens: 384000,
-                  reasoning: true,
-                  compat: {
-                    requiresReasoningContentOnAssistantMessages: true,
-                    thinkingFormat: "deepseek",
-                  },
-                },
-              ],
+              api: "openai-completions",
+              models: [{ id: "deepseek-flash", contextWindow: 1000000, maxTokens: 384000 }],
             },
           },
-        },
-        undefined,
-        undefined,
-        undefined,
-        dataDir,
+        }),
       );
+      const runtime = new PiRuntime(new Logger({ sink: () => {} }));
+      try {
+        const context = (model: string): RuntimeContext => ({
+          project: { ...DUMMY_PROJECT, runtime: { type: "pi", model } },
+          workspacePath: tmpWorkspace,
+          onEvent: () => {},
+        });
+        const session = await runtime.startSession(context("deepseek/deepseek-flash"));
+        const wrapper = (runtime as any).sessions.get(session.id);
+        expect(wrapper.session.model?.id).toBe("deepseek-flash");
+        expect(wrapper.session.model?.contextWindow).toBe(1000000);
 
-      const context: RuntimeContext = {
-        project: {
-          ...DUMMY_PROJECT,
-          runtime: {
-            type: "pi",
-          },
-        },
-        workspacePath: "/tmp",
-        onEvent: () => {},
-      };
-
-      const mr = await (runtime as any).modelRuntime(context.project);
-      const model = mr.getModel("deepseek", "deepseek-flash");
-
-      expect(model).toBeDefined();
-      expect(model.id).toBe("deepseek-flash");
-      expect(model.contextWindow).toBe(1000000);
-      expect(model.maxTokens).toBe(384000);
-      expect(model.reasoning).toBe(true);
-      expect(model.compat?.thinkingFormat).toBe("deepseek");
-      expect(model.compat?.requiresReasoningContentOnAssistantMessages).toBe(true);
-
-      const auth = await mr.getAuth("deepseek");
-      expect(auth?.auth?.apiKey).toBe("sk-test-key");
-
-      await runtime.stop();
-      rmSync(dataDir, { recursive: true, force: true });
+        await expect(runtime.startSession(context("deepseek/unknown"))).rejects.toThrow(
+          "Pi model deepseek/unknown is not configured",
+        );
+      } finally {
+        await runtime.stop();
+        rmSync(join(piAgentDir, "models.json"), { force: true });
+        rmSync(tmpWorkspace, { recursive: true, force: true });
+      }
     });
   });
 });

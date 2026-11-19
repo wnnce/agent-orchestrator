@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { REASONING_EFFORTS } from "./types.ts";
 
 export const gitIdentitySchema = z.object({
   name: z.string().min(1).optional(),
@@ -99,14 +100,6 @@ export const notificationConfigSchema = z
     }
   });
 
-export const projectAgentConfigSchema = z.object({
-  type: z.string().min(1).optional(),
-  model: z.string().min(1).optional(),
-  temperature: z.number().min(0).max(2).optional(),
-  reasoningEffort: z.string().min(1).optional(),
-  mcpServers: z.array(mcpServerConfigSchema).optional(),
-});
-
 export const projectMetaConfigSchema = z.object({
   id: z
     .string()
@@ -166,23 +159,12 @@ export const projectConfigSchema = z
       project: projectMetaConfigSchema.optional(),
       routing: routingDescriptionSchema,
       runtime: z
-        .object({
-          type: z.string().min(1),
+        .strictObject({
+          type: z.string().min(1).optional(),
           model: z.string().min(1).optional(),
-          reasoningEffort: z.string().min(1).optional(),
-          approvalPolicy: z
-            .enum(["never", "on-request", "on-failure", "untrusted"])
-            .optional(),
-          sandbox: z
-            .enum(["read-only", "workspace-write", "danger-full-access"])
-            .optional(),
-          cwdRoot: z.string().min(1).optional(),
-          codexHome: z.string().min(1).optional(),
+          reasoningEffort: z.enum(REASONING_EFFORTS).optional(),
           mcpServers: z.array(mcpServerConfigSchema).optional(),
-          config: z.record(z.string(), z.unknown()).optional(),
-          baseConfigPath: z.string().optional(),
         })
-        .passthrough()
         .optional(),
       session: z
         .strictObject({
@@ -190,7 +172,6 @@ export const projectConfigSchema = z
           archiveTimeoutMs: z.number().int().positive().optional(),
         })
         .optional(),
-      agent: projectAgentConfigSchema.optional(),
       env: z.record(z.string(), z.string()).optional(),
       repository: repositoryConfigSchema.optional(),
       credentials: z.record(z.string(), z.string()).optional(),
@@ -206,23 +187,4 @@ export const projectConfigSchema = z
         message: "routing.projectId must match id",
       });
     }
-  })
-  .transform(foldAgentIntoRuntime);
-
-/**
- * `agent` is an older name for part of `runtime` (type, model, reasoningEffort, mcpServers).
- * It is merged into `runtime` once here — `runtime` wins where both set a field — so the rest of
- * the code only reads `runtime`.
- */
-function foldAgentIntoRuntime<
-  T extends { agent?: object | undefined; runtime?: object | undefined },
->(project: T): Omit<T, "agent"> {
-  const { agent, ...rest } = project;
-  const { temperature: _unused, ...agentRuntime } = (agent ?? {}) as Record<string, unknown>;
-  if (Object.keys(agentRuntime).length === 0) return rest;
-  return { ...rest, runtime: { ...agentRuntime, ...project.runtime } } as Omit<T, "agent">;
-}
-
-export const projectFileSchema = z.object({
-  projects: z.array(projectConfigSchema),
-});
+  });

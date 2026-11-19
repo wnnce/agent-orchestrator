@@ -39,47 +39,9 @@ titles:
   apiKey: ""
   baseUrl: https://api.openai.com/v1 # e.g. https://dashscope.aliyuncs.com/compatible-mode/v1
 
-# 6. Default agent runtime settings
-runtimes:
-  codex:
-    apiKey: ""
-    # model_provider: "custom"
-    # model_providers:
-    #   custom:
-    #     name: "custom"
-    #     base_url: "https://api.example.com/v1"
-    #     wire_api: "responses"
-    #     requires_openai_auth: true
-    # mcpServers: [] # Global servers inherited by projects
-  pi:
-    defaultProvider: deepseek
-    defaultModel: deepseek-flash
-    providers:
-      deepseek:
-        baseUrl: https://api.deepseek.com
-        apiKey: ""
-        api: openai-responses # Optional wire protocol: openai-responses | openai-completions
-        models:
-          - id: deepseek-flash
-            name: DeepSeek Flash
-            contextWindow: 1000000
-            maxTokens: 384000
-            reasoning: true
-            compat:
-              requiresReasoningContentOnAssistantMessages: true
-              thinkingFormat: deepseek
-  claude:
-    apiKey: "" # ANTHROPIC_API_KEY; or set one of the two below instead
-    # authToken: "" # Bearer token for an LLM gateway (ANTHROPIC_AUTH_TOKEN)
-    # oauthToken: "" # Claude subscription token from `claude setup-token`
-    # baseUrl: https://gateway.example.com
-    # model: claude-opus-5-5 # Used when a project sets no runtime.model
-    # sandboxed: true # Required to skip permission checks when the service runs as root (containers)
-    # configDir: .data/claude # Per-project dirs <configDir>/<projectId>
-    # settingSources: [user, project] # "user" is the isolated config dir, "project" reads CLAUDE.md
-    # tools: [Read, Edit, Write, Bash, Grep, Glob] # Defaults to the full Claude Code preset
-    # appendSystemPrompt: ""
-    # mcpServers: []
+# 6. Agent runtimes are configured in their own configuration, not here: Codex in ~/.codex
+#    (CODEX_HOME), Claude Code in ~/.claude (CLAUDE_CONFIG_DIR), Pi in ~/.pi/agent
+#    (PI_CODING_AGENT_DIR). See docs/references/runtime-setup.md.
 
 # 7. External integration channels
 channels:

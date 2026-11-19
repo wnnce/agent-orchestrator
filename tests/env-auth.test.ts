@@ -248,7 +248,7 @@ routing:
 repository:
   url: ./repo1
   baseBranch: main
-agent:
+runtime:
   mcpServers:
     - name: github
       url: https://api.githubcopilot.com/mcp

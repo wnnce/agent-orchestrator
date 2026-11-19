@@ -1,10 +1,9 @@
-import { resolve } from "node:path";
-import { mkdir } from "node:fs/promises";
-import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
+import path from "node:path";
+import { mkdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { query as sdkQuery, type SdkPluginConfig } from "@anthropic-ai/claude-agent-sdk";
 import type { ActionRegistry } from "../../actions/registry.ts";
 import type { ProjectConfig } from "../../domain/types.ts";
 import { Logger } from "../../observability/logger.ts";
-import { SkillManager } from "../../project/skills.ts";
 import type {
   AgentRuntime,
   ApprovalDecision,
@@ -17,11 +16,13 @@ import { CLAUDE_CAPABILITIES } from "./capabilities.ts";
 import { buildQueryOptions } from "./options.ts";
 import { ClaudeSession, type ClaudeQueryFn } from "./session.ts";
 import { createActionServer } from "./tools.ts";
-import type { ClaudeRuntimeConfig } from "./types.ts";
+import { projectSkillSources, type SkillSource } from "../skills.ts";
 
 /**
  * Claude Code through the Claude Agent SDK. Each session runs its own Claude Code process,
- * which `releaseSession` ends; ProjectRuntime releases idle sessions.
+ * which `releaseSession` ends; ProjectRuntime releases idle sessions. Claude Code reads its own
+ * configuration (CLAUDE_CONFIG_DIR, by default ~/.claude); see `buildQueryOptions` for what a
+ * session adds.
  */
 export class ClaudeRuntime implements AgentRuntime {
   readonly name = "claude";
@@ -32,10 +33,9 @@ export class ClaudeRuntime implements AgentRuntime {
 
   constructor(
     private readonly logger = new Logger(),
-    private readonly config: ClaudeRuntimeConfig = {},
     private readonly globalProject?: ProjectConfig | undefined,
     private readonly actionRegistry?: ActionRegistry | undefined,
-    /** Service data directory; Claude Code's config dirs default to <dataDir>/claude/<projectId>. */
+    /** Service data directory; skill plugins are generated under <dataDir>/claude-plugins. */
     private readonly dataDir = ".data",
     private readonly query: ClaudeQueryFn = sdkQuery,
   ) {}
@@ -118,9 +118,11 @@ export class ClaudeRuntime implements AgentRuntime {
     sessionId: string,
     resume: boolean,
   ): Promise<ClaudeSession> {
-    const configDir = this.configDir(context.project);
-    await mkdir(configDir, { recursive: true, mode: 0o700 });
-    await SkillManager.linkSkills(configDir, context.project, this.globalProject);
+    const plugins = await Promise.all(
+      projectSkillSources(context.project, this.globalProject).map((source) =>
+        this.skillPlugin(context.project, source),
+      ),
+    );
 
     const session: ClaudeSession = new ClaudeSession({
       id: sessionId,
@@ -131,12 +133,11 @@ export class ClaudeRuntime implements AgentRuntime {
       options: (canUseTool) =>
         buildQueryOptions({
           project: context.project,
-          config: this.config,
           workspacePath: context.workspacePath,
-          configDir,
           sessionId,
           resume,
           readOnly: context.readOnly,
+          plugins,
           actionServer:
             this.actionRegistry &&
             createActionServer(this.actionRegistry, context.taskKey, () => ({
@@ -163,7 +164,26 @@ export class ClaudeRuntime implements AgentRuntime {
     return session;
   }
 
-  private configDir(project: ProjectConfig): string {
-    return resolve(this.config.configDir ?? resolve(this.dataDir, "claude"), project.id);
+  /**
+   * Claude Code loads extra skills only from plugins, so each skills directory is wrapped in a
+   * generated local plugin whose `skills` links to it. Its skills appear as `<plugin>:<skill>`.
+   */
+  private async skillPlugin(project: ProjectConfig, source: SkillSource): Promise<SdkPluginConfig> {
+    const name = source.projectId === project.id ? project.id : "global";
+    const dir = path.resolve(this.dataDir, "claude-plugins", project.id, name);
+    await mkdir(path.join(dir, ".claude-plugin"), { recursive: true });
+    await writeFile(
+      path.join(dir, ".claude-plugin", "plugin.json"),
+      JSON.stringify({ name, version: "1.0.0", description: `Skills of ${source.projectId}` }),
+    );
+    const link = path.join(dir, "skills");
+    if ((await readlink(link).catch(() => undefined)) !== source.dir) {
+      await rm(link, { force: true });
+      await symlink(source.dir, link, "dir").catch((error: NodeJS.ErrnoException) => {
+        // Another session of the project created it at the same moment.
+        if (error.code !== "EEXIST") throw error;
+      });
+    }
+    return { type: "local", path: dir };
   }
 }

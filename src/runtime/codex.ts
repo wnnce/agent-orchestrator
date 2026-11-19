@@ -1,9 +1,5 @@
-import { existsSync } from "node:fs";
-import path from "node:path";
-import type { CodexConfig } from "../config/service.ts";
 import { Logger } from "../observability/logger.ts";
 import type { ProjectConfig } from "../domain/types.ts";
-import { SkillManager } from "../project/skills.ts";
 import type {
   AgentRuntime,
   ApprovalDecision,
@@ -17,7 +13,8 @@ import { defaultActionRegistry, ActionRegistry } from "../actions/index.ts";
 import { actionContextFor, actionResultText, actionScopeFor } from "./action-bridge.ts";
 import { normalizeCodexNotification, notificationThreadId } from "./codex-normalizer.ts";
 import { CodexConnection } from "./codex/connection.ts";
-import { prepareCodexHome } from "./codex/home.ts";
+import { codexMcpServers } from "./codex/mcp.ts";
+import { projectSkillSources } from "./skills.ts";
 import type { RequestId } from "./codex/generated/RequestId.ts";
 import type { ServerNotification } from "./codex/generated/ServerNotification.ts";
 import type { ServerRequest } from "./codex/generated/ServerRequest.ts";
@@ -48,6 +45,12 @@ export const CODEX_CAPABILITIES: RuntimeCapabilities = {
   sandbox: true,
 };
 
+/**
+ * Codex through `codex app-server`, one process per project. Codex reads its own configuration
+ * (CODEX_HOME, by default ~/.codex): login, model provider, default model, approval policy,
+ * sandbox and MCP servers. Each thread adds only what the project sets: model, reasoning effort,
+ * MCP servers and, for a read-only session, the read-only sandbox.
+ */
 export class CodexRuntime implements AgentRuntime {
   readonly name = "codex";
   readonly type = "codex" as const;
@@ -61,11 +64,8 @@ export class CodexRuntime implements AgentRuntime {
   constructor(
     private readonly binary: string,
     private readonly logger = new Logger(),
-    private readonly config: CodexConfig = {},
-    private readonly inheritedSkillsProject?: ProjectConfig,
+    private readonly globalProject?: ProjectConfig,
     private readonly actionRegistry: ActionRegistry = defaultActionRegistry,
-    /** Service data directory; CODEX_HOME defaults to <dataDir>/codex/<projectId>. */
-    private readonly dataDir = ".data",
   ) {}
 
   async startSession(context: RuntimeContext): Promise<RuntimeSession> {
@@ -83,9 +83,7 @@ export class CodexRuntime implements AgentRuntime {
     try {
       await connection.request("thread/resume", {
         threadId: runtimeSessionId,
-        cwd: context.workspacePath,
-        approvalPolicy: context.project.runtime?.approvalPolicy ?? "never",
-        sandbox: sandboxFor(context),
+        ...this.threadOverrides(context),
       });
     } catch (error) {
       // app-server reports an unknown thread only through its error message.
@@ -104,9 +102,11 @@ export class CodexRuntime implements AgentRuntime {
     input: string,
   ): Promise<RuntimeTurn> {
     const connection = await this.connect(context.project);
+    const effort = context.project.runtime?.reasoningEffort;
     const result = await connection.request<TurnStartResponse>("turn/start", {
       threadId: sessionId,
       input: [{ type: "text", text: input }],
+      ...(effort ? { effort } : {}),
     });
     return { id: result.turn.id };
   }
@@ -169,21 +169,6 @@ export class CodexRuntime implements AgentRuntime {
     }
   }
 
-  async listSkills(project?: ProjectConfig): Promise<unknown[]> {
-    if (this.connection) {
-      try {
-        const res = await this.connection.request<{ data?: Array<{ skills?: unknown[] }> }>(
-          "skills/list",
-          {},
-        );
-        return (res.data ?? []).flatMap((entry) => entry.skills ?? []);
-      } catch (error) {
-        this.logger.warn("failed to list skills from Codex app-server", { error });
-      }
-    }
-    return project ? SkillManager.listProjectSkills(project) : [];
-  }
-
   /** Returns the running app-server, starting it on first use. Concurrent callers share a start. */
   private async connect(project: ProjectConfig): Promise<CodexConnection> {
     if (this.connection) return this.connection;
@@ -195,37 +180,10 @@ export class CodexRuntime implements AgentRuntime {
 
   /** Starts app-server and completes the handshake; it becomes the current connection only then. */
   private async open(project: ProjectConfig): Promise<CodexConnection> {
-    const codexHome = project.runtime?.codexHome ?? path.resolve(this.dataDir, "codex", project.id);
-    await prepareCodexHome({
-      codexHome,
-      project,
-      serviceConfig: this.config,
-      inheritedSkillsProject: this.inheritedSkillsProject,
-    });
-    const env: Record<string, string | undefined> = { ...process.env };
-    for (const key of Object.keys(env)) {
-      if (key.startsWith("CODEX_") || key.startsWith("OPENAI_")) delete env[key];
-    }
-    env.CODEX_HOME = codexHome;
-    const approvalPolicy = project.runtime?.approvalPolicy ?? "never";
-    const sandboxMode = project.runtime?.sandbox ?? "danger-full-access";
-    this.logger.info("starting Codex app-server", {
-      projectId: project.id,
-      codexHome,
-      approvalPolicy,
-      sandboxMode,
-    });
-
+    this.logger.info("starting Codex app-server", { projectId: project.id });
     const connection: CodexConnection = CodexConnection.spawn(
-      [
-        this.binary,
-        "app-server",
-        "-c",
-        `approval_policy=${JSON.stringify(approvalPolicy)}`,
-        "-c",
-        `sandbox_mode=${JSON.stringify(sandboxMode)}`,
-      ],
-      { cwd: codexHome, env },
+      [this.binary, "app-server"],
+      { cwd: process.cwd(), env: process.env },
       {
         onNotification: (notification) => this.handleNotification(notification),
         onRequest: (request) => this.handleServerRequest(connection, request),
@@ -239,9 +197,9 @@ export class CodexRuntime implements AgentRuntime {
         capabilities: { experimentalApi: true },
       });
       connection.notify("initialized", {});
-      const skillsDir = SkillManager.getSkillsDir(project);
-      if (skillsDir && existsSync(skillsDir)) {
-        await connection.request("skills/extraRoots/set", { extraRoots: [skillsDir] });
+      const extraRoots = projectSkillSources(project, this.globalProject).map((s) => s.dir);
+      if (extraRoots.length > 0) {
+        await connection.request("skills/extraRoots/set", { extraRoots });
       }
     } catch (error) {
       await connection.close();
@@ -363,19 +321,26 @@ export class CodexRuntime implements AgentRuntime {
   }
 
   private threadParams(context: RuntimeContext): Record<string, unknown> {
-    const runtime = context.project.runtime;
     const params: Record<string, unknown> = {
-      cwd: context.workspacePath,
-      approvalPolicy: runtime?.approvalPolicy ?? "never",
-      sandbox: sandboxFor(context),
+      ...this.threadOverrides(context),
       serviceName: "agent-orchestrator",
     };
-    if (runtime?.model) params.model = runtime.model;
-
     // Expose orchestrator actions as Codex dynamic tools (task and conversation scopes differ).
     const tools = this.actionRegistry.toCodexTools(actionScopeFor(context.taskKey));
     if (tools.length > 0) params.dynamicTools = tools;
     return params;
+  }
+
+  /** What a thread sets on top of Codex's own configuration, when it starts or resumes. */
+  private threadOverrides(context: RuntimeContext): Record<string, unknown> {
+    const runtime = context.project.runtime;
+    const mcpServers = runtime?.mcpServers ?? [];
+    return {
+      cwd: context.workspacePath,
+      ...(runtime?.model ? { model: runtime.model } : {}),
+      ...(context.readOnly ? { sandbox: "read-only" } : {}),
+      ...(mcpServers.length > 0 ? { config: { mcp_servers: codexMcpServers(mcpServers) } } : {}),
+    };
   }
 
   /** Runs an orchestrator action that Codex called as a dynamic tool and returns its result. */
@@ -449,11 +414,4 @@ export class CodexRuntime implements AgentRuntime {
       }
     }
   }
-}
-
-/** A read-only session always gets Codex's read-only sandbox, whatever the project asks for. */
-function sandboxFor(context: RuntimeContext): string {
-  return context.readOnly
-    ? "read-only"
-    : (context.project.runtime?.sandbox ?? "danger-full-access");
 }

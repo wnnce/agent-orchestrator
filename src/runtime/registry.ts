@@ -6,8 +6,8 @@ import { Logger } from "../observability/logger.ts";
 import type { AgentRuntime, RuntimeCapabilities } from "./runtime.ts";
 import { FAKE_CAPABILITIES, FakeRuntime } from "./runtime.ts";
 import { CODEX_CAPABILITIES, CodexRuntime } from "./codex.ts";
-import { PI_CAPABILITIES, PiRuntime, piRuntimeConfigSchema } from "./pi/index.ts";
-import { CLAUDE_CAPABILITIES, ClaudeRuntime, claudeRuntimeConfigSchema } from "./claude/index.ts";
+import { PI_CAPABILITIES, PiRuntime } from "./pi/index.ts";
+import { CLAUDE_CAPABILITIES, ClaudeRuntime } from "./claude/index.ts";
 
 /**
  * Metadata describing a registered runtime and its capabilities.
@@ -180,14 +180,7 @@ export function createDefaultRuntimeRegistry(logger = new Logger()): RuntimeRegi
     "codex",
     (ctx) => {
       const codexBinary = fileURLToPath(import.meta.resolve("@openai/codex/bin/codex.js"));
-      return new CodexRuntime(
-        codexBinary,
-        ctx.logger,
-        ctx.config.runtimes?.codex ?? {},
-        ctx.globalProject,
-        ctx.actionRegistry,
-        ctx.config.dataDir,
-      );
+      return new CodexRuntime(codexBinary, ctx.logger, ctx.globalProject, ctx.actionRegistry);
     },
     {
       description: "OpenAI Codex app-server runtime adapter",
@@ -197,16 +190,7 @@ export function createDefaultRuntimeRegistry(logger = new Logger()): RuntimeRegi
 
   registry.register(
     "pi",
-    (ctx) => {
-      return new PiRuntime(
-        ctx.logger,
-        piRuntimeConfigSchema.parse(ctx.config.runtimes?.pi ?? {}),
-        ctx.globalProject,
-        ctx.actionRegistry,
-        undefined,
-        ctx.config.dataDir,
-      );
-    },
+    (ctx) => new PiRuntime(ctx.logger, ctx.globalProject, ctx.actionRegistry),
     {
       description: "Pi Agent native TypeScript SDK in-process runtime adapter",
       capabilities: PI_CAPABILITIES,
@@ -216,13 +200,7 @@ export function createDefaultRuntimeRegistry(logger = new Logger()): RuntimeRegi
   registry.register(
     "claude",
     (ctx) =>
-      new ClaudeRuntime(
-        ctx.logger,
-        claudeRuntimeConfigSchema.parse(ctx.config.runtimes?.claude ?? {}),
-        ctx.globalProject,
-        ctx.actionRegistry,
-        ctx.config.dataDir,
-      ),
+      new ClaudeRuntime(ctx.logger, ctx.globalProject, ctx.actionRegistry, ctx.config.dataDir),
     {
       description: "Claude Code runtime adapter (Claude Agent SDK)",
       capabilities: CLAUDE_CAPABILITIES,

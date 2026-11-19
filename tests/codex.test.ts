@@ -17,7 +17,7 @@ const project: ProjectConfig = {
     keywords: [],
     routingHints: [],
   },
-  runtime: { type: "codex", codexHome: "/tmp/codex-test-home" },
+  runtime: { type: "codex" },
 };
 
 test("Codex runtime speaks app-server JSONL", async () => {
@@ -29,7 +29,7 @@ test("Codex runtime speaks app-server JSONL", async () => {
     { mode: 0o755 },
   );
   await chmod(script, 0o755);
-  const runtime = new CodexRuntime(script, undefined, { apiKey: "test-service-key" });
+  const runtime = new CodexRuntime(script);
   const events: string[] = [];
   const context = {
     project,
@@ -49,309 +49,73 @@ test("Codex runtime speaks app-server JSONL", async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-test("Codex replaces imported state and strips inherited Codex settings", async () => {
-  const root = await mkdtemp("/tmp/codex-isolation-");
-  const codexHome = path.join(root, "managed-state");
-  const script = path.join(root, "fake-codex");
-  const previous = {
-    CODEX_HOME: process.env.CODEX_HOME,
-    CODEX_PROFILE: process.env.CODEX_PROFILE,
-    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
-    OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
-  };
-  const runtime = new CodexRuntime(script, new Logger({ sink: () => {} }), {
-    apiKey: "service-test-key",
-    model_provider: "custom-proxy",
-    model_providers: {
-      "custom-proxy": {
-        name: "custom-proxy",
-        base_url: "https://provider.example.com/v1",
-        wire_api: "responses",
-        requires_openai_auth: true,
-      },
-    },
-  });
-  try {
-    await mkdir(codexHome);
-    await writeFile(
-      path.join(codexHome, "auth.json"),
-      JSON.stringify({ tokens: { refresh_token: "stale-login" } }),
-    );
-    await writeFile(
-      path.join(codexHome, "config.toml"),
-      '[mcp_servers.personal]\nurl = "https://personal.example.com/mcp"\n',
-    );
-    await writeFile(
-      script,
-      `#!/usr/bin/env bun
-import { createInterface } from "node:readline";
-import { writeFileSync } from "node:fs";
-writeFileSync("spawn.json", JSON.stringify({
-  cwd: process.cwd(),
-  codexHome: process.env.CODEX_HOME,
-  inherited: Object.keys(process.env).filter(key =>
-    (key.startsWith("CODEX_") || key.startsWith("OPENAI_")) && key !== "CODEX_HOME"
-  ),
-}));
-createInterface({ input: process.stdin }).on("line", line => {
-  const m = JSON.parse(line);
-  if (m.method === "initialize") console.log(JSON.stringify({ id: m.id, result: {} }));
-  else if (m.method === "thread/start") console.log(JSON.stringify({ id: m.id, result: { thread: { id: "isolated-thread" } } }));
-});
-`,
-      { mode: 0o755 },
-    );
-    process.env.CODEX_HOME = path.join(root, "external-state");
-    process.env.CODEX_PROFILE = "personal-profile";
-    process.env.OPENAI_API_KEY = "personal-test-key";
-    process.env.OPENAI_BASE_URL = "https://personal.example.com/v1";
-
-    await runtime.startSession({
-      project: {
-        ...project,
-        runtime: {
-          type: "codex",
-          codexHome,
-          mcpServers: [{ name: "project-tools", url: "https://tools.example.com/mcp" }],
-        },
-      },
-      workspacePath: root,
-      onEvent: () => {},
-    });
-    expect(await Bun.file(path.join(codexHome, "auth.json")).json()).toEqual({
-      auth_mode: "apikey",
-      OPENAI_API_KEY: "service-test-key",
-    });
-    const generated = Bun.TOML.parse(
-      await Bun.file(path.join(codexHome, "config.toml")).text(),
-    ) as any;
-    expect(generated.cli_auth_credentials_store).toBe("file");
-    expect(generated.model_providers["custom-proxy"].base_url).toBe(
-      "https://provider.example.com/v1",
-    );
-    expect(generated.mcp_servers["project-tools"].url).toBe("https://tools.example.com/mcp");
-    expect(generated.mcp_servers.personal).toBeUndefined();
-    const spawn = await Bun.file(path.join(codexHome, "spawn.json")).json();
-    expect(await realpath(spawn.cwd)).toBe(await realpath(codexHome));
-    expect(spawn.codexHome).toBe(codexHome);
-    expect(spawn.inherited).toEqual([]);
-  } finally {
-    await runtime.stop();
-    for (const [key, value] of Object.entries(previous)) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("Codex requires the service API key instead of reusing existing login state", async () => {
-  const root = await mkdtemp("/tmp/codex-missing-key-");
-  const runtime = new CodexRuntime("/must-not-spawn-codex", new Logger({ sink: () => {} }));
-  try {
-    await writeFile(path.join(root, "auth.json"), JSON.stringify({ OPENAI_API_KEY: "stale-key" }));
-    await expect(
-      runtime.startSession({
-        project: { ...project, runtime: { type: "codex", codexHome: root } },
-        workspacePath: root,
-        onEvent: () => {},
-      }),
-    ).rejects.toThrow("codex.apiKey");
-  } finally {
-    await runtime.stop();
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("Codex runtime maps arbitrary configuration and custom model providers to config.toml", async () => {
-  const root = await mkdtemp("/tmp/codex-arbitrary-config-");
-  const codexHome = path.join(root, "managed-codex");
+test("a thread carries only what the project sets on top of Codex's own configuration", async () => {
+  const root = await realpath(await mkdtemp("/tmp/codex-overrides-"));
+  const log = path.join(root, "received.jsonl");
   const script = path.join(root, "fake-codex");
   await writeFile(
     script,
     `#!/usr/bin/env bun
+import { appendFileSync } from "node:fs";
 import { createInterface } from "node:readline";
-createInterface({ input: process.stdin }).on("line", line => {
+const send = (m) => console.log(JSON.stringify(m));
+appendFileSync(${JSON.stringify(log)}, JSON.stringify({ env: { CODEX_HOME: process.env.CODEX_HOME ?? null, OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? null } }) + "\\n");
+createInterface({ input: process.stdin }).on("line", (line) => {
+  appendFileSync(${JSON.stringify(log)}, line + "\\n");
   const m = JSON.parse(line);
-  if (m.method === "initialize") console.log(JSON.stringify({ id: m.id, result: {} }));
-  else if (m.method === "thread/start") console.log(JSON.stringify({ id: m.id, result: { thread: { id: "thread-custom" } } }));
+  if (m.method === "initialize") send({ id: m.id, result: {} });
+  else if (m.method === "thread/start") send({ id: m.id, result: { thread: { id: "thread-1" } } });
+  else if (m.method === "turn/start") send({ id: m.id, result: { turn: { id: "turn-1" } } });
 });
 `,
     { mode: 0o755 },
   );
-
-  const runtime = new CodexRuntime(
-    script,
-    new Logger({ sink: () => {} }),
-    {
-      apiKey: "custom-api-key",
-      model: "o3-mini",
-      model_provider: "custom_gateway",
-      model_providers: {
-        custom_gateway: {
-          name: "custom_gateway",
-          base_url: "https://custom-gateway.internal/v1",
-          wire_api: "chat",
-          requires_openai_auth: false,
-        },
-      },
-      custom_section: {
-        telemetry: false,
-        retries: 3,
-      },
-    },
-  );
-
+  const previous = { home: process.env.CODEX_HOME, key: process.env.OPENAI_API_KEY };
+  process.env.CODEX_HOME = "/home/user/.codex-orchestrator";
+  process.env.OPENAI_API_KEY = "from-environment";
+  const runtime = new CodexRuntime(script, new Logger({ sink: () => {} }));
   try {
-    await runtime.startSession({
+    const context = {
       project: {
         ...project,
         runtime: {
           type: "codex",
-          codexHome,
-          config: {
-            temperature: 0.2,
-          },
+          model: "gpt-5",
+          reasoningEffort: "high" as const,
+          mcpServers: [{ name: "docs", url: "https://mcp.example.com/docs" }],
         },
       },
       workspacePath: root,
       onEvent: () => {},
-    });
+    };
+    const session = await runtime.startSession(context);
+    await runtime.startTurn(context, session.id, "turn", "hello");
 
-    const generatedToml = Bun.TOML.parse(
-      await Bun.file(path.join(codexHome, "config.toml")).text(),
-    ) as any;
-
-    expect(generatedToml.model).toBe("o3-mini");
-    expect(generatedToml.model_provider).toBe("custom_gateway");
-    expect(generatedToml.model_providers.custom_gateway).toEqual({
-      name: "custom_gateway",
-      base_url: "https://custom-gateway.internal/v1",
-      wire_api: "chat",
-      requires_openai_auth: false,
+    const lines = (await Bun.file(log).text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    // The app-server inherits the service's environment untouched.
+    expect(lines[0].env).toEqual({
+      CODEX_HOME: "/home/user/.codex-orchestrator",
+      OPENAI_API_KEY: "from-environment",
     });
-    expect(generatedToml.custom_section).toEqual({
-      telemetry: false,
-      retries: 3,
+    const start = lines.find((m) => m.method === "thread/start");
+    expect(start.params).toMatchObject({
+      cwd: root,
+      model: "gpt-5",
+      config: { mcp_servers: { docs: { url: "https://mcp.example.com/docs" } } },
     });
-    expect(generatedToml.temperature).toBe(0.2);
-    expect(generatedToml.cli_auth_credentials_store).toBe("file");
+    // Approval policy and sandbox are left to Codex's own configuration.
+    expect(start.params.approvalPolicy).toBeUndefined();
+    expect(start.params.sandbox).toBeUndefined();
+    expect(lines.find((m) => m.method === "turn/start").params.effort).toBe("high");
   } finally {
     await runtime.stop();
+    process.env.CODEX_HOME = previous.home;
+    process.env.OPENAI_API_KEY = previous.key;
+    if (previous.home === undefined) delete process.env.CODEX_HOME;
+    if (previous.key === undefined) delete process.env.OPENAI_API_KEY;
     await rm(root, { recursive: true, force: true });
   }
-});
-
-test("Codex runtime merges baseConfigPath template file and project runtime overrides", async () => {
-  const root = await mkdtemp("/tmp/codex-base-template-");
-  const codexHome = path.join(root, "managed-codex");
-  const baseTomlFile = path.join(root, "base.toml");
-  await writeFile(
-    baseTomlFile,
-    `
-[model_providers.shared_proxy]
-name = "shared_proxy"
-base_url = "https://shared.internal/v1"
-wire_api = "responses"
-
-[company_defaults]
-region = "us-east-1"
-`,
-  );
-
-  const script = path.join(root, "fake-codex");
-  await writeFile(
-    script,
-    `#!/usr/bin/env bun
-import { createInterface } from "node:readline";
-createInterface({ input: process.stdin }).on("line", line => {
-  const m = JSON.parse(line);
-  if (m.method === "initialize") console.log(JSON.stringify({ id: m.id, result: {} }));
-  else if (m.method === "thread/start") console.log(JSON.stringify({ id: m.id, result: { thread: { id: "thread-base" } } }));
-});
-`,
-    { mode: 0o755 },
-  );
-
-  const runtime = new CodexRuntime(
-    script,
-    new Logger({ sink: () => {} }),
-    {
-      apiKey: "service-key",
-      baseConfigPath: baseTomlFile,
-      model_provider: "shared_proxy",
-    },
-  );
-
-  try {
-    await runtime.startSession({
-      project: {
-        ...project,
-        runtime: {
-          type: "codex",
-          codexHome,
-          model: "gpt-4o",
-          reasoningEffort: "high",
-          config: {
-            company_defaults: {
-              cluster: "prod-1",
-            },
-          },
-        },
-      },
-      workspacePath: root,
-      onEvent: () => {},
-    });
-
-    const generatedToml = Bun.TOML.parse(
-      await Bun.file(path.join(codexHome, "config.toml")).text(),
-    ) as any;
-
-    expect(generatedToml.model).toBe("gpt-4o");
-    expect(generatedToml.model_reasoning_effort).toBe("high");
-    expect(generatedToml.model_provider).toBe("shared_proxy");
-    expect(generatedToml.model_providers.shared_proxy.base_url).toBe(
-      "https://shared.internal/v1",
-    );
-    expect(generatedToml.company_defaults).toEqual({
-      region: "us-east-1",
-      cluster: "prod-1",
-    });
-  } finally {
-    await runtime.stop();
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("project runtime fields Codex does not know stay out of config.toml", async () => {
-  const { buildCodexConfig } = await import("../src/runtime/codex/home.ts");
-  const config = await buildCodexConfig(
-    {
-      ...project,
-      runtime: {
-        type: "codex",
-        model: "gpt-5",
-        idleTimeoutMs: 60_000,
-        provider: "deepseek",
-        apiKey: "pi-key",
-        config: { model_verbosity: "low" },
-      },
-    },
-    { apiKey: "service-key", model_provider: "proxy", mcpServers: [] },
-  );
-  expect(config).toMatchObject({ model: "gpt-5", model_provider: "proxy", model_verbosity: "low" });
-  expect(config).not.toHaveProperty("idleTimeoutMs");
-  expect(config).not.toHaveProperty("provider");
-  expect(config).not.toHaveProperty("apiKey");
-  expect(config).not.toHaveProperty("mcpServers");
-});
-
-test("a missing Codex base config file is an error, not an empty config", async () => {
-  const { buildCodexConfig } = await import("../src/runtime/codex/home.ts");
-  await expect(
-    buildCodexConfig(
-      { ...project, runtime: { type: "codex", baseConfigPath: "/nonexistent/base.toml" } },
-      { apiKey: "service-key" },
-    ),
-  ).rejects.toThrow();
 });

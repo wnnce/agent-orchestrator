@@ -1,8 +1,8 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { mkdir, writeFile, rm, lstat, readlink } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { mkdir, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { SkillManager } from "../src/project/skills.ts";
+import { projectSkillSources } from "../src/runtime/skills.ts";
 import type { ProjectConfig } from "../src/domain/types.ts";
 import { ProjectManager } from "../src/project/manager.ts";
 import { MemoryStore } from "../src/persistence/store.ts";
@@ -94,121 +94,25 @@ Be careful.`;
     expect(s2?.description).toBe("Second Skill Description");
   });
 
-  test("SkillManager.linkSkills creates symlinks and cleans up stale ones", async () => {
-    const projDir = path.join(testBaseDir, "proj-sync");
-    const skillsDir = path.join(projDir, ".skills");
-    const codexHome = path.join(testBaseDir, "codex-home");
-
-    await mkdir(path.join(skillsDir, "active-skill"), { recursive: true });
-    await writeFile(
-      path.join(skillsDir, "active-skill", "SKILL.md"),
-      `---\nname: active-skill\ndescription: Active\n---\nDo active things`,
-    );
-
-    const project = makeProject("proj-sync", projDir);
-
-    // Initial sync
-    await SkillManager.linkSkills(codexHome, project);
-
-    const linkPath = path.join(codexHome, "skills", "active-skill");
-    expect(existsSync(linkPath)).toBe(true);
-    const stat1 = await lstat(linkPath);
-    expect(stat1.isSymbolicLink()).toBe(true);
-    const target1 = await readlink(linkPath);
-    expect(path.resolve(path.dirname(linkPath), target1)).toBe(
-      path.resolve(skillsDir, "active-skill"),
-    );
-
-    // Now remove active-skill from project and add another-skill
-    await rm(path.join(skillsDir, "active-skill"), { recursive: true, force: true });
-    await mkdir(path.join(skillsDir, "another-skill"), { recursive: true });
-    await writeFile(
-      path.join(skillsDir, "another-skill", "SKILL.md"),
-      `# Another Skill\nAnother description`,
-    );
-
-    // Second sync: should prune active-skill symlink and add another-skill symlink
-    await SkillManager.linkSkills(codexHome, project);
-
-    expect(existsSync(linkPath)).toBe(false);
-    const newLinkPath = path.join(codexHome, "skills", "another-skill");
-    expect(existsSync(newLinkPath)).toBe(true);
-  });
-
-  test("Project-level skills isolation between projects", async () => {
-    const proj1Dir = path.join(testBaseDir, "proj1");
-    const proj2Dir = path.join(testBaseDir, "proj2");
-    const codexHome1 = path.join(testBaseDir, "codex1");
-    const codexHome2 = path.join(testBaseDir, "codex2");
-
-    await mkdir(path.join(proj1Dir, ".skills", "proj1-exclusive"), { recursive: true });
-    await writeFile(
-      path.join(proj1Dir, ".skills", "proj1-exclusive", "SKILL.md"),
-      `# P1 Skill\nExclusively for P1`,
-    );
-
-    await mkdir(path.join(proj2Dir, ".skills", "proj2-exclusive"), { recursive: true });
-    await writeFile(
-      path.join(proj2Dir, ".skills", "proj2-exclusive", "SKILL.md"),
-      `# P2 Skill\nExclusively for P2`,
-    );
-
-    const proj1 = makeProject("p1", proj1Dir);
-    const proj2 = makeProject("p2", proj2Dir);
-
-    await SkillManager.linkSkills(codexHome1, proj1);
-    await SkillManager.linkSkills(codexHome2, proj2);
-
-    const p1Skills = await SkillManager.listProjectSkills(proj1);
-    const p2Skills = await SkillManager.listProjectSkills(proj2);
-
-    expect(p1Skills.map((s) => s.id)).toEqual(["proj1-exclusive"]);
-    expect(p2Skills.map((s) => s.id)).toEqual(["proj2-exclusive"]);
-
-    expect(existsSync(path.join(codexHome1, "skills", "proj1-exclusive"))).toBe(true);
-    expect(existsSync(path.join(codexHome1, "skills", "proj2-exclusive"))).toBe(false);
-
-    expect(existsSync(path.join(codexHome2, "skills", "proj2-exclusive"))).toBe(true);
-    expect(existsSync(path.join(codexHome2, "skills", "proj1-exclusive"))).toBe(false);
-  });
-
-  test("global skills are inherited and project skills override by ID", async () => {
+  test("a session loads the global project's skills, then the project's own", async () => {
     const globalDir = path.join(testBaseDir, "global");
     const projectDir = path.join(testBaseDir, "project");
-    const codexHome = path.join(testBaseDir, "codex-inherited");
+    const otherDir = path.join(testBaseDir, "other");
     await mkdir(path.join(globalDir, ".skills", "shared"), { recursive: true });
-    await writeFile(
-      path.join(globalDir, ".skills", "shared", "SKILL.md"),
-      "# Global shared\nGlobal",
-    );
-    await mkdir(path.join(globalDir, ".skills", "global-only"), { recursive: true });
-    await writeFile(
-      path.join(globalDir, ".skills", "global-only", "SKILL.md"),
-      "# Global only\nGlobal",
-    );
-    await mkdir(path.join(projectDir, ".skills", "shared"), { recursive: true });
-    await writeFile(
-      path.join(projectDir, ".skills", "shared", "SKILL.md"),
-      "# Project shared\nProject",
-    );
     await mkdir(path.join(projectDir, ".skills", "project-only"), { recursive: true });
-    await writeFile(
-      path.join(projectDir, ".skills", "project-only", "SKILL.md"),
-      "# Project only\nProject",
-    );
+    await mkdir(otherDir, { recursive: true });
 
     const globalProject = makeProject("global", globalDir);
-    const project = makeProject("project", projectDir);
-    await SkillManager.linkSkills(codexHome, project, globalProject);
-
-    const readTarget = async (id: string) =>
-      path.resolve(
-        path.dirname(path.join(codexHome, "skills", id)),
-        await readlink(path.join(codexHome, "skills", id)),
-      );
-    expect(await readTarget("global-only")).toBe(path.join(globalDir, ".skills", "global-only"));
-    expect(await readTarget("project-only")).toBe(path.join(projectDir, ".skills", "project-only"));
-    expect(await readTarget("shared")).toBe(path.join(projectDir, ".skills", "shared"));
+    expect(projectSkillSources(makeProject("project", projectDir), globalProject)).toEqual([
+      { projectId: "global", dir: path.join(globalDir, ".skills") },
+      { projectId: "project", dir: path.join(projectDir, ".skills") },
+    ]);
+    // A project without a .skills directory only gets the global ones.
+    expect(projectSkillSources(makeProject("other", otherDir), globalProject)).toEqual([
+      { projectId: "global", dir: path.join(globalDir, ".skills") },
+    ]);
+    // The global project itself is not listed twice.
+    expect(projectSkillSources(globalProject, globalProject)).toHaveLength(1);
   });
 
   test("Gateway GET /projects/:projectId/skills returns project skills", async () => {

@@ -20,7 +20,7 @@ const project: ProjectConfig = {
     keywords: ["alpha", "api"],
     routingHints: [],
   },
-  runtime: { type: "fake", approvalPolicy: "on-request", sandbox: "workspace-write" },
+  runtime: { type: "fake" },
   repository: { url: "", baseBranch: "main" },
 };
 

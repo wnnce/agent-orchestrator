@@ -62,18 +62,22 @@ export interface ProjectRoutingDescription {
   routingHints?: string[];
 }
 
+export const REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+
+/**
+ * What a project chooses about its agent. Everything else (login, providers, default model,
+ * permissions, global MCP servers) comes from the runtime's own configuration.
+ */
 export interface ProjectRuntimeConfig {
-  type: string;
+  /** Runtime adapter; defaults to the service's `defaultRuntime`. */
+  type?: string;
+  /** Interpreted by the runtime; defaults to the runtime's own default model. */
   model?: string;
-  reasoningEffort?: string;
-  approvalPolicy?: "never" | "on-request" | "on-failure" | "untrusted";
-  sandbox?: "read-only" | "workspace-write" | "danger-full-access";
-  cwdRoot?: string;
-  codexHome?: string;
+  /** Runtimes ignore levels they do not support. */
+  reasoningEffort?: ReasoningEffort;
+  /** Added to the MCP servers of the runtime's own configuration. */
   mcpServers?: McpServerConfig[];
-  config?: Record<string, unknown>;
-  baseConfigPath?: string;
-  [key: string]: unknown;
 }
 
 /** How long a project's sessions stay open. */

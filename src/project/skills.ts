@@ -1,4 +1,4 @@
-import { readdir, readFile, stat, lstat, readlink, symlink, unlink, mkdir } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import type { ProjectConfig } from "../domain/types.ts";
@@ -134,97 +134,6 @@ export class SkillManager {
         error: (error as Error).message,
       });
       return [];
-    }
-  }
-
-  /**
-   * Links the project's skills (and those inherited from `inheritedProject`) into
-   * `<homeDir>/skills`, the layout both Codex and Claude Code read, and removes stale links.
-   * Entries that are not symlinks belong to the runtime and are left alone.
-   */
-  static async linkSkills(
-    homeDir: string,
-    project: ProjectConfig,
-    inheritedProject?: ProjectConfig,
-  ): Promise<void> {
-    const skillsDir = path.join(homeDir, "skills");
-    await mkdir(skillsDir, { recursive: true, mode: 0o755 });
-
-    const inherited =
-      inheritedProject && inheritedProject.id !== project.id
-        ? await this.listProjectSkills(inheritedProject)
-        : [];
-    const local = await this.listProjectSkills(project);
-    const skillsById = new Map(inherited.map((skill) => [skill.id, skill]));
-    for (const skill of local) skillsById.set(skill.id, skill);
-    const skills = [...skillsById.values()];
-    const validSkillIds = new Set(skills.map((s) => s.id));
-
-    // 1. Clean up stale or orphan symlinks
-    try {
-      const existingEntries = await readdir(skillsDir, { withFileTypes: true });
-      for (const entry of existingEntries) {
-        const targetPath = path.join(skillsDir, entry.name);
-
-        try {
-          const s = await lstat(targetPath);
-          if (s.isSymbolicLink()) {
-            if (!validSkillIds.has(entry.name)) {
-              await unlink(targetPath);
-              this.logger.debug("removed stale skill symlink", {
-                projectId: project.id,
-                skillId: entry.name,
-              });
-            }
-          }
-        } catch {
-          // Stale broken symlink might fail stat
-          await unlink(targetPath).catch(() => {});
-        }
-      }
-    } catch (error) {
-      this.logger.warn("failed to clean up runtime skills directory", {
-        projectId: project.id,
-        error: (error as Error).message,
-      });
-    }
-
-    // 2. Ensure symlink exists for every valid project skill
-    for (const skill of skills) {
-      const linkPath = path.join(skillsDir, skill.id);
-      try {
-        const linkStat = await lstat(linkPath).catch(() => null);
-        if (linkStat) {
-          if (linkStat.isSymbolicLink()) {
-            const existingTarget = await readlink(linkPath).catch(() => null);
-            if (
-              existingTarget &&
-              path.resolve(path.dirname(linkPath), existingTarget) === path.resolve(skill.dirPath)
-            ) {
-              // Already correctly pointing to project skill
-              continue;
-            }
-            await unlink(linkPath);
-          } else {
-            // Already exists as regular directory, skip
-            continue;
-          }
-        }
-
-        await symlink(skill.dirPath, linkPath, "dir");
-        this.logger.info("linked project skill into runtime home", {
-          projectId: project.id,
-          skillId: skill.id,
-          source: skill.dirPath,
-          target: linkPath,
-        });
-      } catch (error) {
-        this.logger.error("failed to link project skill into runtime home", {
-          projectId: project.id,
-          skillId: skill.id,
-          error: (error as Error).message,
-        });
-      }
     }
   }
 }
