@@ -3,9 +3,9 @@
 | 元数据       | 内容                                                              |
 | :----------- | :---------------------------------------------------------------- |
 | **文档 ID**  | `04-claude-code-integration`                                      |
-| **状态**     | `Draft`                                                           |
+| **状态**     | `Accepted`                                                        |
 | **创建日期** | 2026-11-18                                                        |
-| **目标模块** | `src/runtime/claude/`、`src/runtime/registry.ts`、`src/config/`   |
+| **目标模块** | `src/runtime/claude/`、`src/runtime/registry.ts`                  |
 | **依赖**     | `@anthropic-ai/claude-agent-sdk`（按 0.3.328 的类型定义核对）     |
 
 ---
@@ -62,10 +62,11 @@ Claude Code 可以用官方的 Claude Agent SDK（`@anthropic-ai/claude-agent-sd
 src/runtime/claude/
 ├── index.ts          # 导出 ClaudeRuntime、CLAUDE_CAPABILITIES、配置 schema
 ├── capabilities.ts
-├── types.ts          # claudeRuntimeConfigSchema（zod strict）
+├── types.ts          # claudeRuntimeConfigSchema（zod strict）、项目级字段 schema
+├── options.ts        # buildQueryOptions / buildEnv / permissionModeFor，纯函数
 ├── runtime.ts        # ClaudeRuntime implements AgentRuntime
 ├── session.ts        # ClaudeSession：一个长期存在的 query() 和它的输入队列
-├── normalizer.ts     # SDKMessage → RuntimeEvent[]，纯函数
+├── normalizer.ts     # ClaudeNormalizer：SDKMessage → RuntimeEvent[]
 └── tools.ts          # ActionRegistry → createSdkMcpServer
 ```
 
@@ -73,9 +74,10 @@ src/runtime/claude/
 
 - `runtime.ts`：只负责会话表、配置解析和 `AgentRuntime` 各个方法的分发。
 - `session.ts`：负责单个会话的输入队列、消息循环、turn 状态和待审批的请求。
-- `normalizer.ts`：不持有可变状态。它需要知道某个 `tool_use` 是什么类型的调用，这个映射表由 `ClaudeSession` 传进来。
+- `options.ts`：把服务配置和项目配置转换成 SDK 的 `Options`，不涉及进程和状态。
+- `normalizer.ts`：每个会话一个实例，只保存把消息配对所需的少量状态：流式块的 item id、`tool_use_id → 调用类型`。它不处理 turn 的结束。
 
-这样拆开后，`normalizer.ts` 可以像 `codex-normalizer` 一样，直接用构造出来的 `SDKMessage` 做单元测试。
+这样拆开后，`options.ts` 和 `normalizer.ts` 都可以直接用构造出来的数据做单元测试。
 
 ### 4.2 会话与 query 的生命周期
 
@@ -89,10 +91,10 @@ void this.consume(query); // for await (const message of query) { ... }
 
 | `AgentRuntime` 方法 | 实现                                                                                                                                                                                         |
 | :------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `startSession`      | 用 `crypto.randomUUID()` 生成 id，作为 `options.sessionId` 传给 SDK，然后创建 query，直接返回这个 id。不用等 `system/init` 消息才知道会话 id。                                               |
-| `resumeSession`     | 如果会话表里已经有这个 id，只更新它的 context；否则先确认会话记录存在（见 4.8），再用 `options.resume = id` 创建 query。                                                                     |
+| `startSession`      | 用 `crypto.randomUUID()` 生成 id，作为 `options.sessionId` 传给 SDK，创建 query 并等待 `initializationResult()`，配置或认证问题在这里就会暴露。不用等 `system/init` 消息才知道会话 id。     |
+| `resumeSession`     | 如果会话表里已经有这个 id，只更新它的 context；否则用 `options.resume = id` 创建 query，等待初始化完成（见 4.8）。                                                                           |
 | `startTurn`         | 生成 `runtimeTurnId`，记下当前 turn，`input.push(userMessage(input))`，然后立刻返回。turn 的结束由消息循环里收到的 `result` 消息决定。                                                       |
-| `steerTurn`         | 在 turn 进行中再 `push` 一条用户消息，设置 `priority: "now"`，见 4.6。                                                                                                                       |
+| `steerTurn`         | 在 turn 进行中再 `push` 一条用户消息，设置 `priority: "now"`，并把它的 uuid 加入这个 turn 待回答的输入，见 4.6。                                                                             |
 | `interruptTurn`     | 把 turn 标记为 `canceled`，然后调用 `query.interrupt()`。这个 turn 随后收到的 `result` 会被转成 `turn.interrupted`。                                                                         |
 | `compactSession`    | 输入 `/compact`，等到 `compact_boundary` 和随后的 `result` 消息，见 4.6。                                                                                                                    |
 | `respondToApproval` | 从待审批表里找到对应的 Promise 并 resolve，见 4.5。                                                                                                                                          |
@@ -108,6 +110,8 @@ void this.consume(query); // for await (const message of query) { ... }
 **turn 的边界**：
 
 - 在流式输入模式下，每条用户输入处理完会收到一条 `result` 消息。
+- 每条推送给 CLI 的输入都带一个客户端 `uuid`，`result` 的 `user_message_uuids` 会列出它回答了哪些输入。turn 记下自己的输入（prompt 和所有 steer）的 uuid，这些 uuid 都被回答了，turn 才结束；被中断的 turn 在收到下一条属于它的 `result` 时结束。不属于当前 turn 的 `result`（比如中断后迟到的 steer 回复）会被忽略。
+- `result` 的 `subtype` 为 `success` 时也可能 `is_error: true`（例如 API key 无效），这种情况按失败处理。
 - `ProjectRuntime` 每个会话只有一个 pump，turn 严格串行：新消息先进 `pendingTurns` 排队（`turn.queued`），上一个 turn 结束才会调用下一个 `startTurn`。所以 `ClaudeSession` 不会在 turn 进行中收到第二个 `startTurn`，不需要自己排队。
 - turn 进行中能到达 runtime 的输入只有 steer（4.6）和压缩（4.6）。
 - 如果 `result` 到达时没有活跃 turn（比如 `/compact` 产生的 `result`），就只交给压缩逻辑处理，不产生 turn 事件。
@@ -129,10 +133,10 @@ void this.consume(query); // for await (const message of query) { ... }
   canUseTool,                             // 见 4.5
   tools: config.tools ?? { type: "preset", preset: "claude_code" },
   mcpServers: { ...外部 MCP server, orchestrator: actionServer },
-  allowedTools: ["mcp__orchestrator__*"], // 编排器自己的 action 不需要审批
   systemPrompt: { type: "preset", preset: "claude_code", append: config.appendSystemPrompt },
   includePartialMessages: true,           // 需要流式的文本增量
   persistSession: true,
+  skills: "all",
   pathToClaudeCodeExecutable: config.executable, // 默认使用 SDK 自带的可执行文件
   stderr: (line) => logger.debug("claude stderr", { sessionId, line }),
 }
@@ -148,7 +152,7 @@ void this.consume(query); // for await (const message of query) { ... }
 
 **配置目录**：
 
-- 通过环境变量 `CLAUDE_CONFIG_DIR` 指定，默认是 `<dataDir>/claude/<projectId>`，也可以用 `runtimes.claude.configDir` 覆盖。
+- 通过环境变量 `CLAUDE_CONFIG_DIR` 指定，默认是 `<dataDir>/claude/<projectId>`。`runtimes.claude.configDir` 覆盖的是根目录，每个项目仍然在 `<configDir>/<projectId>` 下各自一个目录。
 - 会话记录、Claude 生成的设置文件和 skills 都放在这里，不会碰宿主机的 `~/.claude`。
 
 **`env` 会整个替换子进程的环境变量**（SDK 文档原话："REPLACES the subprocess environment entirely"），所以 `buildEnv` 需要显式构造出完整的环境：
@@ -158,12 +162,16 @@ void this.consume(query); // for await (const message of query) { ... }
   PATH, HOME, LANG,                        // 只从 process.env 取这几个基础变量
   ...project.env,                          // 项目自己的环境变量
   CLAUDE_CONFIG_DIR: configDir,
-  ANTHROPIC_API_KEY: config.apiKey,        // 二选一
-  ANTHROPIC_AUTH_TOKEN: config.authToken,  // 二选一
-  ANTHROPIC_BASE_URL: config.baseUrl,      // 可选，例如走网关
+  ANTHROPIC_API_KEY: config.apiKey,            // 三选一
+  ANTHROPIC_AUTH_TOKEN: config.authToken,      // 三选一，例如走网关
+  CLAUDE_CODE_OAUTH_TOKEN: config.oauthToken,  // 三选一，`claude setup-token` 生成的订阅 token
+  ANTHROPIC_BASE_URL: config.baseUrl,          // 可选
+  IS_SANDBOX: "1",                             // 只在 sandboxed: true 时设置，见 4.5
   CLAUDE_AGENT_SDK_CLIENT_APP: "agent-orchestrator",
 }
 ```
+
+`PATH`、`HOME` 之外还保留 `USER`、`SHELL`、`LANG`、`LC_ALL`、`TZ`、`TMPDIR`、代理相关变量和 `NODE_EXTRA_CA_CERTS`，这些都不是密钥。三种凭据一个都没配置时，启动会话前直接报错。
 
 不把 `process.env` 整个透传过去，这样服务进程里的其它密钥（数据库连接串、飞书密钥等）就不会泄露给 agent 可以执行的 Bash。这和 Codex 删掉 `CODEX_*` / `OPENAI_*` 前缀变量的思路一样，只是这里换成了白名单。
 
@@ -185,6 +193,13 @@ void this.consume(query); // for await (const message of query) { ... }
 | `untrusted`              | `default`           | 同 `on-request`；Claude Code 没有对应的更严格档位          |
 
 在 `bypassPermissions` 模式下，SDK 不会调用 `canUseTool`。默认安全配置的问题在设计 03 的安全条目里统一处理，这里沿用现状。
+
+**以 root 运行时**：Claude Code 拒绝在 root 下跳过权限检查（`--dangerously-skip-permissions cannot be used with root/sudo privileges`），除非设置了 `IS_SANDBOX=1`。`dev-orchestrator` 容器就是以 root 运行的。
+
+- 这里不做静默绕过，而是加一个显式的服务级开关 `runtimes.claude.sandboxed: true`，表示服务跑在隔离容器里，打开后才设置 `IS_SANDBOX=1`。
+- 以 root 运行、权限模式是 `bypassPermissions`、又没有打开开关时，`buildQueryOptions` 直接报错，说明要怎么改。不会等 CLI 返回一个看不懂的启动失败。
+
+**编排器自己的 action**：最初的方案是用 `allowedTools: ["mcp__orchestrator"]` 免审批，但 SDK 会对每个会话打一条 `CANUSE_TOOL_SHADOWED` 警告。改为在 `canUseTool` 里对 `mcp__orchestrator__*` 直接返回 allow，不产生 `approval.requested`。
 
 `canUseTool` 的实现：
 
@@ -216,14 +231,13 @@ canUseTool: (toolName, input, { toolUseID, signal, title, decisionReason }) =>
 **Steer**：
 
 - 在 turn 进行中 `push` 一条带 `priority: "now"` 的 `SDKUserMessage`。
-- CLI 会把它合并到当前 turn 里，`result` 和 assistant 消息上的 `user_message_uuids` 字段会列出合并进来的输入。
-- 第一阶段需要先用实际的 CLI 确认两点：合并确实发生；只产生**一条** `result` 消息。
-- 如果确认不了，就把 `steer` 能力声明为 `false`，`ProjectRuntime` 会把输入当成排队的下一个 turn，不需要额外处理。
+- 实测（0.3.328）**不会**合并进当前 turn：CLI 在当前工具调用结束后，先给原输入发一条 `result`（文本为空），再把 steer 当作下一轮处理，又发一条 `result`。最终回复同时考虑了工具结果和 steer 的内容。
+- 所以 turn 按 4.2 的 uuid 规则结束：两条 `result` 都到齐，turn 才结束，`finalText` 取最后一条。如果以后的 CLI 改为合并处理，同一套规则依然正确。
 
 **压缩**：
 
 - SDK 没有单独的压缩方法，压缩的方式就是把 `/compact` 当作用户输入发过去，这也是 Claude Code 自己的做法。
-- `compactSession` 发出 `/compact`，然后等待**下一条 `result` 消息**。
+- `compactSession` 发出带 uuid 的 `/compact`，等待回答它的那条 `result`。实测会先收到 `compact_boundary`，再收到一条 `num_turns: 0` 的 `result`。
 - `compact_boundary` 消息会被转成 `compaction.completed`，携带 `pre_tokens` / `post_tokens`。
 - 现在 `ProjectRuntime.compact()` **没有**检查活跃 turn。对 Claude 来说，`/compact` 只是一条普通输入，turn 进行中发出去会和当前 turn 的 `result` 混在一起。所以要在 `ProjectRuntime.compact()` 里加一个通用检查：有活跃 turn 时直接报错，和 `steer` 在没有活跃 turn 时报错的写法对称。这是所有运行时都需要的修复，不放在 Claude 适配器里单独处理。
 - 自动压缩（`trigger: "auto"`）产生的 `compact_boundary` 同样会转成 `compaction.completed`。
@@ -236,25 +250,24 @@ canUseTool: (toolName, input, { toolUseID, signal, title, decisionReason }) =>
 - 目前所有内置 action 的参数都是 zod object，直接用 `.shape` 作为 SDK 需要的 `inputSchema`。
 - 如果某个 action 的参数不是 zod object（只有 JSON Schema），就传空 shape，参数校验仍然交给 `actionRegistry.execute`。
 - handler 的逻辑和 Pi 的 `bridgeActionsToPiTools` 一样：创建 `ActionContext`，执行 action，把结果包装成 `{ content: [{ type: "text", text }], isError }`。
-- 创建 `ActionContext` 的那部分逻辑，从 `pi/tools.ts` 提到 `src/runtime/action-bridge.ts`，两个运行时共用。只有工具的格式转换是各自私有的。
+- 创建 `ActionContext`、选择 action 范围和格式化结果的逻辑，提到了 `src/runtime/action-bridge.ts`，Codex、Pi 和 Claude 三个运行时共用。只有工具的格式转换是各自私有的。
 
 **Skills**：
 
 - 创建 query 之前，把项目的 skills（以及继承自全局项目的 skills）用软链接放到 `<configDir>/skills/<id>`，然后传 `skills: "all"`。
-- 现在的 `SkillManager.syncSkillsToCodex` 本质上是“同步到某个目录下的 `skills/`”，和 Codex 并没有关系。所以把它改名为 `syncSkillsTo(dir, …)`，两个运行时共用。
-- 这一条依赖 Claude Code 会读取 `CLAUDE_CONFIG_DIR/skills`，也就是 `settingSources` 里的 `"user"`，第一阶段需要确认。
+- 原来的 `SkillManager.syncSkillsToCodex` 本质上是“链接到某个目录下的 `skills/`”，和 Codex 并没有关系。已改名为 `SkillManager.linkSkills(homeDir, …)`，Codex 和 Claude 共用。
+- 实测 `settingSources` 包含 `"user"` 时，`CLAUDE_CONFIG_DIR/skills` 下的 skill 会被加载。
 
 ### 4.8 会话恢复
 
 - `runtimeSessionId` 就是 Claude 的会话 UUID，由 `ProjectRuntime` 持久化。
 - 会话记录按 `cwd` 分目录存放；worktree 的路径已经存进了 `SessionRoute.workspacePath`，所以恢复时的 `cwd` 和创建时一样。
 
-**会话记录找不到时**：`resumeSession` 必须抛出 `RuntimeSessionNotFoundError`，`ProjectRuntime` 收到后会发出 `session.runtime_reset` 并新建一个会话。判断方式按优先级：
+**会话记录找不到时**：`resumeSession` 必须抛出 `RuntimeSessionNotFoundError`，`ProjectRuntime` 收到后会发出 `session.runtime_reset` 并新建一个会话。
 
-1. 调用 SDK 的 `getSessionInfo(id, { dir: workspacePath })`。它在宿主进程里运行，需要确认它是否读取子进程的 `CLAUDE_CONFIG_DIR`（它的选项里没有指定配置目录的参数）。
-2. 如果它读不到隔离的配置目录，就**不自己去解析 Claude 的会话文件目录结构**。改为：resume 后的 query 如果在 `system/init` 之前就以错误结束，就把这次失败当作找不到会话。
-
-具体用哪种方式，在第一阶段确认后写回本节。
+- `getSessionInfo` / `listSessions` 读的是**宿主进程**的 `CLAUDE_CONFIG_DIR`，不能按项目指定目录，所以不用它们，也不自己解析 Claude 的会话文件目录结构。
+- 实测 resume 一个不存在的 id 时，在初始化完成之前就会收到一条 `result/error_during_execution`（“No conversation found with session ID …”），随后 `initializationResult()` reject。
+- 所以 `ClaudeSession.open()` 等待 `initializationResult()`：如果它 reject，并且这是一次 resume，并且在初始化前收到过错误 `result`，就抛出 `RuntimeSessionNotFoundError`；其它启动失败抛普通错误，带上 CLI 给出的错误文本。
 
 ### 4.9 事件映射
 
@@ -264,7 +277,7 @@ canUseTool: (toolName, input, { toolUseID, signal, title, decisionReason }) =>
 | :-------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------- |
 | `stream_event`，`content_block_delta` / `text_delta`      | `agent.message.delta`                                                                                        |
 | `stream_event`，`content_block_delta` / `thinking_delta`  | `agent.reasoning.delta`                                                                                      |
-| `assistant` 的 `text` 块                                  | `agent.message.completed`（itemId 用 `${message.uuid}:${index}`）                                            |
+| `assistant` 的 `text` 块                                  | `agent.message.completed`（itemId 用 `${API message id}:${块序号}`，和流式增量的 itemId 一致）                |
 | `assistant` 的 `thinking` 块                              | `agent.reasoning.completed`                                                                                  |
 | `assistant` 的 `tool_use` 块：`Bash`                      | `command.started`（`command`、`workdir` = cwd）                                                              |
 | `assistant` 的 `tool_use` 块：`Write`                     | `file_change.started`（kind `create`）                                                                       |
@@ -289,7 +302,7 @@ canUseTool: (toolName, input, { toolUseID, signal, title, decisionReason }) =>
 export const CLAUDE_CAPABILITIES: RuntimeCapabilities = {
   streaming: true,
   resume: true,
-  steer: true, // 第一阶段验证失败则改为 false，见 4.6
+  steer: true, // 按 uuid 判断 turn 结束，见 4.2、4.6
   interrupt: true,
   compaction: true,
   approvals: true,
@@ -303,12 +316,14 @@ export const CLAUDE_CAPABILITIES: RuntimeCapabilities = {
 
 | 级别    | 场景                                                                                                         |
 | :------ | :----------------------------------------------------------------------------------------------------------- |
-| `info`  | 会话启动、恢复和释放（sessionId、projectId、model）                                                          |
+| `info`  | 会话启动、恢复和释放（sessionId、projectId）                                                                 |
 | `debug` | `system/init` 摘要；子进程 stderr；每个 turn 结束时 `result` 里的耗时、轮数和 `total_cost_usd`               |
-| `warn`  | 收到未知 `requestId` 的审批；恢复时找不到会话                                                                |
+| `warn`  | 恢复时找不到会话（带 CLI 给出的错误文本）                                                                    |
 | `error` | 消息循环异常退出（即上报 `runtime.disconnected` 的时候）                                                     |
 
-日志里永远不写 `env`、`apiKey`、`authToken`，也不写工具的完整输入（可能带文件内容）。工具输入只记录工具名。
+日志里永远不写 `env`、`apiKey`、`authToken`、`oauthToken`，也不写工具的完整输入（可能带文件内容）。
+
+收到未知 `requestId` 的审批时，和 Codex 一样直接抛错，由网关返回给调用方，不另外写日志。
 
 ## 5. 配置
 
@@ -317,11 +332,13 @@ export const CLAUDE_CAPABILITIES: RuntimeCapabilities = {
 ```yaml
 runtimes:
   claude:
-    apiKey: sk-ant-...             # 和 authToken 二选一
-    # authToken: ...
+    apiKey: sk-ant-...             # apiKey / authToken / oauthToken 三选一
+    # authToken: ...               # LLM 网关的 bearer token
+    # oauthToken: ...              # `claude setup-token` 生成的订阅 token
     # baseUrl: https://gateway.example.com
     model: claude-opus-5-5         # 项目没写 runtime.model 时使用的默认模型
-    # configDir: .data/claude      # 默认 <dataDir>/claude/<projectId>
+    # sandboxed: true              # 服务以 root 跑在隔离容器里时必须打开，见 4.5
+    # configDir: .data/claude      # 根目录，每个项目在 <configDir>/<projectId>
     # executable: /usr/local/bin/claude   # 默认用 SDK 自带的可执行文件
     # settingSources: [user, project]
     # tools: [Read, Edit, Write, Bash, Grep, Glob]  # 默认是 claude_code 预设
@@ -350,26 +367,29 @@ runtime:
 
 ### 第一阶段：验证（不提交业务代码）
 
-在临时目录里写一个最小脚本，用真实的 CLI 依次确认下面这些问题。结论写回本文档对应的小节：
+在临时目录里写最小脚本，用真实的 CLI（0.3.328 自带的版本）确认下面这些问题，结论已经写回对应的小节：
 
-1. 在 turn 进行中 `push` 一条 `priority: "now"` 的消息，是否会合并到当前 turn，并且只产生一条 `result`（4.6）。
-2. 输入 `/compact` 是否会产生 `compact_boundary` 和一条 `result` 消息（4.6）。
-3. `getSessionInfo` 能不能找到隔离配置目录里的会话；resume 一个不存在的 id 时，具体会发生什么（4.8）。
-4. `CLAUDE_CONFIG_DIR/skills` 下的 skills 是否会被加载（4.7）。
-5. `dev-orchestrator` 容器里能否正常使用 SDK 自带的可执行文件（optional dependency 区分 glibc 和 musl 两个版本）。
+| 问题 | 结论 |
+| :--- | :--- |
+| turn 进行中 `push` 一条 `priority: "now"` 的消息，会不会合并到当前 turn（4.6） | 不合并，产生两条 `result`；带上客户端 uuid 后，`user_message_uuids` 能准确说明每条 `result` 回答的是哪条输入 |
+| 输入 `/compact` 会产生什么（4.6） | 一条 `compact_boundary`（带 `pre_tokens` / `post_tokens`），然后一条 `result` |
+| `getSessionInfo` 能不能找到隔离目录里的会话；resume 不存在的 id 时会发生什么（4.8） | `getSessionInfo` 只读宿主进程的 `CLAUDE_CONFIG_DIR`；resume 失败表现为初始化前的错误 `result` 加上 `initializationResult()` reject |
+| `CLAUDE_CONFIG_DIR/skills` 下的 skills 会不会被加载（4.7） | 会（`settingSources` 包含 `"user"`） |
+| `dev-orchestrator` 容器里能不能用 SDK 自带的可执行文件 | 容器是 Debian glibc x86_64，对应 `linux-x64` 包，可以用；但容器以 root 运行，跳过权限检查需要 `IS_SANDBOX=1`（4.5） |
+
+另外发现：API key 无效时，`result` 是 `subtype: "success"` 加 `is_error: true`（4.2）。
 
 不需要验证“连续输入”的情况：turn 由 `ProjectRuntime` 串行调度，下一条输入一定在上一条的 `result` 之后才会发出（4.2）。
 
 ### 第二阶段：实现
 
-建议按下面的顺序拆成几个提交：
+实际提交：
 
 1. `fix: reject compaction while a turn is running`：`ProjectRuntime.compact()` 在有活跃 turn 时报错，补测试（4.6）。
-2. `refactor: share action context creation and skill sync between runtimes`：提取 `action-bridge.ts`，`syncSkillsToCodex` 改名为 `syncSkillsTo`。
-3. `build: add claude agent sdk`：安装依赖，同步更新 `bun.lock`。
-4. `feat: add claude code runtime`：`src/runtime/claude/` 和注册代码。
-5. `feat: route claude code permission prompts through approvals`：`canUseTool` 和待审批表。
-6. `docs: document claude runtime configuration`：更新 `config.example.yaml` 和本文档的状态。
+2. `refactor: share action bridging and skill linking between runtimes`：提取 `src/runtime/action-bridge.ts`，`syncSkillsToCodex` 改名为 `linkSkills`。Codex 的动态工具调用也改用它；工具调用找不到对应 thread 时直接回 JSON-RPC 错误，和审批请求的处理一致。
+3. `build: add claude agent sdk`：安装依赖，同步更新 `bun.lock`（带进来的 peer 依赖是 `@modelcontextprotocol/sdk`）。
+4. `feat: add claude code runtime`：`src/runtime/claude/` 和注册代码。审批的代码和会话代码耦合很紧，没有按原计划拆成单独的提交。
+5. `docs: document claude runtime configuration`：`config.example.yaml` 和本文档。
 
 ### 测试
 
@@ -388,6 +408,17 @@ runtime:
   - 恢复时抛出 `RuntimeSessionNotFoundError`。
 - 测试都不需要真实的 API key；第一阶段的验证脚本不进入测试集。
 - 最后跑一遍 `bun run check`、`bun run build`。
+
+除了单元测试，还用真实的 CLI（Haiku）对 `ClaudeRuntime` 做了一次端到端冒烟测试。凭据和配置目录换成宿主机已登录的账号，其余选项不变。确认了：
+
+- Claude 调用了编排器的 action，参数正确；
+- Bash 触发 `approval.requested`，批准后执行成功；
+- 中断以 `turn.interrupted` 结束；
+- `/compact` 产生 `compaction.completed`（21127 → 4623 tokens）；
+- 释放会话后在新进程里恢复，上下文还在；
+- 恢复不存在的会话抛出 `RuntimeSessionNotFoundError`。
+
+这次冒烟测试发现了一个单元测试没覆盖到的问题（构造 action server 时过早访问会话对象），已修复并补了测试。
 
 ## 7. 备选方案与取舍
 
