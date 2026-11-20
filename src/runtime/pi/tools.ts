@@ -1,4 +1,3 @@
-import { z } from "zod";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { ActionRegistry } from "../../actions/registry.ts";
 import {
@@ -6,29 +5,13 @@ import {
   actionContextFor,
   actionResultText,
   actionScopeFor,
+  actionToJsonSchema,
 } from "../action-bridge.ts";
+
+export { actionToJsonSchema };
 
 /** Reads the session's current call site when a tool runs. */
 export type ActionBridgeContextGetter = () => ActionCallSite;
-
-/**
- * Converts a Zod or raw object schema into standard JSON Schema suitable for Pi SDK.
- */
-export function actionToJsonSchema(param: unknown): Record<string, unknown> {
-  if (
-    typeof param === "object" &&
-    param !== null &&
-    typeof (param as { safeParse?: unknown }).safeParse === "function"
-  ) {
-    const schema = z.toJSONSchema(param as z.ZodType) as Record<string, unknown>;
-    const { $schema, ...clean } = schema;
-    return clean;
-  }
-  if (typeof param === "object" && param !== null) {
-    return param as Record<string, unknown>;
-  }
-  return { type: "object", properties: {} };
-}
 
 /**
  * Bridges Agent Orchestrator ActionRegistry actions into native Pi ToolDefinitions.

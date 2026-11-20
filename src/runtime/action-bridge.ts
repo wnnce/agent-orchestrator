@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { createActionContext } from "../actions/context.ts";
 import type { ActionContext, ActionResult, ActionScope } from "../actions/types.ts";
 import type { ProjectConfig } from "../domain/types.ts";
@@ -37,4 +38,21 @@ export function actionContextFor(site: ActionCallSite, signal?: AbortSignal): Ac
 /** The text an agent sees as an action's result. */
 export function actionResultText(result: ActionResult): string {
   return JSON.stringify(result.success ? (result.data ?? {}) : { error: result.error });
+}
+
+/** Converts a Zod or plain object parameter definition into standard JSON Schema. */
+export function actionToJsonSchema(param: unknown): Record<string, unknown> {
+  if (
+    typeof param === "object" &&
+    param !== null &&
+    typeof (param as { safeParse?: unknown }).safeParse === "function"
+  ) {
+    const schema = z.toJSONSchema(param as z.ZodType) as Record<string, unknown>;
+    const { $schema, ...clean } = schema;
+    return clean;
+  }
+  if (typeof param === "object" && param !== null) {
+    return param as Record<string, unknown>;
+  }
+  return { type: "object", properties: {} };
 }
