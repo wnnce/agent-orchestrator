@@ -190,7 +190,7 @@ Agent 运行时不在这里配置。每个运行时都读取自己的标准配�
 bun run db:init
 ```
 
-应用启动过程不会执行 DDL。`database/schema.sql` 是新数据库的最终结构定义；已有数据库需按文件名顺序手动执行 `database/migrations/` 下的 SQL 升级脚本。
+应用启动过程不会执行 DDL。表结构统一定义在 `src/persistence/schema.ts`，由 Drizzle Kit 生成迁移文件至 `database/migrations/`（执行 `bun run db:generate` 生成，`bun run db:init` 执行迁移）。
 
 ### 3. 启动本地服务
 
@@ -379,7 +379,7 @@ data: {"id":"evt_...","sequence":3,"type":"turn.completed","payload":{"status":"
 │   ├── gateway/          # Hono HTTP 网关、分模块路由、入站队列与标题生成
 │   ├── notifications/    # 响应式 Outbox 与飞书/企微/Telegram/Webhook/Log 提供者
 │   ├── observability/    # 结构化 JSON 日志记录器（自动敏感数据脱敏）
-│   ├── persistence/      # Store 接口、PostgreSQL 与纯内存 MemoryStore 实现
+│   ├── persistence/      # Drizzle Schema、Store 接口、PostgreSQL 与 MemoryStore 实现
 │   ├── project/          # ProjectManager、ProjectRuntime、技能加载与 _global_ 全局项目
 │   ├── router/           # 四级意图路由链（粘滞 / 关键词 / LLM / 全局兜底）
 │   ├── runtime/          # RuntimeRegistry、Codex/Claude/Pi 适配器、Action 桥接与 FakeRuntime
@@ -387,7 +387,7 @@ data: {"id":"evt_...","sequence":3,"type":"turn.completed","payload":{"status":"
 │   ├── task/             # 声明式 Markdown 任务加载器、Cron 调度与多类型执行器
 │   └── workspace/        # 单仓库同步与会话级 Git Worktree 管理
 ├── projects/             # 声明式项目配置（含 example 模板与公共 Taskfile）
-├── database/             # 新库 schema.sql 与手动增量 SQL 迁移脚本（migrations/）
+├── database/             # Drizzle Kit 生成的 SQL 迁移脚本与元数据快照（migrations/）
 ├── scripts/              # 显式数据库初始化脚本（init-database.ts）
 ├── docs/                 # 技术设计文档、运行时配置参考与上下文记录
 ├── web/                  # Web Studio 前端应用（React 19, Vite 6, Tailwind CSS v4）

@@ -3,7 +3,7 @@
 | 元数据       | 内容                                                                                             |
 | :----------- | :----------------------------------------------------------------------------------------------- |
 | **文档 ID**  | `07-drizzle-persistence-refactor`                                                                |
-| **状态**     | `Draft`                                                                                          |
+| **状态**     | `Accepted`                                                                                       |
 | **创建日期** | 2026-11-20                                                                                       |
 | **目标模块** | `src/persistence/`、`database/`、`scripts/init-database.ts`、`tests/database-schema.test.ts`     |
 | **相关文档** | `AGENTS.md`、`README.md`、`README_zh.md`、`Dockerfile`                                           |

@@ -190,7 +190,7 @@ When PostgreSQL is configured, initialize a new database explicitly before start
 bun run db:init
 ```
 
-The application never applies DDL during startup. `database/schema.sql` defines the schema for a fresh database; existing databases are upgraded manually using SQL files under `database/migrations/` in filename order.
+The application never applies DDL during startup. Table schemas are defined in TypeScript under `src/persistence/schema.ts` and managed with Drizzle Kit (`bun run db:generate` generates SQL migrations under `database/migrations/`, applied via `bun run db:init`).
 
 ### 3. Run Locally
 
@@ -379,7 +379,7 @@ data: {"id":"evt_...","sequence":3,"type":"turn.completed","payload":{"status":"
 │   ├── gateway/          # Hono HTTP server, domain route modules, inbox & title generator
 │   ├── notifications/    # Reactive Outbox & Feishu/WeCom/Telegram/Webhook/Log providers
 │   ├── observability/    # Structured JSON logger with automatic credential redaction
-│   ├── persistence/      # Store interface, PostgreSQL & MemoryStore implementations
+│   ├── persistence/      # Drizzle schema, Store interface, PostgreSQL & MemoryStore implementations
 │   ├── project/          # ProjectManager, ProjectRuntime, skills loader & _global_ project
 │   ├── router/           # 4-tier routing chain (sticky / keyword / LLM / global fallback)
 │   ├── runtime/          # RuntimeRegistry, Codex/Claude/Pi adapters, action bridge & FakeRuntime
@@ -387,7 +387,7 @@ data: {"id":"evt_...","sequence":3,"type":"turn.completed","payload":{"status":"
 │   ├── task/             # Declarative Markdown task loader, cron scheduler & executors
 │   └── workspace/        # Single-repo synchronization & per-session Git worktree manager
 ├── projects/             # Declarative project definitions (example template & Taskfile)
-├── database/             # Fresh-DB schema.sql and manual incremental SQL migrations
+├── database/             # Drizzle Kit generated SQL migrations and metadata snapshots
 ├── scripts/              # Explicit database initialization script (init-database.ts)
 ├── docs/                 # Design proposals, runtime setup reference & context notes
 ├── web/                  # Web Studio frontend (React 19, Vite 6, Tailwind CSS v4)

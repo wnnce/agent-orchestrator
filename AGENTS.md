@@ -18,9 +18,8 @@ web interface.
 - `src/runtime/`: runtime adapters and canonical event normalization.
 - `src/project/`, `src/session/`, `src/workspace/`: project, session, and workspace lifecycle.
 - `src/actions/`, `src/task/`: actions, task execution, and scheduling.
-- `src/persistence/`: `Store`, `MemoryStore`, and `PostgresStore` implementations.
-- `database/schema.sql`: complete schema for initializing a new PostgreSQL database.
-- `database/migrations/`: one-off SQL upgrades for existing databases, applied manually in name order.
+- `src/persistence/`: Drizzle ORM schema, `Store`, `MemoryStore`, and `PostgresStore` implementations.
+- `database/migrations/`: Drizzle Kit SQL migrations and metadata snapshots generated from `src/persistence/schema.ts`.
 - `scripts/`: explicit operational scripts such as database initialization.
 - `web/`: React/Vite web application.
 - `tests/`: Bun test suite.
