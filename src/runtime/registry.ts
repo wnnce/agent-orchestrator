@@ -8,6 +8,7 @@ import { FAKE_CAPABILITIES, FakeRuntime } from "./runtime.ts";
 import { CODEX_CAPABILITIES, CodexRuntime } from "./codex/index.ts";
 import { PI_CAPABILITIES, PiRuntime } from "./pi/index.ts";
 import { CLAUDE_CAPABILITIES, ClaudeRuntime } from "./claude/index.ts";
+import { AGY_PROFILE, createACPAdapter } from "./acp/index.ts";
 
 /**
  * Metadata describing a registered runtime and its capabilities.
@@ -206,6 +207,8 @@ export function createDefaultRuntimeRegistry(logger = new Logger()): RuntimeRegi
       capabilities: CLAUDE_CAPABILITIES,
     },
   );
+
+  registry.register(createACPAdapter(AGY_PROFILE));
 
   return registry;
 }
