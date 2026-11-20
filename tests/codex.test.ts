@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { mkdir, mkdtemp, writeFile, chmod, rm, realpath } from "node:fs/promises";
 import path from "node:path";
-import { CodexRuntime } from "../src/runtime/codex.ts";
+import { CodexRuntime } from "../src/runtime/codex/index.ts";
 import type { RuntimeEvent } from "../src/runtime/runtime.ts";
 import type { ProjectConfig } from "../src/domain/types.ts";
 import { Logger } from "../src/observability/logger.ts";

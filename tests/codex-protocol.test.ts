@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ProjectConfig } from "../src/domain/types.ts";
 import { Logger } from "../src/observability/logger.ts";
-import { CodexRuntime } from "../src/runtime/codex.ts";
+import { CodexRuntime } from "../src/runtime/codex/index.ts";
 import type { RuntimeContext, RuntimeEvent } from "../src/runtime/runtime.ts";
 
 /**

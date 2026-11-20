@@ -1,5 +1,5 @@
-import { Logger } from "../observability/logger.ts";
-import type { ProjectConfig } from "../domain/types.ts";
+import { Logger } from "../../observability/logger.ts";
+import type { ProjectConfig } from "../../domain/types.ts";
 import type {
   AgentRuntime,
   ApprovalDecision,
@@ -7,21 +7,21 @@ import type {
   RuntimeContext,
   RuntimeSession,
   RuntimeTurn,
-} from "./runtime.ts";
-import { RuntimeSessionNotFoundError } from "./runtime.ts";
-import { defaultActionRegistry, ActionRegistry } from "../actions/index.ts";
-import { actionContextFor, actionResultText, actionScopeFor } from "./action-bridge.ts";
-import { normalizeCodexNotification, notificationThreadId } from "./codex-normalizer.ts";
-import { CodexConnection } from "./codex/connection.ts";
-import { codexMcpServers } from "./codex/mcp.ts";
-import { projectSkillSources } from "./skills.ts";
-import type { RequestId } from "./codex/generated/RequestId.ts";
-import type { ServerNotification } from "./codex/generated/ServerNotification.ts";
-import type { ServerRequest } from "./codex/generated/ServerRequest.ts";
-import type { DynamicToolCallParams } from "./codex/generated/v2/DynamicToolCallParams.ts";
-import type { DynamicToolCallResponse } from "./codex/generated/v2/DynamicToolCallResponse.ts";
-import type { ThreadStartResponse } from "./codex/generated/v2/ThreadStartResponse.ts";
-import type { TurnStartResponse } from "./codex/generated/v2/TurnStartResponse.ts";
+} from "../runtime.ts";
+import { RuntimeSessionNotFoundError } from "../runtime.ts";
+import { defaultActionRegistry, ActionRegistry } from "../../actions/index.ts";
+import { actionContextFor, actionResultText, actionScopeFor } from "../action-bridge.ts";
+import { normalizeCodexNotification, notificationThreadId } from "./normalizer.ts";
+import { CodexConnection } from "./connection.ts";
+import { codexMcpServers } from "./mcp.ts";
+import { projectSkillSources } from "../skills.ts";
+import type { RequestId } from "./generated/RequestId.ts";
+import type { ServerNotification } from "./generated/ServerNotification.ts";
+import type { ServerRequest } from "./generated/ServerRequest.ts";
+import type { DynamicToolCallParams } from "./generated/v2/DynamicToolCallParams.ts";
+import type { DynamicToolCallResponse } from "./generated/v2/DynamicToolCallResponse.ts";
+import type { ThreadStartResponse } from "./generated/v2/ThreadStartResponse.ts";
+import type { TurnStartResponse } from "./generated/v2/TurnStartResponse.ts";
 
 /** JSON-RPC "method not found": the reply to server requests this service does not support. */
 const METHOD_NOT_FOUND = -32601;

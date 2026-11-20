@@ -1,9 +1,9 @@
-import type { FileChangeCompletedPayload } from "../domain/events.ts";
-import type { ServerNotification } from "./codex/generated/ServerNotification.ts";
-import type { PatchChangeKind } from "./codex/generated/v2/PatchChangeKind.ts";
-import type { ThreadItem } from "./codex/generated/v2/ThreadItem.ts";
-import type { Turn } from "./codex/generated/v2/Turn.ts";
-import type { RuntimeEvent } from "./runtime.ts";
+import type { FileChangeCompletedPayload } from "../../domain/events.ts";
+import type { ServerNotification } from "./generated/ServerNotification.ts";
+import type { PatchChangeKind } from "./generated/v2/PatchChangeKind.ts";
+import type { ThreadItem } from "./generated/v2/ThreadItem.ts";
+import type { Turn } from "./generated/v2/Turn.ts";
+import type { RuntimeEvent } from "../runtime.ts";
 
 type ItemOf<T extends ThreadItem["type"]> = Extract<ThreadItem, { type: T }>;
 

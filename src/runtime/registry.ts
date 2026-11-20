@@ -5,7 +5,7 @@ import type { ActionRegistry } from "../actions/registry.ts";
 import { Logger } from "../observability/logger.ts";
 import type { AgentRuntime, RuntimeCapabilities } from "./runtime.ts";
 import { FAKE_CAPABILITIES, FakeRuntime } from "./runtime.ts";
-import { CODEX_CAPABILITIES, CodexRuntime } from "./codex.ts";
+import { CODEX_CAPABILITIES, CodexRuntime } from "./codex/index.ts";
 import { PI_CAPABILITIES, PiRuntime } from "./pi/index.ts";
 import { CLAUDE_CAPABILITIES, ClaudeRuntime } from "./claude/index.ts";
 

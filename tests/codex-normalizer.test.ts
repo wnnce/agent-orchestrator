@@ -3,7 +3,7 @@ import {
   finalTextOfTurn,
   normalizeCodexNotification,
   notificationThreadId,
-} from "../src/runtime/codex-normalizer.ts";
+} from "../src/runtime/codex/normalizer.ts";
 import type { ServerNotification } from "../src/runtime/codex/generated/ServerNotification.ts";
 import type { ThreadItem } from "../src/runtime/codex/generated/v2/ThreadItem.ts";
 import type { Turn } from "../src/runtime/codex/generated/v2/Turn.ts";
