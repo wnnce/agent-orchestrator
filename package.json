@@ -7,6 +7,7 @@
     "dev": "bun run src/main.ts",
     "start": "bun run dist/main.js",
     "build": "bun build src/main.ts --target bun --outdir dist --external pg",
+    "db:generate": "drizzle-kit generate",
     "db:init": "bun run scripts/init-database.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome lint --diagnostic-level=error src scripts tests",
@@ -25,6 +26,7 @@
     "@wecom/aibot-node-sdk": "^1.0.7",
     "cron-parser": "^5.10.4",
     "croner": "^11.0.0",
+    "drizzle-orm": "^0.45.4",
     "hono": "^4.13.17",
     "pg": "^8.16.3",
     "yaml": "^2.8.1",
@@ -35,6 +37,7 @@
     "@types/bun": "^1.3.3",
     "@types/node": "^24.10.0",
     "@types/pg": "^8.15.6",
+    "drizzle-kit": "^0.31.11",
     "prettier": "^3.9.10",
     "typescript": "^5.9.3"
   }
