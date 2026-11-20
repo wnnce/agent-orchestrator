@@ -1,7 +1,9 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Pool } from "pg";
 import YAML from "yaml";
+import { createDrizzleDb } from "../src/persistence/db.ts";
 
 function configPathFromArgs(args: string[]): string {
   if (args.length === 0) return "config.yaml";
@@ -38,20 +40,13 @@ if (!databaseUrl) {
   throw new Error(`PostgreSQL databaseUrl is not configured in ${configPath}`);
 }
 
-const schemaPath = path.resolve(import.meta.dir, "../database/schema.sql");
-const schema = await readFile(schemaPath, "utf8");
+const migrationsFolder = path.resolve(import.meta.dir, "../database/migrations");
 const pool = new Pool({ connectionString: databaseUrl, max: 1 });
-const client = await pool.connect();
 
 try {
-  await client.query("BEGIN");
-  await client.query(schema);
-  await client.query("COMMIT");
-  console.log(`Database schema initialized from ${schemaPath}`);
-} catch (error) {
-  await client.query("ROLLBACK").catch(() => {});
-  throw error;
+  const db = createDrizzleDb(pool);
+  await migrate(db, { migrationsFolder });
+  console.log(`Database migrations applied from ${migrationsFolder}`);
 } finally {
-  client.release();
   await pool.end();
 }

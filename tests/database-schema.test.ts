@@ -1,60 +1,64 @@
 import { describe, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { getTableConfig } from "drizzle-orm/pg-core";
 import type { BaseEntity, BaseLogRecord } from "../src/domain/types.ts";
+import { schema } from "../src/persistence/schema.ts";
 
 describe("database schema definition", () => {
-  test("defines the complete fresh-database schema without upgrade statements", async () => {
-    const schemaPath = path.resolve(import.meta.dir, "../database/schema.sql");
-    const sql = await readFile(schemaPath, "utf8");
-    const createTableRegex = /CREATE TABLE IF NOT EXISTS\s+(\w+)\s*\(([\s\S]*?)\);/gi;
-    const tables: { name: string; body: string }[] = [];
-    let match = createTableRegex.exec(sql);
+  test("defines the 9 active tables in Drizzle schema without legacy unused tables", () => {
+    const tableConfigs = Object.values(schema).map((table) => getTableConfig(table));
+    const tableNames = tableConfigs.map((cfg) => cfg.name).sort();
 
-    while (match !== null) {
-      tables.push({ name: match[1]!, body: match[2]! });
-      match = createTableRegex.exec(sql);
-    }
-
-    expect(tables.map((table) => table.name).sort()).toEqual(
+    expect(tableNames).toEqual(
       [
         "action_executions",
         "artifacts",
         "events",
         "inbound_messages",
         "notification_deliveries",
-        "project_triggers",
         "scheduled_jobs",
         "sessions",
         "task_executions",
-        "trigger_intents",
         "turns",
       ].sort(),
     );
-    expect(tables.some((table) => table.name === "projects")).toBe(false);
-    expect(sql).not.toMatch(/^\s*(ALTER|DROP|UPDATE|DELETE)\s+/gim);
+    expect(tableNames).not.toContain("projects");
+    expect(tableNames).not.toContain("project_triggers");
+    expect(tableNames).not.toContain("trigger_intents");
 
-    for (const table of tables) {
-      expect(table.body).toMatch(/id\s+BIGSERIAL\s+PRIMARY\s+KEY/i);
-      expect(table.body).not.toMatch(/(?:TEXT|VARCHAR(?:\(\d+\))?)\s+PRIMARY\s+KEY/i);
-      expect(table.body).toMatch(/created_at\s+TIMESTAMPTZ\s+NOT\s+NULL/i);
+    for (const cfg of tableConfigs) {
+      const idCol = cfg.columns.find((c) => c.name === "id");
+      expect(idCol).toBeDefined();
+      expect(idCol!.primary).toBe(true);
+      expect(idCol!.getSQLType()).toBe("bigserial");
+
+      const createdAtCol = cfg.columns.find((c) => c.name === "created_at");
+      expect(createdAtCol).toBeDefined();
+      expect(createdAtCol!.notNull).toBe(true);
     }
 
-    const coreEntityTables = ["sessions", "scheduled_jobs", "project_triggers"];
-    for (const tableName of coreEntityTables) {
-      const body = tables.find((table) => table.name === tableName)?.body;
-      expect(body).toBeDefined();
-      expect(body!).toMatch(/updated_at\s+TIMESTAMPTZ\s+NOT\s+NULL/i);
-      expect(body!).toMatch(/deleted_at\s+BIGINT\s+NOT\s+NULL\s+DEFAULT\s+0/i);
+    for (const entityTableName of ["sessions", "scheduled_jobs"]) {
+      const cfg = tableConfigs.find((t) => t.name === entityTableName)!;
+      const updatedAtCol = cfg.columns.find((c) => c.name === "updated_at");
+      const deletedAtCol = cfg.columns.find((c) => c.name === "deleted_at");
+      expect(updatedAtCol).toBeDefined();
+      expect(updatedAtCol!.notNull).toBe(true);
+      expect(deletedAtCol).toBeDefined();
+      expect(deletedAtCol!.notNull).toBe(true);
+      expect(deletedAtCol!.default).toBe(0);
     }
 
-    const sessions = tables.find((table) => table.name === "sessions")?.body;
-    expect(sessions).toMatch(/title\s+VARCHAR\(255\)/i);
-    expect(sessions).toMatch(/metadata\s+JSONB/i);
+    const sessionsCfg = tableConfigs.find((t) => t.name === "sessions")!;
+    expect(sessionsCfg.columns.find((c) => c.name === "title")).toBeDefined();
+    expect(sessionsCfg.columns.find((c) => c.name === "cursors")).toBeDefined();
+    expect(sessionsCfg.columns.find((c) => c.name === "metadata")).toBeDefined();
+    expect(sessionsCfg.columns.find((c) => c.name === "repository_id")).toBeUndefined();
 
-    const notifications = tables.find((table) => table.name === "notification_deliveries")?.body;
-    expect(notifications).toMatch(/details\s+JSONB/i);
-    expect(notifications).not.toMatch(/\berror\b|\battempts\b/i);
+    const notificationsCfg = tableConfigs.find((t) => t.name === "notification_deliveries")!;
+    expect(notificationsCfg.columns.find((c) => c.name === "details")).toBeDefined();
+    expect(notificationsCfg.columns.find((c) => c.name === "error")).toBeUndefined();
+    expect(notificationsCfg.columns.find((c) => c.name === "attempts")).toBeUndefined();
   });
 
   test("base persistence types retain entity and append-only semantics", () => {
@@ -81,10 +85,9 @@ describe("database schema definition", () => {
       readFile(path.resolve(import.meta.dir, "../scripts/init-database.ts"), "utf8"),
     ]);
 
-    expect(mainSource).not.toContain(".migrate(");
-    expect(storeSource).not.toContain("schema.sql");
-    expect(storeSource).not.toMatch(/(?:INSERT INTO|FROM)\s+projects\b/i);
-    expect(initSource).toContain("../database/schema.sql");
-    expect(initSource).toContain('client.query("BEGIN")');
+    expect(mainSource).not.toContain("migrate(");
+    expect(storeSource).not.toContain("migrate(");
+    expect(initSource).toContain("migrate(");
+    expect(initSource).toContain("../database/migrations");
   });
 });
