@@ -1,13 +1,12 @@
 # Agent Orchestrator
 
 <p align="center">
-  <strong>A high-performance Bun/TypeScript gateway and orchestrator for long-lived, project-scoped coding agents.</strong>
+  <strong>A Bun/TypeScript gateway and orchestrator for long-lived, project-scoped coding agents.</strong>
 </p>
 
 <p align="center">
   <a href="https://bun.sh"><img src="https://img.shields.io/badge/Bun-v1.2%2B-black?logo=bun" alt="Bun"></a>
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.9%2B-blue?logo=typescript" alt="TypeScript"></a>
-  <a href="https://github.com"><img src="https://img.shields.io/badge/Tests-273%20passed-success" alt="Tests"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License"></a>
 </p>
 
@@ -19,16 +18,17 @@
 
 ## Overview
 
-**Agent Orchestrator** manages and schedules autonomous coding agents (such as OpenAI Codex App Server) across multi-repository workspaces. It bridges external user channels (Web Studio, REST API, Feishu/Lark, WeChat Work) with isolated execution environments, enforcing strict type safety, canonical domain event streaming, and resilient workspace isolation.
+**Agent Orchestrator** manages and coordinates autonomous coding agents (**OpenAI Codex**, **Claude Code**, and **Pi Agent**) across project-scoped workspaces. It bridges external user channels (Web Studio, REST/SSE API, Feishu/Lark, WeChat Work, and Webhooks) with isolated execution environments, enforcing strict type safety, canonical domain event streaming, and Git worktree isolation.
 
 ### Why Agent Orchestrator?
 
-- **Git Worktree Isolation**: Concurrent agent sessions operate in independent git worktrees cloned from single-flight pre-warmed base repositories. No branch collision, no dirty workspace leaks.
-- **Strict Canonical Event Stream**: Unifies heterogeneous agent outputs into a strongly-typed domain event protocol (`agent.message.*`, `agent.reasoning.*`, `command.*`, `file.change`, etc.). Transient streaming deltas are published live via SSE but bypassed from DB storage to avoid bloat.
-- **Immutable Session Pinning**: Inbound queries are intelligently routed to a project via heuristic or LLM router. Once bound, `sessionId -> projectId -> runtime` routing is pinned forever.
-- **Enterprise Chat Connectors**: Native bidirectional Feishu (WebSocket & Webhook) and WeChat Work integrations featuring interactive streaming cards and message serialization per thread.
-- **Autonomous Task & Action Engine**: Cron and interval scheduled tasks trigger agent actions (`createArtifact`, `notify`, `emitDomainEvent`) with structured audit trails and auto-recovery.
-- **Built-in Web Studio**: Bundled React + Vite dashboard providing real-time turn visualization, session inspection, and workspace management.
+- **Multi-Runtime with Native Configuration**: First-class adapters for **Codex** (`codex app-server`), **Claude Code** (`@anthropic-ai/claude-agent-sdk`), and **Pi** (`@earendil-works/pi-coding-agent`), registered through a pluggable `RuntimeRegistry`. Each runtime reads its own standard global configuration (`~/.codex`, `~/.claude`, `~/.pi/agent`) while projects override only `type`, `model`, `reasoningEffort`, and `mcpServers`.
+- **Single-Repo Git Worktree Isolation**: Each managed project maps to at most one repository. Concurrent sessions run in independent Git worktrees (`agent/<sessionId>`) branched from single-flight synchronized base repositories, with a built-in read-only `_global_` workspace for cross-project analysis.
+- **Canonical Domain Event Stream**: Normalizes heterogeneous agent protocols into a strongly typed discriminated union (`agent.message.*`, `agent.reasoning.*`, `plan.updated`, `command.*`, `file_change.*`, `tool.*`, `mcp_call.*`, `approval.*`, `session.*`, `turn.*`, etc.). High-frequency transient deltas stream live over SSE without bloating persistent storage.
+- **Four-Tier Routing with Session Pinning**: Routes inbound queries through sticky session lookup, deterministic keyword scoring, optional OpenAI-compatible LLM routing, and read-only `_global_` fallback. Once created, a session stays pinned to its project.
+- **Enterprise Chat Connectors & Unified Notifications**: Bidirectional Feishu (WebSocket & Webhook) and WeChat Work (Bot SDK WebSocket) channels with streaming card updates, strictly separated from one-way outbound notifications (Feishu, WeCom, Telegram, Webhook, Log).
+- **Declarative Tasks, Scheduled Jobs & Actions**: Cron-scheduled Markdown tasks (`tasks/*.md`) supporting `agent`, `script`, and `action` executors, delayed per-session `scheduled_jobs`, and audited built-in actions exposed to agents.
+- **Web Studio**: Bundled React 19 + Vite + Tailwind CSS v4 frontend for real-time SSE turn streaming, session kanban management, task history, and scheduled job inspection.
 
 ---
 
@@ -37,31 +37,31 @@
 ```mermaid
 flowchart TD
     subgraph Inbound["Inbound Layer"]
-        UI["Web Studio (React/Vite)"]
-        API["REST / SSE Clients"]
-        FS["Feishu (WS / Webhook)"]
-        WC["WeCom (Bot SDK)"]
+        UI["Web Studio (React 19 / Vite)"]
+        API["REST / SSE / Webhook Clients"]
+        FS["Feishu (WebSocket / Webhook)"]
+        WC["WeCom (Bot WebSocket)"]
     end
 
     subgraph Gateway["Gateway & Routing (Hono)"]
-        Auth["Token Auth & Redaction"]
-        Router["Intent Router (Heuristic / LLM)"]
-        SessionMgr["Session Manager (Pinned Routing)"]
-        EventHub["Event Hub (SSE Publisher)"]
+        Auth["Bearer Auth & Request Logging"]
+        Router["4-Tier Router (Sticky / Keyword / LLM / Global)"]
+        SessionMgr["Session Manager & Entity State"]
+        EventHub["Event Hub (SSE Pub/Sub & Replay)"]
     end
 
     subgraph Execution["Project Runtime"]
-        WkMgr["Workspace Manager (Git Worktrees)"]
-        ActionReg["Action Registry & Context"]
-        TaskEng["Scheduled Task Engine (Cron / Interval)"]
-        Normalizer["Codex Message Normalizer"]
-        Runtime["Agent Runtime (Codex App Server / Custom)"]
+        WkMgr["Workspace Manager (Single-Repo Git Worktrees)"]
+        ActionReg["Action Registry & Audit Context"]
+        TaskEng["Task Engine (Cron) & Scheduled Jobs"]
+        RuntimeReg["Runtime Registry (Codex / Claude / Pi)"]
+        Normalizer["Canonical Event Normalizers"]
     end
 
-    subgraph Persistence["Storage & Outbox"]
-        DB[("PostgreSQL / In-Memory Store")]
-        Outbox["Notification Outbox (Telegram, Webhooks)"]
-        Artifacts["Artifact Store (Disk / Metadata)"]
+    subgraph Persistence["Storage & Outbound"]
+        DB[("PostgreSQL / MemoryStore")]
+        Outbox["Notification Outbox (Feishu / WeCom / Telegram / Webhook)"]
+        Artifacts["Artifact Store (Disk & Metadata)"]
     end
 
     UI --> Auth
@@ -72,51 +72,68 @@ flowchart TD
     Auth --> Router
     Router --> SessionMgr
     SessionMgr --> WkMgr
-    SessionMgr --> Runtime
-    Runtime --> Normalizer
+    SessionMgr --> RuntimeReg
+    RuntimeReg --> Normalizer
     Normalizer --> EventHub
     EventHub --> UI
     EventHub --> API
+    EventHub --> FS
+    EventHub --> WC
 
-    Runtime --> ActionReg
+    RuntimeReg --> ActionReg
     TaskEng --> ActionReg
+    TaskEng --> SessionMgr
     ActionReg --> Outbox
     ActionReg --> Artifacts
     SessionMgr --> DB
+    Outbox --> DB
 ```
 
 ---
 
 ## Key Features
 
-### 1. Multi-Project Workspaces
+### 1. Project-Scoped Workspaces & Global Read-Only Mode
 
-- Each managed project defines its repository, git committer and credentials under `projects/<project-id>/project.yaml`.
-- The base repository is automatically cloned and synchronized via single-flight locking, preventing concurrent fetch collisions.
-- Every session gets a dedicated Git worktree (`ensureSessionWorkspace`) that is pruned on teardown.
+- Each managed project lives under `projects/<project-id>/project.yaml` and defines at most one `repository` (with optional `path`, `committer`, and `ssh-key` or `token` auth), plus optional `scripts/init.sh` and `scripts/sync.sh` hooks.
+- Base repositories are cloned and fetched with single-flight locking (`inFlightBases`) and per-base worktree locks to prevent concurrent Git collisions.
+- Every session operates in its own Git worktree on branch `agent/<sessionId>`, cleaned up when archived or closed.
+- A built-in `_global_` workspace provides read-only cross-project inspection enforced by `RuntimeContext.readOnly`.
 
-### 2. Standardized Agent Runtime & Canonical Protocol
+### 2. Multi-Runtime Adapters & Canonical Protocol
 
-- Runtime interface decouples agent implementations. Includes first-class support for OpenAI Codex App Server JSON-RPC protocol, with extension points for Pi or custom CLI agents.
-- Normalizes proprietary agent dialects into a Discriminated Union `RuntimeEvent`:
-  - `agent.message.delta` & `agent.message.completed`
-  - `agent.reasoning.delta` & `agent.reasoning.completed`
-  - `command.started` & `command.completed`
-  - `file.changed`
-  - `runtime.unmapped` (safely encapsulates vendor dialects inside `metadata.raw` without root pollution)
+- Built-in adapters in `RuntimeRegistry`:
+  - **`codex`**: OpenAI Codex via `codex app-server` JSON-RPC (streaming, resume, steer, interrupt, compaction, approvals, MCP, sandbox).
+  - **`claude`**: Claude Code via `@anthropic-ai/claude-agent-sdk` (streaming, resume, steer, interrupt, compaction, approvals, MCP).
+  - **`pi`**: Pi Agent in-process TypeScript SDK via `@earendil-works/pi-coding-agent` (streaming, resume, steer, interrupt, compaction, MCP, sandbox).
+  - **`fake`**: In-memory mock runtime for automated tests and offline development.
+- Normalizes vendor-specific events into `CanonicalEventPayloadMap`:
+  - `agent.message.delta` / `agent.message.completed`
+  - `agent.reasoning.delta` / `agent.reasoning.completed` / `plan.updated`
+  - `command.started` / `command.output` / `command.completed`
+  - `file_change.started` / `file_change.completed`
+  - `tool.call.started` / `tool.called` / `mcp_call.started` / `mcp_call.completed`
+  - `approval.requested` / `approval.resolved`
+  - `session.*`, `turn.*`, `artifact.created`, `notification.*`, `compaction.*`, `runtime.unmapped`, `runtime.disconnected`
+- Transient streaming events (`agent.message.delta`, `agent.reasoning.delta`, `command.output`) broadcast live through `EventHub` without being persisted to the `events` table.
+- Project skills (`projects/<project-id>/.skills/`) and global skills (`projects/.skills/`) are injected per session via runtime APIs alongside repository-native skills and `AGENTS.md` / `CLAUDE.md`.
 
-### 3. Native Enterprise Channels
+### 3. Enterprise Chat Channels & Unified Notifications
 
-- **Feishu / Lark**: WebSocket long-connection mode (`FeishuWsAdapter`) for zero-public-IP deployments, plus standard Webhook callbacks. Renders markdown responses directly into updating interactive cards (`FeishuCardStreamer`).
-- **WeChat Work (企业微信)**: Native bot SDK integration with chunked card streaming (`WecomCardStreamer`).
-- Automatic deduplication of external message IDs to guarantee turn idempotency.
+- **Bidirectional Channels (`src/channels/`)**:
+  - **Feishu / Lark**: WebSocket long-connection mode (`FeishuWSAdapter`) and HTTP Webhook callbacks (`FeishuAdapter`), streaming Markdown updates into interactive cards (`FeishuSessionStreamer`).
+  - **WeChat Work (企业微信)**: Official `@wecom/aibot-node-sdk` WebSocket adapter (`WeComWSAdapter`) with throttled Markdown streaming (`WeComSessionStreamer`).
+  - Supports external message ID deduplication (`inbound_messages`) and session commands (`/cancel`, `/close`).
+- **One-Way Notifications (`src/notifications/`)**:
+  - Provider registry supporting `feishu`, `wecom`, `telegram`, `webhook`, and `log`.
+  - Global `notifications` in `config.yaml` are inherited by all projects and can be overridden or disabled by name per project.
+  - Reactive in-memory `NotificationOutbox` delivers concurrently via `Promise.allSettled` and records per-channel audit results in `notification_deliveries`.
 
-### 4. Action Engine & Scheduled Tasks
+### 4. Actions, Declarative Tasks & Scheduled Jobs
 
-- Unified action capabilities: `createArtifact`, `notify`, `emitDomainEvent`.
-- Truncates oversized parameters safely in audit logs.
-- Configurable cron/interval tasks invoke project lifecycle handlers and maintenance jobs.
-- Outbox fanout delivers notifications to Feishu, WeCom, Telegram, and generic Webhooks with partial-failure tracking.
+- **Built-in Actions (`src/actions/`)**: `update_task_state`, `send_notification`, `create_artifact`, `schedule_job`, `cancel_job`, and `dispatch_agent_task`, bridged to runtimes by scope (`conversation` vs `task`) with audited execution records (`action_executions`).
+- **Declarative Cron Tasks (`src/task/`)**: Defined as Markdown files with YAML frontmatter under `projects/<project-id>/tasks/*.md`. Supports `agent`, `script`, and `action` executors and automatically recovers `state_after` from the previous successful run.
+- **Delayed Scheduled Jobs**: Agents can schedule follow-up prompts on their own session (`scheduled_jobs`) or cancel pending jobs dynamically.
 
 ---
 
@@ -124,19 +141,22 @@ flowchart TD
 
 ### Prerequisites
 
-- [Bun](https://bun.sh) (v1.2 or higher)
+- [Bun](https://bun.sh) (v1.2 or higher; tested with v1.4+)
 - Git (v2.30+ recommended for worktree features)
-- Docker & Docker Compose (optional, for containerized run)
+- At least one configured agent CLI/runtime (Codex, Claude Code, or Pi) for real agent execution
+- Docker & Docker Compose (optional, for containerized deployment)
 
 ### 1. Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-org/agent-orchestrator.git
+git clone <your-repo-url> agent-orchestrator
 cd agent-orchestrator
 
-# Install dependencies
+# Install backend dependencies
 bun install
+
+# Optional: install and build Web Studio static assets
+cd web && bun install && bun run build && cd ..
 ```
 
 ### 2. Configuration
@@ -147,9 +167,11 @@ Copy the example configuration:
 cp config.example.yaml config.yaml
 ```
 
-Update `config.yaml` with your environment values:
+Minimal `config.yaml`:
 
 ```yaml
+defaultRuntime: codex # codex | claude | pi
+
 server:
   host: 0.0.0.0
   port: 7070
@@ -157,15 +179,10 @@ server:
 storage:
   dataDir: .data
   projectsDir: projects
-  databaseUrl: "" # Leave empty for in-memory store, or provide postgres://...
-
-defaultRuntime: codex # codex | claude | pi
+  databaseUrl: "" # Leave empty for MemoryStore, or provide postgres://...
 ```
 
-Agent runtimes are not configured here. Each one reads its own configuration, the same as when
-you use its CLI directly: Codex from `~/.codex`, Claude Code from `~/.claude`, Pi from
-`~/.pi/agent`. Log in or configure providers there; see
-[docs/references/runtime-setup.md](docs/references/runtime-setup.md).
+Agent runtimes are not configured in `config.yaml`. Each runtime reads its own native configuration, the same as when you use its CLI directly: Codex from `~/.codex` (`CODEX_HOME`), Claude Code from `~/.claude` (`CLAUDE_CONFIG_DIR`), and Pi from `~/.pi/agent` (`PI_CODING_AGENT_DIR`). See [docs/references/runtime-setup.md](docs/references/runtime-setup.md) for login, provider, and migration details.
 
 When PostgreSQL is configured, initialize a new database explicitly before starting the service:
 
@@ -173,41 +190,42 @@ When PostgreSQL is configured, initialize a new database explicitly before start
 bun run db:init
 ```
 
-The application never applies DDL during startup. `database/schema.sql` is a fresh-database
-definition, not an upgrade migration for an existing database.
+The application never applies DDL during startup. `database/schema.sql` defines the schema for a fresh database; existing databases are upgraded manually using SQL files under `database/migrations/` in filename order.
 
 ### 3. Run Locally
 
 ```bash
-# Verify typecheck and tests
+# Run typecheck, lint, and backend tests
 bun run check
 
-# Start development server (serves Gateway API & Web Studio)
+# Start the gateway server (also serves Web Studio if web/dist exists)
 bun run dev
 ```
 
-Open [http://localhost:7070](http://localhost:7070) in your browser to access the Web Studio.
+For frontend hot-reload development, run Vite in a second terminal (`cd web && bun run dev`, which proxies API requests to `http://127.0.0.1:7070`). Otherwise, once `web/dist` is built, open [http://localhost:7070](http://localhost:7070).
 
 ---
 
 ## Docker Deployment
 
-Build and run using Docker Compose:
+`docker-compose.yaml` builds the application image on top of the local `agent-runtime-base` image (`infra/agent-runtime-base/Dockerfile`). Build the base image first, then start the service:
 
 ```bash
 # 1. Prepare configuration
 cp config.example.yaml config.yaml
-# Leave storage.databaseUrl empty for the standalone in-memory deployment
 
-# 2. Build images and start services
+# 2. Build the local runtime base image
+docker compose --profile build build agent-runtime-base
+
+# 3. Build and start the orchestrator container
 docker compose up -d --build
 ```
 
-The application image incorporates:
+What the container images include:
 
-- Multi-repo developer runtime environment (Go, Python/uv, Node.js, Bun, Git, Task, `rg`, `jq`)
-- Dedicated non-root runtime permissions
-- Pre-packaged Web Studio assets served directly from the gateway
+- Runtime base image (`infra/agent-runtime-base`): Debian 13 slim with Go, Node.js, Python/`uv`, Bun, `task` (go-task), `tman`, Git, and non-root `agent` user permissions.
+- Application image (`Dockerfile`): Pre-built backend bundle (`dist/main.js`), `database/`, `scripts/init-database.ts`, `projects/`, and `config.example.yaml`. Note that `Dockerfile` packages the backend service without building `web/dist`; mount or copy `web/dist` into `/app/web/dist` if you want the container gateway to serve Web Studio.
+- Mount persistent volumes for runtime configuration directories (`~/.codex`, `~/.claude`, `~/.pi`) or set `CODEX_HOME` / `CLAUDE_CONFIG_DIR` / `PI_CODING_AGENT_DIR` as described in [docs/references/runtime-setup.md](docs/references/runtime-setup.md).
 
 ---
 
@@ -215,20 +233,27 @@ The application image incorporates:
 
 ### Gateway Service (`config.yaml`)
 
-| Field                     | Type      | Description                                                           |
-| ------------------------- | --------- | --------------------------------------------------------------------- |
-| `server.host`             | `string`  | Bind host (default: `0.0.0.0`)                                        |
-| `server.port`             | `number`  | HTTP & SSE listening port (default: `7070`)                           |
-| `logging.level`           | `string`  | Log level: `debug`, `info`, `warn`, `error`                           |
-| `storage.dataDir`         | `string`  | Root directory for session workspaces and runtimes (default: `.data`) |
-| `storage.projectsDir`     | `string`  | Path containing project YAML declarations (default: `projects`)       |
-| `storage.databaseUrl`     | `string`  | PostgreSQL connection URL. Empty uses In-Memory store                 |
-| `auth.token`              | `string`  | Gateway API bearer token. Empty disables authentication               |
-| `router.model`            | `string`  | Optional model name for zero-shot LLM intent routing                  |
-| `defaultRuntime`          | `string`  | Runtime for projects without `runtime.type` (default: `codex`)        |
-| `channels.feishu.enabled` | `boolean` | Enable Feishu event receiver and interactive card streamer            |
-| `channels.wecom.enabled`  | `boolean` | Enable WeChat Work intelligent bot streaming adapter                  |
-| `notifications`           | `array`   | Global outbound notification endpoints (Telegram, Webhooks)           |
+| Field                       | Type      | Default                      | Description                                                                   |
+| --------------------------- | --------- | ---------------------------- | ----------------------------------------------------------------------------- |
+| `defaultRuntime`            | `string`  | `codex`                      | Runtime for `_global_` and projects without `runtime.type` (`codex\|claude\|pi`) |
+| `server.host`               | `string`  | `0.0.0.0`                    | HTTP bind host                                                                |
+| `server.port`               | `number`  | `7070`                       | HTTP & SSE listening port                                                     |
+| `logging.level`             | `string`  | `info`                       | Log level: `debug`, `info`, `warn`, `error`                                   |
+| `storage.dataDir`           | `string`  | `.data`                      | Root directory for base repos, session workspaces, and secrets                |
+| `storage.projectsDir`       | `string`  | `projects`                   | Directory containing managed project subdirectories                           |
+| `storage.artifactDir`       | `string`  | `<dataDir>/artifacts`        | Directory for persisted session artifacts                                     |
+| `storage.databaseUrl`       | `string`  | `""`                         | PostgreSQL URL; empty enables in-memory `MemoryStore`                         |
+| `auth.token`                | `string`  | `""`                         | Gateway API Bearer token                                                      |
+| `auth.allowUnauthenticated` | `boolean` | `true`                       | Set to `false` together with `auth.token` to enforce Bearer auth              |
+| `router.model`              | `string`  | `""`                         | Optional OpenAI-compatible model for Tier 3 LLM intent routing                |
+| `router.apiKey`             | `string`  | `""`                         | API key for `router.model`                                                    |
+| `router.baseUrl`            | `string`  | `https://api.openai.com/v1`  | Base URL for the router model endpoint                                        |
+| `titles.model`              | `string`  | `""`                         | Optional OpenAI-compatible chat model for async session title generation      |
+| `titles.apiKey`             | `string`  | `""`                         | API key for `titles.model` (falls back to first message line when blank)      |
+| `titles.baseUrl`            | `string`  | `https://api.openai.com/v1`  | Base URL for the title model endpoint                                         |
+| `channels.feishu.enabled`   | `boolean` | `false`                      | Enable Feishu Webhook/WebSocket receiver and card streamer                    |
+| `channels.wecom.enabled`    | `boolean` | `false`                      | Enable WeChat Work Bot SDK WebSocket adapter and streamer                     |
+| `notifications`             | `array`   | `[]`                         | Global outbound notification endpoints inherited by all projects              |
 
 ### Project Definition (`projects/<project-id>/project.yaml`)
 
@@ -246,13 +271,26 @@ routing:
   keywords: [order, payment, checkout]
 
 runtime:
-  type: codex
+  type: codex # optional; defaults to config.yaml defaultRuntime
   model: gpt-5-codex
-  reasoningEffort: high
+  reasoningEffort: high # minimal | low | medium | high | xhigh | max
+  mcpServers:
+    - name: github
+      url: https://api.githubcopilot.com/mcp
+      http_headers:
+        Authorization: "Bearer {env:GITHUB_TOKEN}"
+
+session:
+  idleTimeoutMs: 1800000
+  archiveTimeoutMs: 3600000
 
 repository:
   url: git@github.com:my-org/my-service.git
   baseBranch: main
+  # path: repos/my-service # optional local base checkout relative to project directory
+  committer:
+    name: orchestrator-bot
+    email: bot@example.com
   auth:
     type: token
     token: "{env:GITHUB_TOKEN}"
@@ -277,9 +315,19 @@ Response (`201 Created`):
 
 ```json
 {
-  "sessionId": "ses_7f300c1e-3a87-43cf-bc08-f41cb8371302",
-  "projectId": "my-service",
-  "status": "ready"
+  "session": {
+    "sessionId": "ses_7f300c1e-3a87-43cf-bc08-f41cb8371302",
+    "projectId": "my-service",
+    "status": "running",
+    "source": "web",
+    "runtime": "codex"
+  },
+  "routedProject": "my-service",
+  "turn": {
+    "id": "turn_...",
+    "sessionId": "ses_7f300c1e-3a87-43cf-bc08-f41cb8371302",
+    "status": "queued"
+  }
 }
 ```
 
@@ -293,6 +341,8 @@ curl -X POST http://localhost:7070/sessions/ses_7f300c1e-3a87-43cf-bc08-f41cb837
   }'
 ```
 
+Returns `202 Accepted` with `{ "turn": { ... } }`. Additional session controls are available at `POST /sessions/:sessionId/steer`, `POST /sessions/:sessionId/interrupt`, `POST /sessions/:sessionId/compact`, `POST /sessions/:sessionId/approvals`, `PATCH /sessions/:sessionId`, and `DELETE /sessions/:sessionId`.
+
 ### 3. Stream Session Events (SSE)
 
 ```bash
@@ -303,14 +353,14 @@ curl -N -H "Accept: text/event-stream" \
 Server-Sent Events output:
 
 ```text
-event: agent.message.delta
-data: {"sequence":1,"type":"agent.message.delta","payload":{"delta":"Analyzing error logs..."}}
+id: 1
+data: {"id":"evt_...","sequence":1,"type":"agent.message.delta","payload":{"delta":"Analyzing error logs..."}}
 
-event: command.started
-data: {"sequence":2,"type":"command.started","payload":{"command":"go test ./..."}}
+id: 2
+data: {"id":"evt_...","sequence":2,"type":"command.started","payload":{"itemId":"cmd_1","command":"go test ./..."}}
 
-event: turn.completed
-data: {"sequence":3,"type":"turn.completed","payload":{"status":"completed","finalText":"All tests passed."}}
+id: 3
+data: {"id":"evt_...","sequence":3,"type":"turn.completed","payload":{"status":"completed","finalText":"All tests passed."}}
 ```
 
 ---
@@ -320,28 +370,31 @@ data: {"sequence":3,"type":"turn.completed","payload":{"status":"completed","fin
 ```text
 .
 ├── src/
-│   ├── actions/          # Unified Action Registry, ActionContext & execution audit
+│   ├── actions/          # Built-in Action Registry, ActionContext & execution audit
 │   ├── artifacts/        # Artifact persistence & file management
-│   ├── channels/         # Feishu and WeCom WebSocket/Webhook & Card Streamers
-│   ├── domain/           # Canonical event protocol, payload maps & domain types
+│   ├── channels/         # Feishu and WeCom WebSocket/Webhook adapters & session streamers
+│   ├── config/           # Service YAML schema, .env parser & project config loader
+│   ├── domain/           # Canonical event protocol, Zod schemas & domain types
 │   ├── events/           # EventHub, SSE streaming broker & replay buffer
-│   ├── gateway/          # Hono HTTP server, route controllers & middleware
-│   ├── notifications/    # Outbox delivery, Telegram & Webhook providers
-│   ├── observability/    # Structured logger with automatic credential redaction
-│   ├── persistence/      # PostgreSQL store & In-Memory fallback store
-│   ├── project/          # Project schema validator, catalog loader & handlers
-│   ├── router/           # Heuristic & LLM-based intent routing engine
-│   ├── runtime/          # Codex App Server adapter, normalizers & FakeRuntime
-│   ├── task/             # Scheduled task runner (cron / interval engine)
-│   └── workspace/        # Git worktree manager & multi-repo synchronization
-├── projects/             # Declarative project configurations and Taskfile
-├── database/             # Final PostgreSQL schema for new databases
-├── scripts/              # Explicit database initialization and maintenance commands
-├── web/                  # Web Studio frontend (React 19, Vite, Tailwind CSS)
-├── infra/                # Dockerfile and runtime base image recipes
-├── tests/                # Bun automated test suite (30 test files, 273+ tests)
-├── config.example.yaml   # Comprehensive configuration template
-└── Taskfile.yaml         # Go-Task lifecycle automation
+│   ├── gateway/          # Hono HTTP server, domain route modules, inbox & title generator
+│   ├── notifications/    # Reactive Outbox & Feishu/WeCom/Telegram/Webhook/Log providers
+│   ├── observability/    # Structured JSON logger with automatic credential redaction
+│   ├── persistence/      # Store interface, PostgreSQL & MemoryStore implementations
+│   ├── project/          # ProjectManager, ProjectRuntime, skills loader & _global_ project
+│   ├── router/           # 4-tier routing chain (sticky / keyword / LLM / global fallback)
+│   ├── runtime/          # RuntimeRegistry, Codex/Claude/Pi adapters, action bridge & FakeRuntime
+│   ├── session/          # SessionEntity state machine, SessionManager & lifecycle hooks
+│   ├── task/             # Declarative Markdown task loader, cron scheduler & executors
+│   └── workspace/        # Single-repo synchronization & per-session Git worktree manager
+├── projects/             # Declarative project definitions (example template & Taskfile)
+├── database/             # Fresh-DB schema.sql and manual incremental SQL migrations
+├── scripts/              # Explicit database initialization script (init-database.ts)
+├── docs/                 # Design proposals, runtime setup reference & context notes
+├── web/                  # Web Studio frontend (React 19, Vite 6, Tailwind CSS v4)
+├── infra/                # Runtime base container image definitions
+├── tests/                # Bun automated test suite
+├── config.example.yaml   # Service configuration template
+└── Taskfile.yaml         # Go-Task project init/sync lifecycle automation
 ```
 
 ---
@@ -349,20 +402,24 @@ data: {"sequence":3,"type":"turn.completed","payload":{"status":"completed","fin
 ## Development & Testing
 
 ```bash
-# Run full type check across all TypeScript files
+# TypeScript validation
 bun run typecheck
 
-# Run test suite
+# Biome lint check
+bun run lint
+
+# Backend test suite
 bun test
 
-# Run code check (typecheck + test)
+# Full backend check (typecheck + lint + test)
 bun run check
 
-# Build production bundle
+# Backend production bundle
 bun run build
 
-# Web Studio frontend development
+# Web Studio development & build
 cd web && bun install && bun run dev
+cd web && bun run build
 ```
 
 ---
