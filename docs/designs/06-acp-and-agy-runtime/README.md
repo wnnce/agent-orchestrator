@@ -3,7 +3,7 @@
 | 元数据       | 内容                                                                                 |
 | :----------- | :----------------------------------------------------------------------------------- |
 | **文档 ID**  | `06-acp-and-agy-runtime`                                                             |
-| **状态**     | `Draft`                                                                              |
+| **状态**     | `Accepted`                                                                           |
 | **创建日期** | 2026-11-20                                                                           |
 | **目标模块** | `src/runtime/acp/`、`src/runtime/registry.ts`、`docs/references/runtime-setup.md`    |
 | **依赖**     | `@agentclientprotocol/sdk`（`^2.8.0`，Apache-2.0，零外部传递依赖）                    |

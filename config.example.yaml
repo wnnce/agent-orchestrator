@@ -41,7 +41,8 @@ titles:
 
 # 6. Agent runtimes are configured in their own configuration, not here: Codex in ~/.codex
 #    (CODEX_HOME), Claude Code in ~/.claude (CLAUDE_CONFIG_DIR), Pi in ~/.pi/agent
-#    (PI_CODING_AGENT_DIR). See docs/references/runtime-setup.md.
+#    (PI_CODING_AGENT_DIR), Antigravity (agy) in ~/.gemini/antigravity-cli.
+#    See docs/references/runtime-setup.md.
 
 # 7. External integration channels
 channels:

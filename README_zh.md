@@ -18,7 +18,7 @@
 
 ## 概述
 
-**Agent Orchestrator** 是一套面向项目级工作区的自主编码 Agent 调度与长周期会话网关，原生支持 **OpenAI Codex**、**Claude Code** 与 **Pi Agent** 三种运行时。系统向上接入 Web Studio、REST/SSE API、飞书（Lark）、企业微信与 Webhook，向下驱动单仓库 Git Worktree 隔离工作区与 Agent 运行时，提供严格的类型约束、规范化的领域事件流（Canonical Event Stream）以及任务与动作编排能力。
+**Agent Orchestrator** 是一套面向项目级工作区的自主编码 Agent 调度与长周期会话网关，原生支持 **OpenAI Codex**、**Claude Code**、**Pi Agent** 以及基于 **ACP（Agent Client Protocol）** 的运行时（如 **Antigravity `agy`**）。系统向上接入 Web Studio、REST/SSE API、飞书（Lark）、企业微信与 Webhook，向下驱动单仓库 Git Worktree 隔离工作区与 Agent 运行时，提供严格的类型约束、规范化的领域事件流（Canonical Event Stream）以及任务与动作编排能力。
 
 ### 核心能力与设计
 
@@ -106,6 +106,7 @@ flowchart TD
   - **`codex`**：基于 `codex app-server` JSON-RPC（支持 streaming、resume、steer、interrupt、compaction、approvals、MCP、sandbox）。
   - **`claude`**：基于 `@anthropic-ai/claude-agent-sdk`（支持 streaming、resume、steer、interrupt、compaction、approvals、MCP）。
   - **`pi`**：基于 `@earendil-works/pi-coding-agent` 进程内 SDK（支持 streaming、resume、steer、interrupt、compaction、MCP、sandbox）。
+  - **`agy`**（基于通用 `ACPRuntime`）：通过 `@agentclientprotocol/sdk` 对接 `agy acp --stdio --process-per-session`（支持 streaming、resume、interrupt、compaction、approvals、MCP 与 `additionalDirectories` 技能注入）。
   - **`fake`**：用于自动化测试与离线开发的内存模拟运行时。
 - 统一规范化事件（`CanonicalEventPayloadMap`）：
   - `agent.message.delta` / `agent.message.completed`
@@ -170,7 +171,7 @@ cp config.example.yaml config.yaml
 最小化 `config.yaml` 示例：
 
 ```yaml
-defaultRuntime: codex # codex | claude | pi
+defaultRuntime: codex # codex | claude | pi | agy
 
 server:
   host: 0.0.0.0
@@ -235,7 +236,7 @@ docker compose up -d --build
 
 | 配置项                      | 类型      | 默认值                      | 作用说明                                                               |
 | --------------------------- | --------- | --------------------------- | ---------------------------------------------------------------------- |
-| `defaultRuntime`            | `string`  | `codex`                     | `_global_` 与未指定 `runtime.type` 的项目使用的运行时（`codex\|claude\|pi`） |
+| `defaultRuntime`            | `string`  | `codex`                     | `_global_` 与未指定 `runtime.type` 的项目使用的运行时（`codex\|claude\|pi\|agy`） |
 | `server.host`               | `string`  | `0.0.0.0`                   | HTTP 服务监听地址                                                      |
 | `server.port`               | `number`  | `7070`                      | HTTP 与 SSE 监听端口                                                   |
 | `logging.level`             | `string`  | `info`                      | 日志级别：`debug`, `info`, `warn`, `error`                             |
@@ -382,7 +383,7 @@ data: {"id":"evt_...","sequence":3,"type":"turn.completed","payload":{"status":"
 │   ├── persistence/      # Drizzle Schema、Store 接口、PostgreSQL 与 MemoryStore 实现
 │   ├── project/          # ProjectManager、ProjectRuntime、技能加载与 _global_ 全局项目
 │   ├── router/           # 四级意图路由链（粘滞 / 关键词 / LLM / 全局兜底）
-│   ├── runtime/          # RuntimeRegistry、Codex/Claude/Pi 适配器、Action 桥接与 FakeRuntime
+│   ├── runtime/          # RuntimeRegistry、Codex/Claude/Pi/ACP(agy) 适配器、Action 桥接与 FakeRuntime
 │   ├── session/          # SessionEntity 状态机、SessionManager 与生命周期 Hook
 │   ├── task/             # 声明式 Markdown 任务加载器、Cron 调度与多类型执行器
 │   └── workspace/        # 单仓库同步与会话级 Git Worktree 管理

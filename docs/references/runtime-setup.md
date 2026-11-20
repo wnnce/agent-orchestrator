@@ -1,6 +1,6 @@
 # 运行时与项目配置
 
-编排器不管理 agent 运行时的配置。Codex、Claude Code 和 Pi 都读取各自的标准配置目录，和直接用它们的 CLI 时完全一样：登录、模型 provider、默认模型、权限、全局 MCP 服务、hooks 都在那里配置。
+编排器不管理 agent 运行时的配置。Codex、Claude Code、Pi 和 Antigravity (`agy`) 都读取各自的标准配置目录，和直接用它们的 CLI 时完全一样：登录、模型 provider、默认模型、权限、全局 MCP 服务、hooks 都在那里配置。
 
 编排器只做两件事：
 
@@ -16,6 +16,7 @@
 | Codex | `~/.codex` | `CODEX_HOME` | `config.toml`、`auth.json` |
 | Claude Code | `~/.claude` | `CLAUDE_CONFIG_DIR` | `settings.json`、`.credentials.json`、`.claude.json`（用户级 MCP） |
 | Pi | `~/.pi/agent` | `PI_CODING_AGENT_DIR` | `settings.json`、`models.json`、`auth.json` |
+| Antigravity (`agy`) | `~/.gemini/antigravity-cli`、`~/.gemini/config` | 继承用户 `$HOME` | `settings.json`、登录凭证、`skills.json` / `mcp_config.json` |
 
 运行时进程继承服务进程的环境变量。所以这些目录变量和认证变量（例如 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY`）在服务的环境里设置就行。
 
@@ -23,12 +24,13 @@
 
 ## 容器部署（`dev-orchestrator`）
 
-1. **持久化配置目录**：给 `/root/.codex`、`/root/.claude`、`/root/.pi` 挂卷。也可以设置上面三个环境变量，指向卷里的目录。
+1. **持久化配置目录**：给 `/root/.codex`、`/root/.claude`、`/root/.pi`、`/root/.gemini` 挂卷。也可以设置上面三个环境变量，指向卷里的目录。
 2. **设置 `IS_SANDBOX=1`**：容器以 root 运行，而 Claude Code 在 root 下拒绝跳过权限检查（`bypassPermissions`），除非设置了这个变量。
 3. **进容器各登录一次**：
    - Codex：`docker exec -it dev-orchestrator codex login --device-auth`；用 API key 时执行 `printenv OPENAI_API_KEY | codex login --with-api-key`；也可以在 `config.toml` 里配置一个自定义 provider。
    - Claude Code：`docker exec -it dev-orchestrator claude auth login`；也可以用 `claude setup-token` 生成长期 token，设置为环境变量 `CLAUDE_CODE_OAUTH_TOKEN`。
    - Pi：在 `pi` 里用 `/login` 登录 OAuth 类 provider，或者在 `models.json` / `auth.json` 里配置 provider。
+   - Antigravity (`agy`)：`docker exec -it dev-orchestrator agy acp --login` 交互式登录，或在环境中配置 Gemini API Key / ADC。
 4. **按需设置默认值**：
    - Codex：`config.toml` 里的 `model`、`model_provider`、`approval_policy`、`sandbox_mode`；
    - Claude Code：`settings.json` 里的 `model` 和 `permissions.defaultMode`；
@@ -39,7 +41,7 @@
 只有一个和运行时相关的字段：
 
 ```yaml
-defaultRuntime: codex   # 全局项目和没写 runtime.type 的项目使用的运行时：codex | claude | pi
+defaultRuntime: codex   # 全局项目和没写 runtime.type 的项目使用的运行时：codex | claude | pi | agy
 ```
 
 `config.yaml` 里不能再有 `runtimes:` 或 `codex:` 段，否则服务启动时会报 `Unrecognized key`。
@@ -78,7 +80,8 @@ session:                       # 可选
 - **仓库自带的**：会话的工作目录就是仓库的 worktree，运行时会原生加载。不同运行时读的目录不一样：
   - Codex 读 `.agents/skills`、`.codex/skills` 和 `AGENTS.md`；
   - Pi 读 `.agents/skills`、`.pi/skills` 和 `AGENTS.md`；
-  - Claude Code 读 `.claude/skills` 和 `CLAUDE.md`。
+  - Claude Code 读 `.claude/skills` 和 `CLAUDE.md`；
+  - Antigravity (`agy`) 读 `.agents/skills`、`AGENTS.md` 和 `GEMINI.md`。
 
   想三家通用，可以在仓库里放 `.agents/skills` 和 `AGENTS.md`，再用软链接 `.claude/skills -> ../.agents/skills`、`CLAUDE.md -> AGENTS.md`。
 - **编排器的项目 skills**：放在 `projects/<id>/.skills/<name>/SKILL.md`，全局 skills 放在 `projects/.skills/`。每个会话通过运行时的 API 传入。在 Claude Code 里，它们显示为 `<项目 id>:<skill>` 和 `global:<skill>`。

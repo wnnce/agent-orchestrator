@@ -18,7 +18,7 @@
 
 ## Overview
 
-**Agent Orchestrator** manages and coordinates autonomous coding agents (**OpenAI Codex**, **Claude Code**, and **Pi Agent**) across project-scoped workspaces. It bridges external user channels (Web Studio, REST/SSE API, Feishu/Lark, WeChat Work, and Webhooks) with isolated execution environments, enforcing strict type safety, canonical domain event streaming, and Git worktree isolation.
+**Agent Orchestrator** manages and coordinates autonomous coding agents (**OpenAI Codex**, **Claude Code**, **Pi Agent**, and **ACP**-compatible runtimes such as **Antigravity (`agy`)**) across project-scoped workspaces. It bridges external user channels (Web Studio, REST/SSE API, Feishu/Lark, WeChat Work, and Webhooks) with isolated execution environments, enforcing strict type safety, canonical domain event streaming, and Git worktree isolation.
 
 ### Why Agent Orchestrator?
 
@@ -106,6 +106,7 @@ flowchart TD
   - **`codex`**: OpenAI Codex via `codex app-server` JSON-RPC (streaming, resume, steer, interrupt, compaction, approvals, MCP, sandbox).
   - **`claude`**: Claude Code via `@anthropic-ai/claude-agent-sdk` (streaming, resume, steer, interrupt, compaction, approvals, MCP).
   - **`pi`**: Pi Agent in-process TypeScript SDK via `@earendil-works/pi-coding-agent` (streaming, resume, steer, interrupt, compaction, MCP, sandbox).
+  - **`agy`** (via generic `ACPRuntime`): Antigravity CLI over `@agentclientprotocol/sdk` (`agy acp --stdio --process-per-session`, supporting streaming, resume, interrupt, compaction, approvals, MCP, and `additionalDirectories` skills).
   - **`fake`**: In-memory mock runtime for automated tests and offline development.
 - Normalizes vendor-specific events into `CanonicalEventPayloadMap`:
   - `agent.message.delta` / `agent.message.completed`
@@ -170,7 +171,7 @@ cp config.example.yaml config.yaml
 Minimal `config.yaml`:
 
 ```yaml
-defaultRuntime: codex # codex | claude | pi
+defaultRuntime: codex # codex | claude | pi | agy
 
 server:
   host: 0.0.0.0
@@ -235,7 +236,7 @@ What the container images include:
 
 | Field                       | Type      | Default                      | Description                                                                   |
 | --------------------------- | --------- | ---------------------------- | ----------------------------------------------------------------------------- |
-| `defaultRuntime`            | `string`  | `codex`                      | Runtime for `_global_` and projects without `runtime.type` (`codex\|claude\|pi`) |
+| `defaultRuntime`            | `string`  | `codex`                      | Runtime for `_global_` and projects without `runtime.type` (`codex\|claude\|pi\|agy`) |
 | `server.host`               | `string`  | `0.0.0.0`                    | HTTP bind host                                                                |
 | `server.port`               | `number`  | `7070`                       | HTTP & SSE listening port                                                     |
 | `logging.level`             | `string`  | `info`                       | Log level: `debug`, `info`, `warn`, `error`                                   |
@@ -382,7 +383,7 @@ data: {"id":"evt_...","sequence":3,"type":"turn.completed","payload":{"status":"
 │   ├── persistence/      # Drizzle schema, Store interface, PostgreSQL & MemoryStore implementations
 │   ├── project/          # ProjectManager, ProjectRuntime, skills loader & _global_ project
 │   ├── router/           # 4-tier routing chain (sticky / keyword / LLM / global fallback)
-│   ├── runtime/          # RuntimeRegistry, Codex/Claude/Pi adapters, action bridge & FakeRuntime
+│   ├── runtime/          # RuntimeRegistry, Codex/Claude/Pi/ACP(agy) adapters, action bridge & FakeRuntime
 │   ├── session/          # SessionEntity state machine, SessionManager & lifecycle hooks
 │   ├── task/             # Declarative Markdown task loader, cron scheduler & executors
 │   └── workspace/        # Single-repo synchronization & per-session Git worktree manager
