@@ -18,6 +18,7 @@
     "formatCheck": "prettier --check src tests"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^2.8.0",
     "@anthropic-ai/claude-agent-sdk": "0.3.328",
     "@earendil-works/pi-coding-agent": "^1.5.2",
     "@larksuiteoapi/node-sdk": "^1.76.0",
