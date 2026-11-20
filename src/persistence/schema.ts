@@ -12,15 +12,17 @@ import {
   uniqueIndex,
   varchar,
 } from "drizzle-orm/pg-core";
-import type {
-  ActionExecutionRecord,
-  NotificationConfig,
-  NotificationDelivery,
-  NotificationDeliveryDetail,
-  ScheduledJobStatusCode,
-  SessionStatus,
-  TaskExecutionRecord,
-  TurnStatus,
+import {
+  NOT_DELETED,
+  ScheduledJobStatus,
+  type ActionExecutionRecord,
+  type NotificationConfig,
+  type NotificationDelivery,
+  type NotificationDeliveryDetail,
+  type ScheduledJobStatusCode,
+  type SessionStatus,
+  type TaskExecutionRecord,
+  type TurnStatus,
 } from "../domain/types.ts";
 
 export const sessions = pgTable(
@@ -45,7 +47,7 @@ export const sessions = pgTable(
     metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-    deletedAt: bigint("deleted_at", { mode: "number" }).notNull().default(0),
+    deletedAt: bigint("deleted_at", { mode: "number" }).notNull().default(NOT_DELETED),
   },
   (table) => [
     uniqueIndex("idx_sessions_session_id").on(table.sessionId, table.deletedAt),
@@ -205,23 +207,26 @@ export const scheduledJobs = pgTable(
     name: varchar("name", { length: 255 }).notNull(),
     delayMinutes: integer("delay_minutes").notNull().default(0),
     triggerAt: timestamp("trigger_at", { withTimezone: true }).notNull(),
-    status: smallint("status").$type<ScheduledJobStatusCode>().notNull().default(1),
+    status: smallint("status")
+      .$type<ScheduledJobStatusCode>()
+      .notNull()
+      .default(ScheduledJobStatus.PENDING),
     prompt: text("prompt").notNull().default(""),
     metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
     resultSummary: text("result_summary"),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-    deletedAt: bigint("deleted_at", { mode: "number" }).notNull().default(0),
+    deletedAt: bigint("deleted_at", { mode: "number" }).notNull().default(NOT_DELETED),
   },
   (table) => [
     uniqueIndex("idx_scheduled_jobs_job_id").on(table.jobId, table.deletedAt),
     index("idx_scheduled_jobs_poll")
       .on(table.status, table.triggerAt)
-      .where(sql`status = 1 AND deleted_at = 0`),
+      .where(sql.raw(`status = ${ScheduledJobStatus.PENDING} AND deleted_at = ${NOT_DELETED}`)),
     index("idx_scheduled_jobs_session")
       .on(table.sessionId, table.status)
-      .where(sql`deleted_at = 0`),
+      .where(sql.raw(`deleted_at = ${NOT_DELETED}`)),
   ],
 );
 

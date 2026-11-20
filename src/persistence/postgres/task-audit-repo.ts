@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, isNotNull, lte, or } from "drizzle-orm";
 import {
+  NOT_DELETED,
   ScheduledJobStatus,
   type ActionExecutionFilter,
   type ActionExecutionRecord,
@@ -155,7 +156,7 @@ export class PostgresTaskAuditRepo {
       finishedAt: job.finishedAt ? new Date(job.finishedAt) : null,
       createdAt: job.createdAt ? new Date(job.createdAt) : now,
       updatedAt: job.updatedAt ? new Date(job.updatedAt) : now,
-      deletedAt: 0,
+      deletedAt: NOT_DELETED,
     });
   }
 
@@ -168,7 +169,7 @@ export class PostgresTaskAuditRepo {
           eq(scheduledJobs.sessionId, sessionId),
           eq(scheduledJobs.status, ScheduledJobStatus.PENDING),
           or(eq(scheduledJobs.jobId, identifier), eq(scheduledJobs.name, identifier)),
-          eq(scheduledJobs.deletedAt, 0),
+          eq(scheduledJobs.deletedAt, NOT_DELETED),
         ),
       )
       .returning({ id: scheduledJobs.id });
@@ -190,7 +191,7 @@ export class PostgresTaskAuditRepo {
         and(
           matchExpr,
           eq(scheduledJobs.status, ScheduledJobStatus.PENDING),
-          eq(scheduledJobs.deletedAt, 0),
+          eq(scheduledJobs.deletedAt, NOT_DELETED),
         ),
       )
       .returning({ id: scheduledJobs.id });
@@ -205,7 +206,7 @@ export class PostgresTaskAuditRepo {
     const conditions = [
       eq(scheduledJobs.status, ScheduledJobStatus.PENDING),
       lte(scheduledJobs.triggerAt, asOf),
-      eq(scheduledJobs.deletedAt, 0),
+      eq(scheduledJobs.deletedAt, NOT_DELETED),
     ];
     if (projectId) {
       conditions.push(eq(scheduledJobs.projectId, projectId));
@@ -221,7 +222,7 @@ export class PostgresTaskAuditRepo {
   }
 
   async listScheduledJobs(filter?: ListScheduledJobsFilter): Promise<ScheduledJobRecord[]> {
-    const conditions = [eq(scheduledJobs.deletedAt, 0)];
+    const conditions = [eq(scheduledJobs.deletedAt, NOT_DELETED)];
     if (filter?.sessionId) {
       conditions.push(eq(scheduledJobs.sessionId, filter.sessionId));
     }
@@ -256,7 +257,7 @@ export class PostgresTaskAuditRepo {
         ...(finishedAt !== undefined ? { finishedAt: new Date(finishedAt) } : {}),
         updatedAt: new Date(),
       })
-      .where(and(eq(scheduledJobs.jobId, jobId), eq(scheduledJobs.deletedAt, 0)));
+      .where(and(eq(scheduledJobs.jobId, jobId), eq(scheduledJobs.deletedAt, NOT_DELETED)));
   }
 
   async recordActionExecution(record: ActionExecutionRecord): Promise<void> {

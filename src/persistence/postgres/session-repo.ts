@@ -1,5 +1,5 @@
 import { and, desc, eq, isNull, ne } from "drizzle-orm";
-import type { InboundMessageRecord, SessionRoute } from "../../domain/types.ts";
+import { NOT_DELETED, type InboundMessageRecord, type SessionRoute } from "../../domain/types.ts";
 import type { DrizzleDatabase } from "../db.ts";
 import { inboundMessages, scheduledJobs, sessions } from "../schema.ts";
 import type { ListSessionsOptions } from "../types.ts";
@@ -36,7 +36,7 @@ export class PostgresSessionRepo {
       metadata,
       createdAt: now,
       updatedAt: now,
-      deletedAt: 0,
+      deletedAt: NOT_DELETED,
     });
 
     return { ...route, source, runtime, metadata };
@@ -46,13 +46,13 @@ export class PostgresSessionRepo {
     const rows = await this.db
       .select()
       .from(sessions)
-      .where(and(eq(sessions.sessionId, sessionId), eq(sessions.deletedAt, 0)))
+      .where(and(eq(sessions.sessionId, sessionId), eq(sessions.deletedAt, NOT_DELETED)))
       .limit(1);
     return rows[0] ? toSessionRoute(rows[0]) : null;
   }
 
   async listSessions(projectId?: string, options?: ListSessionsOptions): Promise<SessionRoute[]> {
-    const conditions = [eq(sessions.deletedAt, 0)];
+    const conditions = [eq(sessions.deletedAt, NOT_DELETED)];
     if (projectId) {
       conditions.push(eq(sessions.projectId, projectId));
     }
@@ -100,14 +100,14 @@ export class PostgresSessionRepo {
         ...(route.runtime !== undefined ? { runtime: route.runtime } : {}),
         updatedAt: new Date(),
       })
-      .where(and(eq(sessions.sessionId, route.sessionId), eq(sessions.deletedAt, 0)));
+      .where(and(eq(sessions.sessionId, route.sessionId), eq(sessions.deletedAt, NOT_DELETED)));
   }
 
   async updateSessionTitle(sessionId: string, title: string): Promise<boolean> {
     const updated = await this.db
       .update(sessions)
       .set({ title, updatedAt: new Date() })
-      .where(and(eq(sessions.sessionId, sessionId), eq(sessions.deletedAt, 0)))
+      .where(and(eq(sessions.sessionId, sessionId), eq(sessions.deletedAt, NOT_DELETED)))
       .returning({ id: sessions.id });
     return updated.length > 0;
   }
@@ -117,7 +117,7 @@ export class PostgresSessionRepo {
       .update(sessions)
       .set({ title, updatedAt: new Date() })
       .where(
-        and(eq(sessions.sessionId, sessionId), isNull(sessions.title), eq(sessions.deletedAt, 0)),
+        and(eq(sessions.sessionId, sessionId), isNull(sessions.title), eq(sessions.deletedAt, NOT_DELETED)),
       )
       .returning({ id: sessions.id });
     return updated.length > 0;
@@ -142,7 +142,7 @@ export class PostgresSessionRepo {
           eq(sessions.externalConversationId, conversationId),
           threadCond,
           ne(sessions.status, "archived"),
-          eq(sessions.deletedAt, 0),
+          eq(sessions.deletedAt, NOT_DELETED),
         ),
       )
       .orderBy(desc(sessions.lastActiveAt))
@@ -180,12 +180,12 @@ export class PostgresSessionRepo {
       await tx
         .update(scheduledJobs)
         .set({ deletedAt: nowTs, updatedAt: now })
-        .where(and(eq(scheduledJobs.sessionId, sessionId), eq(scheduledJobs.deletedAt, 0)));
+        .where(and(eq(scheduledJobs.sessionId, sessionId), eq(scheduledJobs.deletedAt, NOT_DELETED)));
 
       await tx
         .update(sessions)
         .set({ deletedAt: nowTs, updatedAt: now })
-        .where(and(eq(sessions.sessionId, sessionId), eq(sessions.deletedAt, 0)));
+        .where(and(eq(sessions.sessionId, sessionId), eq(sessions.deletedAt, NOT_DELETED)));
     });
   }
 }

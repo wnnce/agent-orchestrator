@@ -1,4 +1,5 @@
 import {
+  NOT_DELETED,
   ScheduledJobStatus,
   type ActionExecutionFilter,
   type ActionExecutionRecord,
@@ -72,7 +73,7 @@ export class MemoryTaskAuditStore {
   async cancelScheduledJob(sessionId: string, identifier: string): Promise<boolean> {
     for (const [id, job] of this.scheduledJobs.entries()) {
       if (
-        (job.deletedAt ?? 0) === 0 &&
+        (job.deletedAt ?? NOT_DELETED) === NOT_DELETED &&
         job.sessionId === sessionId &&
         job.status === ScheduledJobStatus.PENDING &&
         (job.jobId === identifier || job.name === identifier)
@@ -91,7 +92,7 @@ export class MemoryTaskAuditStore {
   async cancelScheduledJobById(jobId: string): Promise<boolean> {
     for (const [id, job] of this.scheduledJobs.entries()) {
       if (
-        (job.deletedAt ?? 0) === 0 &&
+        (job.deletedAt ?? NOT_DELETED) === NOT_DELETED &&
         (job.jobId === jobId || (job.id !== undefined && String(job.id) === jobId)) &&
         job.status === ScheduledJobStatus.PENDING
       ) {
@@ -109,7 +110,7 @@ export class MemoryTaskAuditStore {
   async listScheduledJobs(filter?: ListScheduledJobsFilter): Promise<ScheduledJobRecord[]> {
     const list: ScheduledJobRecord[] = [];
     for (const item of this.scheduledJobs.values()) {
-      if ((item.deletedAt ?? 0) !== 0) continue;
+      if ((item.deletedAt ?? NOT_DELETED) !== NOT_DELETED) continue;
       if (filter?.sessionId && item.sessionId !== filter.sessionId) continue;
       if (filter?.projectId && item.projectId !== filter.projectId) continue;
       if (filter?.status !== undefined && item.status !== filter.status) continue;
@@ -126,7 +127,7 @@ export class MemoryTaskAuditStore {
     const threshold = asOf.toISOString();
     const list: ScheduledJobRecord[] = [];
     for (const item of this.scheduledJobs.values()) {
-      if ((item.deletedAt ?? 0) !== 0) continue;
+      if ((item.deletedAt ?? NOT_DELETED) !== NOT_DELETED) continue;
       if (item.status !== ScheduledJobStatus.PENDING) continue;
       if (item.triggerAt > threshold) continue;
       if (projectId && item.projectId !== projectId) continue;
@@ -142,7 +143,7 @@ export class MemoryTaskAuditStore {
     finishedAt?: string,
   ): Promise<void> {
     const current = this.scheduledJobs.get(jobId);
-    if (!current || (current.deletedAt ?? 0) !== 0) return;
+    if (!current || (current.deletedAt ?? NOT_DELETED) !== NOT_DELETED) return;
     this.scheduledJobs.set(jobId, {
       ...current,
       status,
@@ -154,7 +155,7 @@ export class MemoryTaskAuditStore {
 
   softDeleteScheduledJobsBySession(sessionId: string, deletedAt = Date.now()): void {
     for (const [id, job] of this.scheduledJobs.entries()) {
-      if (job.sessionId === sessionId && (job.deletedAt ?? 0) === 0) {
+      if (job.sessionId === sessionId && (job.deletedAt ?? NOT_DELETED) === NOT_DELETED) {
         this.scheduledJobs.set(id, {
           ...job,
           deletedAt,

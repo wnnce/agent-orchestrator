@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Pool } from "pg";
-import { ScheduledJobStatus } from "../src/domain/types.ts";
+import { NOT_DELETED, ScheduledJobStatus } from "../src/domain/types.ts";
 import { createDrizzleDb } from "../src/persistence/db.ts";
 import { PostgresStore, MemoryStore, newSessionRoute } from "../src/persistence/store.ts";
 import {
@@ -160,7 +160,7 @@ describe("PostgresStore with Drizzle ORM", () => {
       metadata: { runtime: "codex" },
       createdAt: now,
       updatedAt: now,
-      deletedAt: 0,
+      deletedAt: NOT_DELETED,
     });
 
     expect(session.id).toBe(7);

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { getTableConfig } from "drizzle-orm/pg-core";
-import type { BaseEntity, BaseLogRecord } from "../src/domain/types.ts";
+import { NOT_DELETED, type BaseEntity, type BaseLogRecord } from "../src/domain/types.ts";
 import { schema } from "../src/persistence/schema.ts";
 
 describe("database schema definition", () => {
@@ -46,7 +46,7 @@ describe("database schema definition", () => {
       expect(updatedAtCol!.notNull).toBe(true);
       expect(deletedAtCol).toBeDefined();
       expect(deletedAtCol!.notNull).toBe(true);
-      expect(deletedAtCol!.default).toBe(0);
+      expect(deletedAtCol!.default).toBe(NOT_DELETED);
     }
 
     const sessionsCfg = tableConfigs.find((t) => t.name === "sessions")!;
@@ -72,9 +72,9 @@ describe("database schema definition", () => {
       id: 100,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      deletedAt: 0,
+      deletedAt: NOT_DELETED,
     };
-    expect(coreEntity.deletedAt).toBe(0);
+    expect(coreEntity.deletedAt).toBe(NOT_DELETED);
     expect(typeof { ...coreEntity, deletedAt: Date.now() }.deletedAt).toBe("number");
   });
 

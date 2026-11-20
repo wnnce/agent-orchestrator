@@ -125,6 +125,9 @@ export interface NotificationConfig {
   enabled?: boolean | undefined;
 }
 
+/** Sentinel value stored in `deletedAt` for active (non-deleted) entities. */
+export const NOT_DELETED = 0;
+
 /**
  * Base entity interface with full lifecycle tracking (auto-increment ID, timestamps, soft delete).
  * Applied to core business entities such as projects, sessions, scheduled_jobs.
@@ -133,7 +136,7 @@ export interface BaseEntity {
   readonly id?: number | undefined;
   readonly createdAt?: string | undefined;
   readonly updatedAt?: string | undefined;
-  readonly deletedAt?: number | undefined; // 0 for active, >0 timestamp in ms when soft-deleted
+  readonly deletedAt?: number | undefined; // NOT_DELETED (0) for active, >0 timestamp in ms when soft-deleted
 }
 
 /**
