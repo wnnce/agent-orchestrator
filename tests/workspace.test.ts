@@ -163,18 +163,52 @@ describe("WorkspaceManager worktree isolation", () => {
     expect(existsSync(path.join(baseRootDir, "service"))).toBe(false);
   });
 
-  test("the base is cloned when scripts/init.sh runs but does not produce it", async () => {
+  test("scripts/init.sh makes the first checkout instead of the orchestrator", async () => {
     const scripts = path.join(testProject.projectDir!, "scripts");
     await mkdir(scripts, { recursive: true });
-    await writeFile(path.join(scripts, "init.sh"), "#!/usr/bin/env bash\nmkdir -p repos\nexit 0\n");
+    await writeFile(
+      path.join(scripts, "init.sh"),
+      `#!/usr/bin/env bash\nset -e\ngit clone -q ${remoteDir} repos/service\n`,
+    );
     const project = {
       ...testProject,
       repository: { ...testProject.repository!, path: "repos/service" },
     };
 
     const workspace = await manager.ensureSessionWorkspace(project, "ses-init");
-    expect(existsSync(path.join(testProject.projectDir!, "repos", "service", ".git"))).toBe(true);
     expect(await Bun.file(path.join(workspace, "backend.txt")).text()).toBe("hello backend");
+  });
+
+  test("a failing scripts/init.sh fails the base setup with its error", async () => {
+    const scripts = path.join(testProject.projectDir!, "scripts");
+    await mkdir(scripts, { recursive: true });
+    await writeFile(
+      path.join(scripts, "init.sh"),
+      "#!/usr/bin/env bash\necho 'Permission denied (publickey)' >&2\nexit 128\n",
+    );
+    const project = {
+      ...testProject,
+      repository: { ...testProject.repository!, path: "repos/service" },
+    };
+
+    await expect(manager.ensureSessionWorkspace(project, "ses-init")).rejects.toThrow(
+      "scripts/init.sh exited with code 128: Permission denied (publickey)",
+    );
+  });
+
+  test("scripts/init.sh that does not create the repository is an error, not a fallback clone", async () => {
+    const scripts = path.join(testProject.projectDir!, "scripts");
+    await mkdir(scripts, { recursive: true });
+    await writeFile(path.join(scripts, "init.sh"), "#!/usr/bin/env bash\nmkdir -p repos\n");
+    const project = {
+      ...testProject,
+      repository: { ...testProject.repository!, path: "repos/service" },
+    };
+
+    await expect(manager.ensureSessionWorkspace(project, "ses-init")).rejects.toThrow(
+      "scripts/init.sh did not create the repository",
+    );
+    expect(existsSync(path.join(testProject.projectDir!, "repos", "service"))).toBe(false);
   });
 
   test("single-flight coalesces concurrent ensureBase requests", async () => {

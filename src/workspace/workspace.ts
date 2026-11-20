@@ -187,38 +187,41 @@ export class WorkspaceManager {
     return { keyPath: keyFilePath, sshCommand: sshCommand(keyFilePath) };
   }
 
-  /** Runs the project's optional `scripts/<action>.sh`. Returns whether it ran successfully. */
-  async runLifecycleScript(project: ProjectConfig, action: "init" | "sync"): Promise<boolean> {
+  /**
+   * Runs the project's optional `scripts/<action>.sh` from the project directory. Returns false
+   * when the project has no such script and throws when the script fails.
+   */
+  private async runLifecycleScript(
+    project: ProjectConfig,
+    action: "init" | "sync",
+  ): Promise<boolean> {
     if (!project.projectDir) return false;
     const scriptPath = path.join(project.projectDir, "scripts", `${action}.sh`);
     if (!existsSync(scriptPath)) return false;
 
+    const proc = Bun.spawn(["bash", scriptPath], {
+      cwd: project.projectDir,
+      // project.env already includes the project's .env file (see config loading).
+      env: { ...process.env, ...(project.env ?? {}) },
+      stdout: "ignore",
+      stderr: "pipe",
+    });
+    const [stderr, code] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+    if (code !== 0) {
+      throw new Error(`scripts/${action}.sh exited with code ${code}: ${stderr.trim()}`);
+    }
+    return true;
+  }
+
+  /** scripts/sync.sh is best effort: when it fails, sessions use the base repository as it is. */
+  private async runSyncScript(project: ProjectConfig): Promise<void> {
     try {
-      const proc = Bun.spawn(["bash", scriptPath], {
-        cwd: project.projectDir,
-        // project.env already includes the project's .env file (see config loading).
-        env: { ...process.env, ...(project.env ?? {}) },
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      const [stderr, code] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
-      if (code !== 0) {
-        this.logger.warn("project lifecycle script failed", {
-          projectId: project.id,
-          script: `scripts/${action}.sh`,
-          exitCode: code,
-          stderr: stderr.trim(),
-        });
-        return false;
-      }
-      return true;
+      await this.runLifecycleScript(project, "sync");
     } catch (error) {
-      this.logger.warn("project lifecycle script could not be started", {
+      this.logger.warn("project sync script failed; using the base repository as it is", {
         projectId: project.id,
-        script: `scripts/${action}.sh`,
-        error,
+        error: (error as Error).message,
       });
-      return false;
     }
   }
 
@@ -282,21 +285,21 @@ export class WorkspaceManager {
         const hasSyncScript =
           project.projectDir && existsSync(path.join(project.projectDir, "scripts", "sync.sh"));
         if (!hasSyncScript) await this.pullBase(project, repository, basePath, authEnv);
-      } else {
-        // First run: scripts/init.sh may prepare the repository. It is a hook, not a guarantee,
-        // so the repository is cloned here whenever it is still missing afterwards.
-        await this.runLifecycleScript(project, "init");
+      } else if (await this.runLifecycleScript(project, "init")) {
+        // A project with scripts/init.sh makes the first checkout of its repository itself.
         if (!existsSync(path.join(basePath, ".git"))) {
-          const resolvedUrl = isRemoteUrl(repository.url)
-            ? repository.url
-            : path.resolve(project.projectDir ?? process.cwd(), repository.url);
-          await run(
-            "git",
-            ["clone", "--single-branch", "--branch", repository.baseBranch, resolvedUrl, basePath],
-            undefined,
-            authEnv,
-          );
+          throw new Error(`scripts/init.sh did not create the repository at ${basePath}`);
         }
+      } else {
+        const resolvedUrl = isRemoteUrl(repository.url)
+          ? repository.url
+          : path.resolve(project.projectDir ?? process.cwd(), repository.url);
+        await run(
+          "git",
+          ["clone", "--single-branch", "--branch", repository.baseBranch, resolvedUrl, basePath],
+          undefined,
+          authEnv,
+        );
       }
 
       // Worktrees share the base repository's config, so identity and auth are set once here.
@@ -350,7 +353,7 @@ export class WorkspaceManager {
 
   /** Service start: run scripts/sync.sh and bring the base repository up to date. */
   async syncBase(project: ProjectConfig): Promise<void> {
-    await this.runLifecycleScript(project, "sync");
+    await this.runSyncScript(project);
     if (project.repository) await this.ensureBase(project, project.repository);
   }
 
@@ -368,7 +371,7 @@ export class WorkspaceManager {
     }
 
     const repository = project.repository!;
-    await this.runLifecycleScript(project, "sync");
+    await this.runSyncScript(project);
     const basePath = await this.ensureBase(project, repository);
     if (!repository.url) {
       await mkdir(workspace, { recursive: true, mode: 0o750 });
