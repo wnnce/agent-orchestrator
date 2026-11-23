@@ -28,8 +28,9 @@ docker buildx build --load \\
   infra/agent-runtime-base
 ```
 
-The image uses named volumes for `/data` and `/workspace`. SSH keys and other
-credentials must be injected at runtime through Docker/Kubernetes secrets.
+The image declares `/workspace` as a writable volume mount point for manual use.
+The orchestrator manages its worktrees under its configured data directory instead.
+SSH keys and other credentials must be injected at runtime through Docker/Kubernetes secrets.
 
 ## Included versions
 

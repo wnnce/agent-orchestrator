@@ -21,7 +21,7 @@ case "${mode}" in
       fi
     fi
 
-    dirs=(/data /workspace /app /data/artifacts /data/projects)
+    dirs=(/workspace /app)
     [[ -n "${CODEX_HOME:-}" ]] && dirs+=("${CODEX_HOME}")
     mkdir -p "${dirs[@]}" 2>/dev/null || true
 
@@ -162,8 +162,8 @@ EOF
 chmod 0644 /etc/profile.d/agent-runtime-path.sh
 
 useradd --create-home --uid 10001 --shell /bin/bash agent
-mkdir -p /app /data /workspace /data/artifacts /data/projects
-chown -R agent:agent /app /data /workspace /home/agent
+mkdir -p /app /workspace
+chown -R agent:agent /app /workspace /home/agent
 
 rm -rf \
   /tmp/go.tgz \

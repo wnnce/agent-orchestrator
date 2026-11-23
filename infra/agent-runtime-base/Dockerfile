@@ -18,6 +18,6 @@ ENV PATH=/usr/local/bin:/opt/node/bin:/usr/local/go/bin:/home/agent/.local/bin:$
     BUN_INSTALL=/usr/local
 
 WORKDIR /app
-VOLUME ["/data", "/workspace"]
+VOLUME ["/workspace"]
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/agent-runtime", "run"]
 CMD ["bash"]

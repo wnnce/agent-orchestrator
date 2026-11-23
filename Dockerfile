@@ -20,6 +20,6 @@ RUN mkdir -p /app/.data
 RUN chown -R agent:agent /app
 USER agent
 ENV PATH="/app/node_modules/.bin:${PATH}"
-VOLUME ["/data", "/workspace"]
+VOLUME ["/workspace"]
 EXPOSE 7070
 CMD ["bun", "run", "dist/main.js"]
