@@ -109,7 +109,7 @@ apt-get install --no-install-recommends -y \
   zip \
   zstd
 
-sed -i -e 's/^# \(zh_CN.UTF-8 UTF-8\)/\1/' -e 's/^# \(en_US.UTF-8 UTF-8\)/\1/' /etc/locale.gen
+sed -i -e 's/^# \(en_US.UTF-8 UTF-8\)/\1/' -e 's/^# \(zh_CN.UTF-8 UTF-8\)/\1/' /etc/locale.gen
 locale-gen
 
 curl --fail --location --silent --show-error \

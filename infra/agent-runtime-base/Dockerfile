@@ -13,8 +13,8 @@ COPY agent-runtime.sh /usr/local/bin/agent-runtime
 RUN bash /usr/local/bin/agent-runtime install
 
 ENV PATH=/usr/local/bin:/opt/node/bin:/usr/local/go/bin:/home/agent/.local/bin:$PATH \
-    LANG=zh_CN.UTF-8 \
-    LC_ALL=zh_CN.UTF-8 \
+    LANG=en_US.UTF-8 \
+    LC_ALL=en_US.UTF-8 \
     BUN_INSTALL=/usr/local
 
 WORKDIR /app
