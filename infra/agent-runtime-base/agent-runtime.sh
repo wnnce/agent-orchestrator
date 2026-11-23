@@ -98,6 +98,7 @@ apt-get install --no-install-recommends -y \
   python-is-python3 \
   python3 \
   python3-dev \
+  python3-pip \
   python3-venv \
   ripgrep \
   tar \
