@@ -1,4 +1,5 @@
 export * from "./capabilities.ts";
+export * from "./models.ts";
 export * from "./types.ts";
 export * from "./normalizer.ts";
 export * from "./tools.ts";

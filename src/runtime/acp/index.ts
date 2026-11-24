@@ -25,6 +25,10 @@ export function createACPAdapter(profile: ACPProfile): RuntimeAdapter {
     type: profile.type,
     description: profile.description,
     capabilities: profile.capabilities,
+    ...(profile.defaultReasoningEfforts !== undefined
+      ? { defaultReasoningEfforts: profile.defaultReasoningEfforts }
+      : {}),
+    ...(profile.listModels !== undefined ? { listModels: profile.listModels } : {}),
     create: (ctx: RuntimeFactoryContext) =>
       new ACPRuntime(
         profile,

@@ -10,6 +10,7 @@ import { GatewayService } from "./service.ts";
 import { FeishuAdapter, FeishuWSAdapter } from "../channels/feishu.ts";
 import { WeComClient, WeComWSAdapter } from "../channels/wecom.ts";
 import type { EventHub } from "../events/hub.ts";
+import { RuntimeModelCatalog } from "../runtime/catalog.ts";
 import type { SessionManager } from "../session/index.ts";
 import {
   createSystemRouter,
@@ -126,7 +127,11 @@ export class Gateway {
     });
 
     // 3. Health & Readiness checks (no authentication)
-    app.route("/", createSystemRouter(this.projects.getRuntimeRegistry()));
+    const modelCatalog = new RuntimeModelCatalog({
+      modelsFile: this.config.runtimeModelsFile ?? "runtime-models.json",
+      logger: this.logger,
+    });
+    app.route("/", createSystemRouter(this.projects.getRuntimeRegistry(), modelCatalog));
 
     // 4. Channel adapters (authenticate with platform credentials)
     app.route("/", createChannelsRouter({ feishu: this.feishu }));

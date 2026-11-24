@@ -37,6 +37,7 @@ export const AGY_PROFILE: ACPProfile = {
   type: "agy",
   description: "Antigravity CLI runtime adapter (ACP stdio server)",
   capabilities: AGY_CAPABILITIES,
+  defaultReasoningEfforts: ["low", "medium", "high"],
   readOnlyModeId: "plan",
   injectSkillsViaAdditionalDirectories: true,
   compactCommand: "/compact",

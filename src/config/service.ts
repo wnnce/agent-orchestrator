@@ -25,6 +25,7 @@ export const storageConfigSchema = z.strictObject({
   projectsDir: z.string().trim().min(1).default("projects"),
   artifactDir: z.string().trim().min(1).optional(),
   databaseUrl: optionalText,
+  runtimeModelsFile: optionalText,
 });
 
 export const authConfigSchema = z.strictObject({
@@ -123,11 +124,14 @@ function normalizeRawConfig(raw: unknown): unknown {
     storage.artifactDir = obj.artifactDir;
   if (obj.databaseUrl !== undefined && storage.databaseUrl === undefined)
     storage.databaseUrl = obj.databaseUrl;
+  if (obj.runtimeModelsFile !== undefined && storage.runtimeModelsFile === undefined)
+    storage.runtimeModelsFile = obj.runtimeModelsFile;
   obj.storage = storage;
   delete obj.dataDir;
   delete obj.projectConfigPath;
   delete obj.artifactDir;
   delete obj.databaseUrl;
+  delete obj.runtimeModelsFile;
 
   // 4. auth
   const auth = { ...(obj.auth ?? {}) };
@@ -176,6 +180,7 @@ export type StorageConfig = {
   projectsDir: string;
   artifactDir: string;
   databaseUrl?: string | undefined;
+  runtimeModelsFile?: string | undefined;
 };
 export type AuthConfig = z.output<typeof authConfigSchema>;
 export type RouterConfig = z.output<typeof routerConfigSchema>;
@@ -205,6 +210,7 @@ export interface AppConfig {
   dataDir: string;
   artifactDir: string;
   projectConfigPath: string;
+  runtimeModelsFile?: string | undefined;
   databaseUrl?: string | undefined;
   apiToken?: string | undefined;
   allowUnauthenticated: boolean;
@@ -266,12 +272,20 @@ export async function loadConfig(file = "config.yaml"): Promise<AppConfig> {
     ? path.resolve(baseDir, data.storage.artifactDir)
     : path.join(dataDir, "artifacts");
   const projectsDir = path.resolve(baseDir, data.storage.projectsDir);
+  const explicitRuntimeModelsFile = data.storage.runtimeModelsFile
+    ? path.resolve(baseDir, data.storage.runtimeModelsFile)
+    : undefined;
+  const runtimeModelsFile =
+    explicitRuntimeModelsFile ?? path.resolve(baseDir, "runtime-models.json");
 
   const storage: StorageConfig = {
-    ...data.storage,
     dataDir,
     artifactDir,
     projectsDir,
+    ...(data.storage.databaseUrl !== undefined ? { databaseUrl: data.storage.databaseUrl } : {}),
+    ...(explicitRuntimeModelsFile !== undefined
+      ? { runtimeModelsFile: explicitRuntimeModelsFile }
+      : {}),
   };
 
   return {
@@ -291,6 +305,7 @@ export async function loadConfig(file = "config.yaml"): Promise<AppConfig> {
     dataDir,
     artifactDir,
     projectConfigPath: projectsDir,
+    runtimeModelsFile,
     databaseUrl: data.storage.databaseUrl,
     apiToken: data.auth.token,
     allowUnauthenticated: data.auth.allowUnauthenticated,

@@ -5,9 +5,10 @@ import type { ActionRegistry } from "../actions/registry.ts";
 import { Logger } from "../observability/logger.ts";
 import type { AgentRuntime, RuntimeCapabilities } from "./runtime.ts";
 import { FAKE_CAPABILITIES, FakeRuntime } from "./runtime.ts";
-import { CODEX_CAPABILITIES, CodexRuntime } from "./codex/index.ts";
-import { PI_CAPABILITIES, PiRuntime } from "./pi/index.ts";
-import { CLAUDE_CAPABILITIES, ClaudeRuntime } from "./claude/index.ts";
+import type { RuntimeModelLister, RuntimeModelOption } from "./models.ts";
+import { CODEX_CAPABILITIES, CodexRuntime, createCodexModelLister } from "./codex/index.ts";
+import { PI_CAPABILITIES, PiRuntime, createPiModelLister } from "./pi/index.ts";
+import { CLAUDE_CAPABILITIES, ClaudeRuntime, listClaudeModels } from "./claude/index.ts";
 import { AGY_PROFILE, createACPAdapter } from "./acp/index.ts";
 
 /**
@@ -18,6 +19,10 @@ export interface RuntimeMetadata {
   type: string;
   description?: string | undefined;
   capabilities?: RuntimeCapabilities | undefined;
+  /** Fallback reasoning effort levels supported by this runtime when a model does not declare its own. */
+  defaultReasoningEfforts?: readonly string[] | undefined;
+  /** Marks test/internal runtimes (e.g. `fake`) so UIs can hide them by default. */
+  internal?: boolean | undefined;
 }
 
 /**
@@ -26,6 +31,10 @@ export interface RuntimeMetadata {
 export interface RuntimeRegistrationOptions {
   description?: string | undefined;
   capabilities?: RuntimeCapabilities | undefined;
+  defaultReasoningEfforts?: readonly string[] | undefined;
+  internal?: boolean | undefined;
+  /** Optional model discovery function owned by this runtime. */
+  listModels?: RuntimeModelLister | undefined;
 }
 
 /**
@@ -52,6 +61,9 @@ export interface RuntimeAdapter {
   readonly type?: string | undefined;
   readonly description?: string | undefined;
   readonly capabilities?: RuntimeCapabilities | undefined;
+  readonly defaultReasoningEfforts?: readonly string[] | undefined;
+  readonly internal?: boolean | undefined;
+  readonly listModels?: RuntimeModelLister | undefined;
   create(context: RuntimeFactoryContext): AgentRuntime;
 }
 
@@ -61,6 +73,7 @@ export interface RuntimeAdapter {
 export class RuntimeRegistry {
   private readonly factories = new Map<string, RuntimeFactory>();
   private readonly metadataMap = new Map<string, RuntimeMetadata>();
+  private readonly modelListers = new Map<string, RuntimeModelLister>();
 
   constructor(private readonly logger = new Logger()) {}
 
@@ -85,11 +98,17 @@ export class RuntimeRegistry {
         });
       }
       this.factories.set(name, maybeFactory);
+      if (options?.listModels) this.modelListers.set(name, options.listModels);
+      else this.modelListers.delete(name);
       this.metadataMap.set(name, {
         name,
         type: name,
         description: options?.description,
         capabilities: options?.capabilities,
+        ...(options?.defaultReasoningEfforts !== undefined
+          ? { defaultReasoningEfforts: options.defaultReasoningEfforts }
+          : {}),
+        ...(options?.internal ? { internal: true } : {}),
       });
     } else {
       const rawName = typeOrAdapter.name ?? typeOrAdapter.type;
@@ -103,11 +122,17 @@ export class RuntimeRegistry {
         });
       }
       this.factories.set(name, (ctx) => typeOrAdapter.create(ctx));
+      if (typeOrAdapter.listModels) this.modelListers.set(name, typeOrAdapter.listModels);
+      else this.modelListers.delete(name);
       this.metadataMap.set(name, {
         name,
         type: name,
         description: typeOrAdapter.description,
         capabilities: typeOrAdapter.capabilities,
+        ...(typeOrAdapter.defaultReasoningEfforts !== undefined
+          ? { defaultReasoningEfforts: typeOrAdapter.defaultReasoningEfforts }
+          : {}),
+        ...(typeOrAdapter.internal ? { internal: true } : {}),
       });
     }
     return this;
@@ -119,6 +144,7 @@ export class RuntimeRegistry {
   unregister(type: string): boolean {
     const key = type.trim().toLowerCase();
     this.metadataMap.delete(key);
+    this.modelListers.delete(key);
     return this.factories.delete(key);
   }
 
@@ -151,6 +177,16 @@ export class RuntimeRegistry {
   }
 
   /**
+   * Lists selectable models exposed directly by the specified runtime adapter.
+   */
+  async listModels(type: string): Promise<readonly RuntimeModelOption[]> {
+    const key = type.trim().toLowerCase();
+    const lister = this.modelListers.get(key);
+    if (!lister) return [];
+    return await lister();
+  }
+
+  /**
    * Instantiate an AgentRuntime for the specified runtime type.
    */
   create(type: string, context: RuntimeFactoryContext): AgentRuntime {
@@ -175,6 +211,8 @@ export function createDefaultRuntimeRegistry(logger = new Logger()): RuntimeRegi
   registry.register("fake", () => new FakeRuntime(), {
     description: "In-memory mock runtime for tests and offline development",
     capabilities: FAKE_CAPABILITIES,
+    defaultReasoningEfforts: [],
+    internal: true,
   });
 
   registry.register(
@@ -186,6 +224,8 @@ export function createDefaultRuntimeRegistry(logger = new Logger()): RuntimeRegi
     {
       description: "OpenAI Codex app-server runtime adapter",
       capabilities: CODEX_CAPABILITIES,
+      defaultReasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
+      listModels: createCodexModelLister({ logger }),
     },
   );
 
@@ -195,6 +235,8 @@ export function createDefaultRuntimeRegistry(logger = new Logger()): RuntimeRegi
     {
       description: "Pi Agent native TypeScript SDK in-process runtime adapter",
       capabilities: PI_CAPABILITIES,
+      defaultReasoningEfforts: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+      listModels: createPiModelLister({ logger }),
     },
   );
 
@@ -205,6 +247,8 @@ export function createDefaultRuntimeRegistry(logger = new Logger()): RuntimeRegi
     {
       description: "Claude Code runtime adapter (Claude Agent SDK)",
       capabilities: CLAUDE_CAPABILITIES,
+      defaultReasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
+      listModels: listClaudeModels,
     },
   );
 

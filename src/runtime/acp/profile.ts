@@ -5,6 +5,7 @@ import type {
   SessionConfigSelectOption,
 } from "@agentclientprotocol/sdk";
 import type { McpServerConfig, ProjectConfig } from "../../domain/types.ts";
+import type { RuntimeModelLister } from "../models.ts";
 import type { RuntimeCapabilities } from "../runtime.ts";
 
 export interface ACPConfigUpdate {
@@ -20,6 +21,10 @@ export interface ACPProfile {
   readonly type: string;
   readonly description: string;
   readonly capabilities: RuntimeCapabilities;
+  /** Fallback reasoning efforts supported by this ACP agent when a model does not declare its own. */
+  readonly defaultReasoningEfforts?: readonly string[] | undefined;
+  /** Optional model lister implemented by this ACP profile. */
+  readonly listModels?: RuntimeModelLister | undefined;
 
   /** Builds the subprocess command and optional environment overrides. */
   buildCommand(options: { project: ProjectConfig; readOnly: boolean }): {
