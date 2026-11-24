@@ -58,19 +58,35 @@ export async function runProjectTask(
 export async function fetchTaskExecutions(params?: {
   projectId?: string;
   taskKey?: string;
+  status?: "success" | "failed";
+  beforeId?: number;
   limit?: number;
-}): Promise<TaskExecutionRecord[]> {
+}): Promise<{
+  executions: TaskExecutionRecord[];
+  hasMore: boolean;
+  nextBeforeId: number | null;
+}> {
   const searchParams = new URLSearchParams();
   if (params?.projectId) searchParams.set("projectId", params.projectId);
   if (params?.taskKey) searchParams.set("taskKey", params.taskKey);
+  if (params?.status) searchParams.set("status", params.status);
+  if (params?.beforeId && params.beforeId > 0) {
+    searchParams.set("beforeId", String(params.beforeId));
+  }
   if (params?.limit) searchParams.set("limit", String(params.limit));
 
   const qs = searchParams.toString();
   const url = `/tasks/executions${qs ? `?${qs}` : ""}`;
   const res = await fetch(url);
-  if (!res.ok) return [];
+  if (!res.ok) {
+    return { executions: [], hasMore: false, nextBeforeId: null };
+  }
   const data = await res.json();
-  return data.executions || [];
+  return {
+    executions: data.executions || [],
+    hasMore: Boolean(data.hasMore),
+    nextBeforeId: typeof data.nextBeforeId === "number" ? data.nextBeforeId : null,
+  };
 }
 
 export async function fetchTaskExecutionLogs(

@@ -371,6 +371,10 @@ html:not(.dark) .shj-syn-func { color: #8250df; }
   animation: studio-dialog-content-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+.animate-delayed-fade {
+  animation: studio-dialog-overlay-in 160ms ease-out 120ms both;
+}
+
 .thinking-shimmer {
   background: linear-gradient(
     90deg,
@@ -409,6 +413,7 @@ html:not(.dark) .shj-syn-func { color: #8250df; }
   .animate-msg-enter,
   .animate-dialog-overlay,
   .animate-dialog-content,
+  .animate-delayed-fade,
   .thinking-shimmer {
     animation: none !important;
   }

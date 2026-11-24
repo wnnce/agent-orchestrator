@@ -20,6 +20,7 @@ import type {
   ScheduledJobRecord,
   SessionRoute,
   SessionUsageSummary,
+  TaskExecutionRecord,
 } from "../types";
 import {
   calculateCacheHitRate,
@@ -37,6 +38,7 @@ interface InspectorProps {
   session: SessionRoute | null;
   project: ProjectRouting | null;
   usage?: SessionUsageSummary | null;
+  taskExecution?: TaskExecutionRecord | null;
 }
 
 export const Inspector: React.FC<InspectorProps> = ({
@@ -45,6 +47,7 @@ export const Inspector: React.FC<InspectorProps> = ({
   session,
   project,
   usage = null,
+  taskExecution = null,
 }) => {
   const confirm = useConfirm();
   const [tab, setTab] = useState<"events" | "artifacts" | "jobs" | "info">("artifacts");
@@ -487,6 +490,28 @@ export const Inspector: React.FC<InspectorProps> = ({
                 </p>
               </div>
             </div>
+
+            {taskExecution && (
+              <div>
+                <h4 className="font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
+                  任务状态快照 (Task State)
+                </h4>
+                <div className="space-y-2 font-mono text-[10.5px] bg-[var(--bg-surface)] p-2.5 rounded-[var(--radius-md)] border border-[var(--border-default)]">
+                  <div>
+                    <div className="text-[10px] text-[var(--text-muted)] mb-1">stateBefore</div>
+                    <pre className="p-2 rounded bg-[var(--bg-code)] text-[var(--text-code)] overflow-x-auto max-h-32">
+                      {JSON.stringify(taskExecution.stateBefore || {}, null, 2)}
+                    </pre>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-[var(--text-muted)] mb-1">stateAfter</div>
+                    <pre className="p-2 rounded bg-[var(--bg-code)] text-[var(--text-code)] overflow-x-auto max-h-32">
+                      {JSON.stringify(taskExecution.stateAfter || {}, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </m.div>

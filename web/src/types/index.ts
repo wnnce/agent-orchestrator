@@ -91,6 +91,10 @@ export interface TaskDefinition {
   filePath: string;
   sourceFormat?: "markdown" | "typescript";
   type?: string;
+  command?: string;
+  action?: string;
+  actionParams?: Record<string, unknown>;
+  timeoutMs?: number;
   runtime?: TaskRuntimeConfig;
   isScheduled?: boolean;
   nextRun?: string | null;

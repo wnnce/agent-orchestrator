@@ -22,12 +22,16 @@ interface StudioContextType {
   activeSessionId: string | null;
   setActiveSessionId: (id: string | null) => void;
   activeSession: SessionRoute | null;
+  activeTaskId: string | null;
+  activeExecutionId: string | null;
   isReady: boolean;
   showInspector: boolean;
   setShowInspector: (show: boolean) => void;
   toggleInspector: () => void;
   openSession: (sessionId: string) => void;
   closeToBoard: () => void;
+  openTask: (taskId: string, executionId?: string | null) => void;
+  closeToTasks: () => void;
   refreshProjects: () => Promise<void>;
   refreshSessions: () => Promise<void>;
 }
@@ -42,7 +46,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
   const [showInspector, setShowInspector] = useState(false);
 
   // Synchronously parse routing parameters from location
-  const { activeProjectId, activeView, activeSessionId } = useMemo(() => {
+  const { activeProjectId, activeView, activeSessionId, activeTaskId, activeExecutionId } = useMemo(() => {
     // 1. Match /:projectId/sessions/:sessionId
     const sessionMatch = location.match(/^\/([^/]+)\/sessions\/([^/]+)\/?$/);
     if (sessionMatch) {
@@ -50,10 +54,36 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         activeProjectId: decodeURIComponent(sessionMatch[1]!),
         activeView: "sessions" as StudioView,
         activeSessionId: decodeURIComponent(sessionMatch[2]!),
+        activeTaskId: null,
+        activeExecutionId: null,
       };
     }
 
-    // 2. Match /:projectId/:view
+    // 2. Match /:projectId/tasks/:taskId/:executionId
+    const taskExecMatch = location.match(/^\/([^/]+)\/tasks\/([^/]+)\/([^/]+)\/?$/);
+    if (taskExecMatch) {
+      return {
+        activeProjectId: decodeURIComponent(taskExecMatch[1]!),
+        activeView: "tasks" as StudioView,
+        activeSessionId: null,
+        activeTaskId: decodeURIComponent(taskExecMatch[2]!),
+        activeExecutionId: decodeURIComponent(taskExecMatch[3]!),
+      };
+    }
+
+    // 3. Match /:projectId/tasks/:taskId
+    const taskMatch = location.match(/^\/([^/]+)\/tasks\/([^/]+)\/?$/);
+    if (taskMatch) {
+      return {
+        activeProjectId: decodeURIComponent(taskMatch[1]!),
+        activeView: "tasks" as StudioView,
+        activeSessionId: null,
+        activeTaskId: decodeURIComponent(taskMatch[2]!),
+        activeExecutionId: null,
+      };
+    }
+
+    // 4. Match /:projectId/:view
     const viewMatch = location.match(/^\/([^/]+)\/([^/]+)\/?$/);
     if (viewMatch) {
       const rawView = viewMatch[2]!;
@@ -67,24 +97,30 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         activeProjectId: decodeURIComponent(viewMatch[1]!),
         activeView: v,
         activeSessionId: null,
+        activeTaskId: null,
+        activeExecutionId: null,
       };
     }
 
-    // 3. Match /:projectId
+    // 5. Match /:projectId
     const projMatch = location.match(/^\/([^/]+)\/?$/);
     if (projMatch) {
       return {
         activeProjectId: decodeURIComponent(projMatch[1]!),
         activeView: "sessions" as StudioView,
         activeSessionId: null,
+        activeTaskId: null,
+        activeExecutionId: null,
       };
     }
 
-    // 4. Root "/" or other paths
+    // 6. Root "/" or other paths
     return {
       activeProjectId: null,
       activeView: "sessions" as StudioView,
       activeSessionId: null,
+      activeTaskId: null,
+      activeExecutionId: null,
     };
   }, [location]);
 
@@ -215,6 +251,20 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     navigate(`/${targetProj}/sessions`);
   }, [activeProjectId, projects, navigate]);
 
+  const openTask = useCallback(
+    (taskId: string, executionId?: string | null) => {
+      const targetProj = activeProjectId || projects[0]?.projectId || "default";
+      const base = `/${encodeURIComponent(targetProj)}/tasks/${encodeURIComponent(taskId)}`;
+      navigate(executionId ? `${base}/${encodeURIComponent(executionId)}` : base);
+    },
+    [activeProjectId, projects, navigate],
+  );
+
+  const closeToTasks = useCallback(() => {
+    const targetProj = activeProjectId || projects[0]?.projectId || "default";
+    navigate(`/${encodeURIComponent(targetProj)}/tasks`);
+  }, [activeProjectId, projects, navigate]);
+
   const toggleInspector = useCallback(() => setShowInspector((prev) => !prev), []);
 
   return (
@@ -231,12 +281,16 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         activeSessionId,
         setActiveSessionId,
         activeSession,
+        activeTaskId,
+        activeExecutionId,
         isReady,
         showInspector,
         setShowInspector,
         toggleInspector,
         openSession,
         closeToBoard,
+        openTask,
+        closeToTasks,
         refreshProjects,
         refreshSessions,
       }}

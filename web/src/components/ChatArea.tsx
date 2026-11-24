@@ -12,6 +12,7 @@ import {
   Archive,
   Loader2,
   AlertCircle,
+  MessageSquare,
 } from "lucide-react";
 import type { ChatMessage } from "../types";
 import { calculateCacheHitRate, formatTokenCount } from "../utils/formatters";
@@ -21,6 +22,7 @@ import { MarkdownRenderer } from "./common/MarkdownRenderer";
 interface ChatAreaProps {
   messages: ChatMessage[];
   isRunning: boolean;
+  isLoading?: boolean;
   onSendMessage: (text: string) => Promise<boolean> | void;
   onInterrupt: () => void;
   isClosed?: boolean;
@@ -30,6 +32,7 @@ interface ChatAreaProps {
 export const ChatArea: React.FC<ChatAreaProps> = ({
   messages,
   isRunning,
+  isLoading = false,
   onSendMessage,
   onInterrupt,
   isClosed = false,
@@ -226,43 +229,57 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto px-4 md:px-8 pt-8 pb-48 space-y-8"
       >
-        {messages.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center px-4 select-none pb-12">
-            <div className="w-12 h-12 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface-elevated)] flex items-center justify-center mb-4 text-[var(--text-primary)] shadow-sm">
-              <Sparkles className="w-5 h-5 text-[var(--text-secondary)]" />
-            </div>
-            <h2 className="text-lg font-semibold tracking-tight text-[var(--text-primary)] mb-1">
-              How can I help you today?
-            </h2>
-            <p className="text-xs text-[var(--text-muted)] mb-6 text-center max-w-sm leading-relaxed">
-              Ask questions, execute tasks, inspect files, or modify code in this workspace.
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full max-w-lg">
-              {[
-                { label: "Check project status", desc: "Run health checks and view recent logs" },
-                { label: "Inspect modified files", desc: "Review git diff and working tree changes" },
-                { label: "Run test suite", desc: "Execute automated tests and inspect results" },
-                { label: "Explain project architecture", desc: "Overview of components, services and flow" },
-              ].map((item) => (
-                <button
-                  key={item.label}
-                  type="button"
-                  onClick={() => {
-                    setInput(item.label);
-                    textareaRef.current?.focus();
-                  }}
-                  className="p-3 text-left rounded-xl border border-[var(--border-default)] hover:border-[var(--border-strong)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-hover)] hover:-translate-y-0.5 active:scale-[0.99] transition-all duration-150 cursor-pointer group"
-                >
-                  <div className="text-xs font-medium text-[var(--text-primary)]">
-                    {item.label}
-                  </div>
-                  <div className="text-[11px] text-[var(--text-muted)] mt-0.5">
-                    {item.desc}
-                  </div>
-                </button>
-              ))}
-            </div>
+        {isLoading ? (
+          <div className="h-full flex items-center justify-center gap-2 text-xs font-mono text-[var(--text-muted)] select-none pb-12 animate-delayed-fade">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span>Loading conversation...</span>
           </div>
+        ) : messages.length === 0 ? (
+          isClosed ? (
+            <div className="h-full flex flex-col items-center justify-center gap-2 px-4 select-none pb-12 text-center font-mono">
+              <div className="w-10 h-10 rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] flex items-center justify-center text-[var(--text-muted)]">
+                <MessageSquare className="w-4 h-4 opacity-60" />
+              </div>
+              <div className="text-xs text-[var(--text-muted)]">暂无对话消息记录</div>
+            </div>
+          ) : (
+            <div className="h-full flex flex-col items-center justify-center px-4 select-none pb-12">
+              <div className="w-12 h-12 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface-elevated)] flex items-center justify-center mb-4 text-[var(--text-primary)] shadow-sm">
+                <Sparkles className="w-5 h-5 text-[var(--text-secondary)]" />
+              </div>
+              <h2 className="text-lg font-semibold tracking-tight text-[var(--text-primary)] mb-1">
+                How can I help you today?
+              </h2>
+              <p className="text-xs text-[var(--text-muted)] mb-6 text-center max-w-sm leading-relaxed">
+                Ask questions, execute tasks, inspect files, or modify code in this workspace.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full max-w-lg">
+                {[
+                  { label: "Check project status", desc: "Run health checks and view recent logs" },
+                  { label: "Inspect modified files", desc: "Review git diff and working tree changes" },
+                  { label: "Run test suite", desc: "Execute automated tests and inspect results" },
+                  { label: "Explain project architecture", desc: "Overview of components, services and flow" },
+                ].map((item) => (
+                  <button
+                    key={item.label}
+                    type="button"
+                    onClick={() => {
+                      setInput(item.label);
+                      textareaRef.current?.focus();
+                    }}
+                    className="p-3 text-left rounded-xl border border-[var(--border-default)] hover:border-[var(--border-strong)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-hover)] hover:-translate-y-0.5 active:scale-[0.99] transition-all duration-150 cursor-pointer group"
+                  >
+                    <div className="text-xs font-medium text-[var(--text-primary)]">
+                      {item.label}
+                    </div>
+                    <div className="text-[11px] text-[var(--text-muted)] mt-0.5">
+                      {item.desc}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )
         ) : (
           messages.map((msg) => {
             const isUser = msg.role === "user";
