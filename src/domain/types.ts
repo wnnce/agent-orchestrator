@@ -112,6 +112,9 @@ export interface ProjectMetaConfig {
   enabled?: boolean;
 }
 
+export type ProjectVarValue = string | number | boolean;
+export type ProjectVars = Record<string, ProjectVarValue>;
+
 export interface ProjectConfig {
   id: string;
   revision?: number;
@@ -124,6 +127,8 @@ export interface ProjectConfig {
   routing: ProjectRoutingDescription;
   runtime?: ProjectRuntimeConfig;
   session?: ProjectSessionConfig;
+  /** Non-sensitive project variables explicitly exposed to prompt templates and TS tasks. */
+  vars?: ProjectVars;
   env?: Record<string, string>;
   repository?: RepositoryConfig;
   credentials?: Record<string, string>;

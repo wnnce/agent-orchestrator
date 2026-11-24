@@ -40,7 +40,7 @@ timezone: "Asia/Shanghai"
 enabled: true
 description: "Checks PRs that need review"
 ---
-Please check github for PRs in project {{projectId}}.
+Please check github for PRs in project {{project.id}}.
 Current state is: {{state}}
 `;
 
@@ -538,8 +538,8 @@ describe("ProjectRuntime Task Integration", () => {
       new ArtifactStore("/tmp", store),
     );
 
-    const template = `Project: {{projectId}}
-Task: {{taskId}} (Key: {{taskKey}}, Name: {{taskName}})
+    const template = `Project: {{project.id}}
+Task: {{task.id}} (Key: {{task.key}}, Name: {{task.name}})
 Current PR Cursor: {{state.lastPr}}
 Full state:
 {{state}}`;
@@ -586,7 +586,7 @@ id: cleanup-task
 name: Cleanup Task
 cron: "0 0 * * *"
 ---
-Clean up project {{projectId}} with state: {{state}}
+Clean up project {{project.id}} with state: {{state}}
 `,
     );
 

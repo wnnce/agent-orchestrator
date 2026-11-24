@@ -32,7 +32,7 @@ describe("Task Real-World Scenarios Simulation", () => {
     name: "Demo Task",
     cron: "*/5 * * * *",
     enabled: true,
-    promptTemplate: "Run analysis for {{projectId}} with state: {{state.cursor}}",
+    promptTemplate: "Run analysis for {{project.id}} with state: {{state.cursor}}",
     filePath: "/sim-proj/tasks/demo-task.md",
   };
 
@@ -600,7 +600,7 @@ describe("Task Real-World Scenarios Simulation", () => {
       const fakeRunner: AgentSessionRunner = {
         createSession: async () => ({ sessionId: "ses_1" }),
         renderPrompt: (tpl, vars) => {
-          let out = tpl.replace("{{projectId}}", vars.projectId);
+          let out = tpl.replace("{{project.id}}", vars.projectId);
           out = out.replace("{{state.cursor}}", String(vars.state["cursor"] ?? "none"));
           return out;
         },
@@ -616,7 +616,7 @@ describe("Task Real-World Scenarios Simulation", () => {
       const task: TaskDefinition = {
         ...baseTask,
         type: "agent",
-        promptTemplate: "Project: {{projectId}}, cursor: {{state.cursor}}",
+        promptTemplate: "Project: {{project.id}}, cursor: {{state.cursor}}",
       };
 
       const result = await executor.execute({

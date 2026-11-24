@@ -19,6 +19,8 @@ export interface AgentSessionRunner {
       taskId: string;
       taskKey: string;
       taskName: string;
+      cron?: string | undefined;
+      timezone?: string | undefined;
     },
   ): string;
   runTurn(
@@ -67,6 +69,8 @@ export class AgentTaskExecutor implements ITaskExecutor {
         taskId: task.taskId,
         taskKey: task.taskKey,
         taskName: task.name,
+        cron: task.cron,
+        timezone: task.timezone,
       });
 
       // 3. Dispatch turn execution and await completion

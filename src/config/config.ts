@@ -177,10 +177,27 @@ function parseProjectYaml(
     }
   };
 
+  const sanitizeVars = (p: Record<string, unknown>) => {
+    if (!p.vars || typeof p.vars !== "object" || Array.isArray(p.vars)) return;
+    const rawVars = p.vars as Record<string, unknown>;
+    const cleaned: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(rawVars)) {
+      if (typeof value === "string" && /\{env:[^}]+\}/.test(value)) {
+        console.warn(
+          `[config] Skipping unresolved env placeholder in project "${String(p.id)}" vars.${key}`,
+        );
+        continue;
+      }
+      cleaned[key] = value;
+    }
+    p.vars = cleaned;
+  };
+
   const prepareProject = (item: Record<string, unknown>): ProjectConfig | null => {
     const p = normalizeProjectRaw(item, fallbackId);
     if (!p) return null;
     attachEnv(p);
+    sanitizeVars(p);
     if (!p.routing) {
       p.routing = {
         projectId: p.id,

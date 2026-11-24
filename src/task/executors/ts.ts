@@ -1,8 +1,13 @@
 import { createActionContext } from "../../actions/context.ts";
 import type { ActionRegistry } from "../../actions/registry.ts";
 import type { ActionContext, ActionResult } from "../../actions/types.ts";
-import type { TaskExecutionLogRecord } from "../../domain/types.ts";
+import type { ProjectVars, TaskExecutionLogRecord } from "../../domain/types.ts";
 import { Logger } from "../../observability/logger.ts";
+import {
+  buildNowPromptScope,
+  renderPromptTemplate,
+  type ProjectPromptScope,
+} from "../../prompt/template.ts";
 import { TaskLogBuffer } from "../log-buffer.ts";
 import type { TaskRunContext, TsTaskHandler, TsTaskResult } from "../sdk.ts";
 import type {
@@ -16,6 +21,10 @@ export interface TsTaskExecutorOptions {
   readonly resolveHandler: (task: TaskDefinition) => Promise<TsTaskHandler>;
   readonly actionRegistry?: ActionRegistry | undefined;
   readonly getEnv?: ((projectId: string) => Record<string, string> | undefined) | undefined;
+  readonly getVars?: ((projectId: string) => ProjectVars | undefined) | undefined;
+  readonly getProjectScope?:
+    | ((projectId: string) => ProjectPromptScope | Record<string, unknown> | undefined)
+    | undefined;
   readonly getWorkdir?: ((projectId: string) => string | undefined) | undefined;
   readonly createActionContext?:
     | ((context: TaskExecutionContext) => ActionContext)
@@ -60,6 +69,12 @@ export class TsTaskExecutor implements ITaskExecutor {
     const env: Readonly<Record<string, string>> = Object.freeze({
       ...(this.options.getEnv ? (this.options.getEnv(task.projectId) ?? {}) : {}),
     });
+    const vars: Readonly<ProjectVars> = Object.freeze({
+      ...(this.options.getVars ? (this.options.getVars(task.projectId) ?? {}) : {}),
+    });
+    const projectScope = this.options.getProjectScope
+      ? this.options.getProjectScope(task.projectId)
+      : { id: task.projectId };
 
     // Combine parent AbortSignal (from TaskEngine timeoutMs) with optional defaultTimeoutMs.
     const abortController = new AbortController();
@@ -158,9 +173,25 @@ export class TsTaskExecutor implements ITaskExecutor {
       taskName: task.name,
       workdir,
       env,
+      vars,
       logger: taskLogger,
       signal,
       state: Object.freeze({ ...context.stateBefore }),
+      renderPrompt: (template, extraScopes) =>
+        renderPromptTemplate(template, {
+          ...(projectScope ? { project: projectScope } : {}),
+          vars,
+          task: {
+            id: task.taskId,
+            key: task.taskKey,
+            name: task.name,
+            cron: task.cron,
+            timezone: task.timezone ?? "",
+          },
+          state: localState,
+          now: buildNowPromptScope(task.timezone),
+          ...(extraScopes ?? {}),
+        }).rendered,
       getState,
       updateState,
       notify: (message, options) => actionContext.notify(message, options),

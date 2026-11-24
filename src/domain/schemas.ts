@@ -172,6 +172,12 @@ export const projectConfigSchema = z
           archiveTimeoutMs: z.number().int().positive().optional(),
         })
         .optional(),
+      vars: z
+        .record(
+          z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
+          z.union([z.string(), z.number(), z.boolean()]),
+        )
+        .optional(),
       env: z.record(z.string(), z.string()).optional(),
       repository: repositoryConfigSchema.optional(),
       credentials: z.record(z.string(), z.string()).optional(),

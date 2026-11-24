@@ -6,7 +6,7 @@ import type {
   DispatchTaskResult,
   UpdateTaskStateOptions,
 } from "../actions/types.ts";
-import type { ArtifactRecord } from "../domain/types.ts";
+import type { ArtifactRecord, ProjectVarValue } from "../domain/types.ts";
 import type { NotificationMessage, NotificationOptions } from "../notifications/index.ts";
 import type { Logger } from "../observability/logger.ts";
 
@@ -32,10 +32,15 @@ export interface TaskRunContext {
   readonly taskName: string;
   readonly workdir: string;
   readonly env: Readonly<Record<string, string>>;
+  /** Non-sensitive project variables from `project.yaml` `vars:`. */
+  readonly vars: Readonly<Record<string, ProjectVarValue>>;
   readonly logger: Logger;
   readonly signal?: AbortSignal | undefined;
   /** Snapshot of the task's persisted incremental state before execution. */
   readonly state: Readonly<Record<string, unknown>>;
+
+  /** Render a prompt template using this task's standard project/vars/task/state/now scopes. */
+  renderPrompt(template: string, extraScopes?: Readonly<Record<string, unknown>>): string;
 
   /** Read the task's current incremental state. */
   getState(): Promise<Record<string, unknown>>;

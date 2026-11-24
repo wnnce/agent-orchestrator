@@ -2,8 +2,9 @@ import { constants } from "node:fs";
 import { access, readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
-import type { ProjectConfig } from "../domain/types.ts";
+import type { ProjectConfig, ProjectVars } from "../domain/types.ts";
 import { Logger } from "../observability/logger.ts";
+import { findMissingProjectVars } from "../prompt/template.ts";
 import {
   type TaskExtensionAPI,
   type TsTaskHandler,
@@ -13,6 +14,7 @@ import { taskFrontmatterSchema, type TaskDefinition } from "./types.ts";
 
 export interface LoadTasksOptions {
   readonly env?: Record<string, string> | undefined;
+  readonly vars?: ProjectVars | undefined;
   readonly workdir?: string | undefined;
   readonly initTimeoutMs?: number | undefined;
 }
@@ -290,6 +292,16 @@ export class TaskLoader {
             continue;
           }
           seenTaskKeys.add(task.taskKey);
+          if (task.promptTemplate) {
+            const missingVars = findMissingProjectVars(task.promptTemplate, options.vars);
+            if (missingVars.length > 0) {
+              this.logger.warn("task prompt references undefined project vars", {
+                taskKey: task.taskKey,
+                filePath,
+                missingVars,
+              });
+            }
+          }
           tasks.push(task);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -388,6 +400,7 @@ export class TaskLoader {
       if (!project.projectDir) continue;
       const tasks = await this.loadProjectTasks(project.projectDir, project.id, {
         env: project.env,
+        vars: project.vars,
         workdir: project.projectDir,
       });
       allTasks.push(...tasks);

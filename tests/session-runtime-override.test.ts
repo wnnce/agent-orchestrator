@@ -281,7 +281,7 @@ runtime:
   model: claude-haiku-5-5
   reasoningEffort: low
 ---
-Triage open issues for {{projectId}}.
+Triage open issues for {{project.id}}.
 `,
     );
 

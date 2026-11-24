@@ -27,6 +27,11 @@ import { WorkspaceManager } from "../workspace/workspace.ts";
 import { ArtifactStore } from "../artifacts/store.ts";
 import { NotificationHub, NotificationOutbox } from "../notifications/index.ts";
 import { Logger } from "../observability/logger.ts";
+import {
+  buildNowPromptScope,
+  buildProjectPromptScope,
+  renderPromptTemplate,
+} from "../prompt/template.ts";
 import { MemoryEventHub, type EventHub } from "../events/hub.ts";
 import { SkillManager, type ProjectSkill } from "./skills.ts";
 import { GLOBAL_PROJECT_ID } from "./global.ts";
@@ -196,6 +201,8 @@ export class ProjectRuntime {
           actionRegistry: this.actionRegistry,
           appendLogs: (logs) => this.store.appendTaskExecutionLogs(logs),
           getEnv: () => this.project.env,
+          getVars: () => this.project.vars,
+          getProjectScope: () => buildProjectPromptScope(this.project),
           ...(this.project.projectDir
             ? { getWorkdir: () => this.project.projectDir }
             : {}),
@@ -1299,7 +1306,8 @@ export class ProjectRuntime {
   }
 
   /**
-   * Render variables in task prompt template
+   * Render variables in task prompt template using standard namespaces:
+   * `project.*`, `vars.*`, `task.*`, `state` / `state.*`, and `now.*`.
    */
   renderTaskPrompt(
     template: string,
@@ -1309,26 +1317,34 @@ export class ProjectRuntime {
       taskId: string;
       taskKey: string;
       taskName: string;
+      cron?: string | undefined;
+      timezone?: string | undefined;
     },
   ): string {
-    let result = template;
-    result = result.replaceAll("{{projectId}}", vars.projectId);
-    result = result.replaceAll("{{taskId}}", vars.taskId);
-    result = result.replaceAll("{{taskKey}}", vars.taskKey);
-    result = result.replaceAll("{{taskName}}", vars.taskName);
-    result = result.replaceAll(
-      "{{state}}",
-      JSON.stringify(vars.state, null, 2),
-    );
-
-    // Support {{state.fieldName}} variable extraction
-    result = result.replace(/\{\{state\.([a-zA-Z0-9_]+)\}\}/g, (_, field) => {
-      const val = vars.state[field];
-      if (val === undefined || val === null) return "";
-      return typeof val === "object" ? JSON.stringify(val) : String(val);
+    const projectScope = buildProjectPromptScope(this.project);
+    const { rendered, missingVars } = renderPromptTemplate(template, {
+      project: projectScope,
+      vars: this.project.vars ?? {},
+      task: {
+        id: vars.taskId,
+        key: vars.taskKey,
+        name: vars.taskName,
+        cron: vars.cron ?? "",
+        timezone: vars.timezone ?? "",
+      },
+      state: vars.state,
+      now: buildNowPromptScope(vars.timezone),
     });
 
-    return result;
+    if (missingVars.length > 0) {
+      this.logger.warn("task prompt contains unresolved variables", {
+        projectId: this.project.id,
+        taskKey: vars.taskKey,
+        missingVars,
+      });
+    }
+
+    return rendered;
   }
 
   /**
@@ -1409,6 +1425,7 @@ export class ProjectRuntime {
       this.project.id,
       {
         env: this.project.env,
+        vars: this.project.vars,
         workdir: this.project.projectDir,
       },
     );
@@ -1430,6 +1447,7 @@ export class ProjectRuntime {
       this.project.id,
       {
         env: this.project.env,
+        vars: this.project.vars,
         workdir: this.project.projectDir,
       },
     );
