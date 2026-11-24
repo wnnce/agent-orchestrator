@@ -7,6 +7,7 @@ import type {
   SessionRoute,
   TaskExecutionRecord,
   TurnRecord,
+  TurnUsage,
 } from "../../domain/types.ts";
 import type {
   ActionExecutionRow,
@@ -52,6 +53,27 @@ export function toSessionRoute(row: SessionRow): SessionRoute {
 }
 
 export function toTurnRecord(row: TurnRow): TurnRecord {
+  const details = row.usageDetails;
+  const hasUsage = row.totalTokens > 0 || row.model !== null || details !== null;
+  const usage: TurnUsage | undefined = hasUsage
+    ? {
+        ...(row.model !== null ? { model: row.model } : {}),
+        inputTokens: row.inputTokens,
+        cacheReadTokens: row.cacheReadTokens,
+        cacheWriteTokens: row.cacheWriteTokens,
+        outputTokens: row.outputTokens,
+        reasoningTokens: row.reasoningTokens,
+        totalTokens: row.totalTokens,
+        ...(details?.byModel !== undefined ? { byModel: details.byModel } : {}),
+        ...(details?.contextUsedTokens !== undefined
+          ? { contextUsedTokens: details.contextUsedTokens }
+          : {}),
+        ...(details?.contextWindowTokens !== undefined
+          ? { contextWindowTokens: details.contextWindowTokens }
+          : {}),
+      }
+    : undefined;
+
   return {
     id: row.turnId,
     sessionId: row.sessionId,
@@ -60,6 +82,7 @@ export function toTurnRecord(row: TurnRow): TurnRecord {
     ...(row.runtimeTurnId !== null ? { runtimeTurnId: row.runtimeTurnId } : {}),
     ...(row.output !== null ? { output: row.output } : {}),
     ...(row.error !== null ? { error: row.error } : {}),
+    ...(usage !== undefined ? { usage } : {}),
     createdAt: row.createdAt.toISOString(),
     ...(row.startedAt !== null ? { startedAt: row.startedAt.toISOString() } : {}),
     ...(row.finishedAt !== null ? { finishedAt: row.finishedAt.toISOString() } : {}),

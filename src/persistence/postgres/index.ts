@@ -9,6 +9,7 @@ import type {
   ScheduledJobRecord,
   ScheduledJobStatusCode,
   SessionRoute,
+  SessionUsageSummary,
   TaskExecutionRecord,
   TurnRecord,
 } from "../../domain/types.ts";
@@ -114,6 +115,10 @@ export class PostgresStore implements Store {
 
   updateTurn(turnId: string, patch: TurnPatch): Promise<void> {
     return this.turnEventRepo.updateTurn(turnId, patch);
+  }
+
+  getSessionUsage(sessionId: string): Promise<SessionUsageSummary | null> {
+    return this.turnEventRepo.getSessionUsage(sessionId);
   }
 
   appendEvent(event: EventRecord): Promise<EventRecord> {

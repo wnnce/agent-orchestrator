@@ -1,4 +1,4 @@
-import type { BaseLogRecord } from "./types.ts";
+import type { BaseLogRecord, TurnUsage } from "./types.ts";
 
 /**
  * ============================================================================
@@ -241,6 +241,8 @@ export interface TurnCompletedPayload {
   readonly finalText?: string | undefined;
   readonly error?: string | undefined;
   readonly durationMs?: number | undefined;
+  /** Normalized model token & cache usage for this turn. */
+  readonly usage?: TurnUsage | undefined;
   readonly metadata?: Record<string, unknown> | undefined;
 }
 

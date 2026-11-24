@@ -59,6 +59,23 @@ describe("database schema definition", () => {
     expect(notificationsCfg.columns.find((c) => c.name === "details")).toBeDefined();
     expect(notificationsCfg.columns.find((c) => c.name === "error")).toBeUndefined();
     expect(notificationsCfg.columns.find((c) => c.name === "attempts")).toBeUndefined();
+
+    const turnsCfg = tableConfigs.find((t) => t.name === "turns")!;
+    expect(turnsCfg.columns.find((c) => c.name === "model")?.notNull).toBe(false);
+    expect(turnsCfg.columns.find((c) => c.name === "usage_details")?.notNull).toBe(false);
+    for (const tokenCol of [
+      "input_tokens",
+      "cache_read_tokens",
+      "cache_write_tokens",
+      "output_tokens",
+      "reasoning_tokens",
+      "total_tokens",
+    ]) {
+      const col = turnsCfg.columns.find((c) => c.name === tokenCol);
+      expect(col).toBeDefined();
+      expect(col!.notNull).toBe(true);
+      expect(col!.default).toBe(0);
+    }
   });
 
   test("base persistence types retain entity and append-only semantics", () => {

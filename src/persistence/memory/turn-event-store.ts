@@ -1,4 +1,9 @@
-import type { ArtifactRecord, EventRecord, TurnRecord } from "../../domain/types.ts";
+import type {
+  ArtifactRecord,
+  EventRecord,
+  SessionUsageSummary,
+  TurnRecord,
+} from "../../domain/types.ts";
 import type { TurnPatch } from "../types.ts";
 
 /** In-memory repository for `turns`, `events`, and `artifacts`. */
@@ -34,9 +39,56 @@ export class MemoryTurnEventStore {
     if (patch.runtimeTurnId !== undefined) next.runtimeTurnId = patch.runtimeTurnId;
     if (patch.output !== undefined) next.output = patch.output;
     if (patch.error !== undefined) next.error = patch.error;
+    if (patch.usage !== undefined) next.usage = structuredClone(patch.usage);
     if (patch.startedAt !== undefined) next.startedAt = patch.startedAt;
     if (patch.finishedAt !== undefined) next.finishedAt = patch.finishedAt;
     this.turns.set(turnId, next);
+  }
+
+  async getSessionUsage(sessionId: string): Promise<SessionUsageSummary | null> {
+    let turnCount = 0;
+    let inputTokens = 0;
+    let cacheReadTokens = 0;
+    let cacheWriteTokens = 0;
+    let outputTokens = 0;
+    let reasoningTokens = 0;
+    let totalTokens = 0;
+    let latestTurn: TurnRecord | undefined;
+
+    for (const turn of this.turns.values()) {
+      if (turn.sessionId !== sessionId || !turn.usage || turn.usage.totalTokens <= 0) {
+        continue;
+      }
+      turnCount += 1;
+      inputTokens += turn.usage.inputTokens;
+      cacheReadTokens += turn.usage.cacheReadTokens;
+      cacheWriteTokens += turn.usage.cacheWriteTokens;
+      outputTokens += turn.usage.outputTokens;
+      reasoningTokens += turn.usage.reasoningTokens;
+      totalTokens += turn.usage.totalTokens;
+      if (!latestTurn || turn.createdAt >= latestTurn.createdAt) {
+        latestTurn = turn;
+      }
+    }
+
+    if (turnCount === 0) return null;
+    const latestUsage = latestTurn?.usage;
+    return {
+      turnCount,
+      inputTokens,
+      cacheReadTokens,
+      cacheWriteTokens,
+      outputTokens,
+      reasoningTokens,
+      totalTokens,
+      ...(latestUsage?.model ? { lastModel: latestUsage.model } : {}),
+      ...(latestUsage?.contextUsedTokens !== undefined
+        ? { contextUsedTokens: latestUsage.contextUsedTokens }
+        : {}),
+      ...(latestUsage?.contextWindowTokens !== undefined
+        ? { contextWindowTokens: latestUsage.contextWindowTokens }
+        : {}),
+    };
   }
 
   async appendEvent(event: EventRecord): Promise<EventRecord> {

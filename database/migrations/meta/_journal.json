@@ -8,6 +8,13 @@
       "when": 1795193951319,
       "tag": "0000_young_blue_blade",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1795490866597,
+      "tag": "0001_complete_gargoyle",
+      "breakpoints": true
     }
   ]
 }

@@ -23,6 +23,7 @@ import {
   type SessionStatus,
   type TaskExecutionRecord,
   type TurnStatus,
+  type TurnUsageDetails,
 } from "../domain/types.ts";
 
 export const sessions = pgTable(
@@ -74,6 +75,14 @@ export const turns = pgTable(
     runtimeTurnId: varchar("runtime_turn_id", { length: 100 }),
     output: text("output"),
     error: text("error"),
+    model: varchar("model", { length: 150 }),
+    inputTokens: bigint("input_tokens", { mode: "number" }).notNull().default(0),
+    cacheReadTokens: bigint("cache_read_tokens", { mode: "number" }).notNull().default(0),
+    cacheWriteTokens: bigint("cache_write_tokens", { mode: "number" }).notNull().default(0),
+    outputTokens: bigint("output_tokens", { mode: "number" }).notNull().default(0),
+    reasoningTokens: bigint("reasoning_tokens", { mode: "number" }).notNull().default(0),
+    totalTokens: bigint("total_tokens", { mode: "number" }).notNull().default(0),
+    usageDetails: jsonb("usage_details").$type<TurnUsageDetails>(),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

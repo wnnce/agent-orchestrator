@@ -9,6 +9,7 @@ import type {
   ScheduledJobRecord,
   ScheduledJobStatusCode,
   SessionRoute,
+  SessionUsageSummary,
   TaskExecutionRecord,
   TurnRecord,
 } from "../domain/types.ts";
@@ -18,7 +19,10 @@ export interface ListSessionsOptions {
 }
 
 export type TurnPatch = Partial<
-  Pick<TurnRecord, "status" | "runtimeTurnId" | "output" | "error" | "startedAt" | "finishedAt">
+  Pick<
+    TurnRecord,
+    "status" | "runtimeTurnId" | "output" | "error" | "usage" | "startedAt" | "finishedAt"
+  >
 >;
 
 export interface ListNotificationDeliveriesFilter {
@@ -56,6 +60,7 @@ export interface Store {
   getTurn(turnId: string): Promise<TurnRecord | null>;
   getLatestTurn(sessionId: string): Promise<TurnRecord | null>;
   updateTurn(turnId: string, patch: TurnPatch): Promise<void>;
+  getSessionUsage(sessionId: string): Promise<SessionUsageSummary | null>;
   appendEvent(event: EventRecord): Promise<EventRecord>;
   getLatestEventSequence(sessionId: string): Promise<number>;
   listEvents(sessionId: string, afterSequence?: number): Promise<EventRecord[]>;

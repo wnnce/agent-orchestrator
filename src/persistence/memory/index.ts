@@ -8,6 +8,7 @@ import type {
   ScheduledJobRecord,
   ScheduledJobStatusCode,
   SessionRoute,
+  SessionUsageSummary,
   TaskExecutionRecord,
   TurnRecord,
 } from "../../domain/types.ts";
@@ -123,6 +124,10 @@ export class MemoryStore implements Store {
 
   updateTurn(turnId: string, patch: TurnPatch): Promise<void> {
     return this.turnEventStore.updateTurn(turnId, patch);
+  }
+
+  getSessionUsage(sessionId: string): Promise<SessionUsageSummary | null> {
+    return this.turnEventStore.getSessionUsage(sessionId);
   }
 
   appendEvent(event: EventRecord): Promise<EventRecord> {

@@ -103,6 +103,71 @@ describe("PostgresStore with Drizzle ORM", () => {
     );
   });
 
+  test("updateTurn persists normalized TurnUsage columns in a single atomic UPDATE", async () => {
+    const { store, captured } = createMockDrizzlePool(() => [[42]]);
+
+    await store.updateTurn("turn_usage_1", {
+      status: "completed",
+      usage: {
+        model: "claude-sonnet-4-6",
+        inputTokens: 1200,
+        cacheReadTokens: 8000,
+        cacheWriteTokens: 300,
+        outputTokens: 400,
+        reasoningTokens: 100,
+        totalTokens: 9900,
+        contextUsedTokens: 9900,
+        contextWindowTokens: 200000,
+      },
+    });
+
+    expect(captured).toHaveLength(1);
+    const query = captured[0]!;
+    expect(query.sql).toContain('"model"');
+    expect(query.sql).toContain('"input_tokens"');
+    expect(query.sql).toContain('"cache_read_tokens"');
+    expect(query.sql).toContain('"cache_write_tokens"');
+    expect(query.sql).toContain('"output_tokens"');
+    expect(query.sql).toContain('"reasoning_tokens"');
+    expect(query.sql).toContain('"total_tokens"');
+    expect(query.sql).toContain('"usage_details"');
+    expect(query.values).toContain("claude-sonnet-4-6");
+    expect(query.values).toContain(9900);
+  });
+
+  test("getSessionUsage aggregates turns with total_tokens > 0 and combines latest model/context", async () => {
+    const { store, captured } = createMockDrizzlePool((sql) => {
+      if (sql.includes("count(*)")) {
+        return [[2, "1500", "9000", "500", "600", "150", "11600"]];
+      }
+      return [
+        [
+          "gpt-5.4",
+          {
+            contextUsedTokens: 6400,
+            contextWindowTokens: 258000,
+          },
+        ],
+      ];
+    });
+
+    const summary = await store.getSessionUsage("ses_usage_1");
+    expect(captured).toHaveLength(2);
+    expect(captured[0]!.sql).toContain('"turns"."total_tokens" > $2');
+    expect(summary).toEqual({
+      turnCount: 2,
+      inputTokens: 1500,
+      cacheReadTokens: 9000,
+      cacheWriteTokens: 500,
+      outputTokens: 600,
+      reasoningTokens: 150,
+      totalTokens: 11600,
+      lastModel: "gpt-5.4",
+      contextUsedTokens: 6400,
+      contextWindowTokens: 258000,
+    });
+  });
+
   test("findSessionByExternal uses IS NULL when threadId is omitted and equality when provided", async () => {
     const withoutThread = createMockDrizzlePool();
     await withoutThread.store.findSessionByExternal("feishu", "oc_1");
@@ -178,13 +243,58 @@ describe("PostgresStore with Drizzle ORM", () => {
       runtimeTurnId: null,
       output: "ok",
       error: null,
+      model: null,
+      inputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      outputTokens: 0,
+      reasoningTokens: 0,
+      totalTokens: 0,
+      usageDetails: null,
       startedAt: now,
       finishedAt: now,
       createdAt: now,
     });
     expect(turn.id).toBe("turn_9");
     expect("error" in turn).toBe(false);
+    expect("usage" in turn).toBe(false);
     expect(turn.output).toBe("ok");
+
+    const turnWithUsage = toTurnRecord({
+      id: 10,
+      turnId: "turn_10",
+      sessionId: "ses_7",
+      input: "analyze",
+      status: "completed",
+      runtimeTurnId: "rt_10",
+      output: "done",
+      error: null,
+      model: "gemini-4-neon",
+      inputTokens: 15709,
+      cacheReadTokens: 11432,
+      cacheWriteTokens: 0,
+      outputTokens: 124,
+      reasoningTokens: 109,
+      totalTokens: 27265,
+      usageDetails: {
+        contextUsedTokens: 27265,
+        contextWindowTokens: 1048576,
+      },
+      startedAt: now,
+      finishedAt: now,
+      createdAt: now,
+    });
+    expect(turnWithUsage.usage).toEqual({
+      model: "gemini-4-neon",
+      inputTokens: 15709,
+      cacheReadTokens: 11432,
+      cacheWriteTokens: 0,
+      outputTokens: 124,
+      reasoningTokens: 109,
+      totalTokens: 27265,
+      contextUsedTokens: 27265,
+      contextWindowTokens: 1048576,
+    });
 
     const action = toActionExecutionRecord({
       id: 11,
@@ -260,5 +370,69 @@ describe("MemoryStore behavior consistency", () => {
     expect(await store.listDueScheduledJobs("proj-mem", new Date("2026-11-20T02:00:00.000Z"))).toEqual([]);
     expect(await store.listScheduledJobs({ projectId: "proj-mem" })).toEqual([]);
     expect(await store.cancelScheduledJobById("job_deleted")).toBe(false);
+  });
+
+  test("getSessionUsage aggregates turns with usage and returns null when none exist", async () => {
+    const store = new MemoryStore();
+    expect(await store.getSessionUsage("ses_empty")).toBeNull();
+
+    await store.createTurn({
+      id: "t1",
+      sessionId: "ses_u",
+      input: "first",
+      status: "completed",
+      createdAt: "2026-11-23T01:00:00.000Z",
+    });
+    await store.updateTurn("t1", {
+      usage: {
+        model: "claude-sonnet-4-6",
+        inputTokens: 500,
+        cacheReadTokens: 2000,
+        cacheWriteTokens: 200,
+        outputTokens: 100,
+        reasoningTokens: 0,
+        totalTokens: 2800,
+        contextUsedTokens: 2800,
+        contextWindowTokens: 200000,
+      },
+    });
+    await store.createTurn({
+      id: "t2",
+      sessionId: "ses_u",
+      input: "no usage turn",
+      status: "failed",
+      createdAt: "2026-11-23T01:01:00.000Z",
+    });
+    await store.createTurn({
+      id: "t3",
+      sessionId: "ses_u",
+      input: "third",
+      status: "completed",
+      createdAt: "2026-11-23T01:02:00.000Z",
+      usage: {
+        model: "claude-opus-4-6",
+        inputTokens: 300,
+        cacheReadTokens: 3000,
+        cacheWriteTokens: 0,
+        outputTokens: 200,
+        reasoningTokens: 50,
+        totalTokens: 3500,
+        contextUsedTokens: 3500,
+        contextWindowTokens: 1000000,
+      },
+    });
+
+    expect(await store.getSessionUsage("ses_u")).toEqual({
+      turnCount: 2,
+      inputTokens: 800,
+      cacheReadTokens: 5000,
+      cacheWriteTokens: 200,
+      outputTokens: 300,
+      reasoningTokens: 50,
+      totalTokens: 6300,
+      lastModel: "claude-opus-4-6",
+      contextUsedTokens: 3500,
+      contextWindowTokens: 1000000,
+    });
   });
 });
