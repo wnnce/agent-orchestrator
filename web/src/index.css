@@ -316,4 +316,110 @@ html:not(.dark) .shj-syn-func { color: #8250df; }
   fill: var(--text-primary) !important;
 }
 
+/* =====================================================================
+   Studio Micro-Interactions & GPU-Composited CSS Animations
+   ===================================================================== */
+@keyframes studio-msg-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes studio-dialog-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes studio-dialog-content-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes studio-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.animate-msg-enter {
+  animation: studio-msg-enter 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-dialog-overlay {
+  animation: studio-dialog-overlay-in 150ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-dialog-content {
+  animation: studio-dialog-content-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.thinking-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--text-muted) 0%,
+    var(--text-primary) 50%,
+    var(--text-muted) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: studio-shimmer 2.2s linear infinite;
+}
+
+/* Smooth GPU-friendly zero-JS accordion for collapsible blocks */
+.collapsible-grid {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 160ms ease-out;
+}
+
+.collapsible-grid[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.collapsible-grid > .collapsible-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-msg-enter,
+  .animate-dialog-overlay,
+  .animate-dialog-content,
+  .thinking-shimmer {
+    animation: none !important;
+  }
+  .thinking-shimmer {
+    color: var(--text-muted);
+    background: none;
+  }
+  .collapsible-grid {
+    transition: none !important;
+  }
+}
+
+
 

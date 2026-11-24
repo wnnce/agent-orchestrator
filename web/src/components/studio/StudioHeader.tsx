@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { AnimatePresence, m } from "motion/react";
 import {
   ChevronDown,
   PanelRightClose,
@@ -12,6 +13,7 @@ import {
 } from "lucide-react";
 import { useStudio } from "../../context/StudioContext";
 import { useTheme } from "../../context/ThemeContext";
+import { EASE_OUT_EXPO } from "../../utils/motion";
 
 export function StudioHeader() {
   const {
@@ -32,6 +34,7 @@ export function StudioHeader() {
 
   const { theme, cycleTheme } = useTheme();
   const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
+  const [refreshSpinKey, setRefreshSpinKey] = useState(0);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown when clicking outside
@@ -49,6 +52,7 @@ export function StudioHeader() {
   }, []);
 
   const handleRefresh = () => {
+    setRefreshSpinKey((k) => k + 1);
     refreshProjects();
     refreshSessions();
   };
@@ -95,42 +99,54 @@ export function StudioHeader() {
             <span className="font-medium leading-none">
               {activeProject?.displayName || activeProjectId || "Select Project"}
             </span>
-            <ChevronDown className="w-3 h-3 text-[var(--text-muted)] shrink-0" />
+            <ChevronDown
+              className={`w-3 h-3 text-[var(--text-muted)] shrink-0 transition-transform duration-150 ${
+                projectDropdownOpen ? "rotate-180" : ""
+              }`}
+            />
           </button>
 
           {/* Minimalist Dropdown Menu */}
-          {projectDropdownOpen && (
-            <div className="absolute left-0 top-full mt-1 w-56 rounded-[var(--radius-md)] bg-[var(--bg-surface-elevated)] border border-[var(--border-default)] shadow-lg py-1 z-50 animate-in fade-in-50 duration-100">
-              <div className="px-2.5 py-1 text-[10px] uppercase tracking-wider text-[var(--text-muted)] font-mono border-b border-[var(--border-subtle)] mb-1">
-                Projects
-              </div>
-              {projects.map((p) => {
-                const isSelected = p.projectId === activeProjectId;
-                return (
-                  <button
-                    key={p.projectId}
-                    type="button"
-                    onClick={() => {
-                      setActiveProjectId(p.projectId);
-                      setProjectDropdownOpen(false);
-                    }}
-                    className={`w-full px-2.5 py-1.5 text-xs text-left flex items-center justify-between hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer ${
-                      isSelected
-                        ? "text-[var(--text-primary)] font-semibold bg-[var(--bg-surface)]"
-                        : "text-[var(--text-secondary)]"
-                    }`}
-                  >
-                    <span className="truncate">
-                      {p.displayName || p.projectId}
-                    </span>
-                    {isSelected && (
-                      <Check className="w-3.5 h-3.5 text-[var(--text-primary)] shrink-0" />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          <AnimatePresence>
+            {projectDropdownOpen && (
+              <m.div
+                initial={{ opacity: 0, y: -4, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -4, scale: 0.98 }}
+                transition={{ duration: 0.14, ease: EASE_OUT_EXPO }}
+                className="absolute left-0 top-full mt-1 w-56 rounded-[var(--radius-md)] bg-[var(--bg-surface-elevated)] border border-[var(--border-default)] shadow-lg py-1 z-50 origin-top-left"
+              >
+                <div className="px-2.5 py-1 text-[10px] uppercase tracking-wider text-[var(--text-muted)] font-mono border-b border-[var(--border-subtle)] mb-1">
+                  Projects
+                </div>
+                {projects.map((p) => {
+                  const isSelected = p.projectId === activeProjectId;
+                  return (
+                    <button
+                      key={p.projectId}
+                      type="button"
+                      onClick={() => {
+                        setActiveProjectId(p.projectId);
+                        setProjectDropdownOpen(false);
+                      }}
+                      className={`w-full px-2.5 py-1.5 text-xs text-left flex items-center justify-between hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer ${
+                        isSelected
+                          ? "text-[var(--text-primary)] font-semibold bg-[var(--bg-surface)]"
+                          : "text-[var(--text-secondary)]"
+                      }`}
+                    >
+                      <span className="truncate">
+                        {p.displayName || p.projectId}
+                      </span>
+                      {isSelected && (
+                        <Check className="w-3.5 h-3.5 text-[var(--text-primary)] shrink-0" />
+                      )}
+                    </button>
+                  );
+                })}
+              </m.div>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* View Section Indicator / Session Breadcrumb */}
@@ -194,13 +210,22 @@ export function StudioHeader() {
         </div>
 
         {/* Data Refresh button */}
-        <button
+        <m.button
+          whileTap={{ scale: 0.9 }}
           onClick={handleRefresh}
           title="Refresh"
           className="w-7 h-7 flex items-center justify-center rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer"
         >
-          <RotateCw className="w-3.5 h-3.5" />
-        </button>
+          <m.span
+            key={refreshSpinKey}
+            initial={refreshSpinKey > 0 ? { rotate: 0 } : false}
+            animate={refreshSpinKey > 0 ? { rotate: 360 } : undefined}
+            transition={{ duration: 0.45, ease: EASE_OUT_EXPO }}
+            className="inline-flex"
+          >
+            <RotateCw className="w-3.5 h-3.5" />
+          </m.span>
+        </m.button>
 
         {/* Dark Mode / Theme Cycler in Header */}
         <button

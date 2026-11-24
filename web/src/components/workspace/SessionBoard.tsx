@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import { AnimatePresence, m } from "motion/react";
 import { toast } from "sonner";
 import {
   Plus,
@@ -25,6 +26,7 @@ import { useConfirm } from "../../context/ConfirmContext";
 import type { RuntimeInfo, SessionRoute } from "../../types";
 import { formatTimeAgo, formatDateTime, formatTokenCount } from "../../utils/formatters";
 import { copyToClipboard } from "../../utils/clipboard";
+import { EASE_OUT_EXPO, SPRING_SOFT } from "../../utils/motion";
 
 interface ColumnDef {
   id: "active" | "idle" | "suspended" | "closed";
@@ -117,7 +119,7 @@ function SessionCard({
   return (
     <div
       onClick={onOpen}
-      className="group relative flex flex-col justify-between p-4 rounded-[var(--radius-md)] bg-[var(--bg-card)] border border-[var(--border-default)] hover:border-[var(--border-strong)] hover:shadow-xs transition-all cursor-pointer space-y-3"
+      className="group relative flex flex-col justify-between p-4 rounded-[var(--radius-md)] bg-[var(--bg-card)] border border-[var(--border-default)] hover:border-[var(--border-strong)] hover:-translate-y-0.5 active:scale-[0.99] hover:shadow-xs transition-all duration-150 cursor-pointer space-y-3"
     >
       {/* 1. Card Top: Title / Inline Edit + Action Buttons */}
       <div className="flex items-start justify-between gap-2">
@@ -549,7 +551,7 @@ export function SessionBoard() {
           <button
             onClick={handleOpenCreateModal}
             disabled={isCreating}
-            className="px-3 py-1 rounded-[var(--radius-sm)] text-xs font-medium bg-[var(--primary)] text-[var(--text-inverted)] hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity cursor-pointer flex items-center gap-1.5 shrink-0"
+            className="px-3 py-1 rounded-[var(--radius-sm)] text-xs font-medium bg-[var(--primary)] text-[var(--text-inverted)] hover:opacity-90 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
           >
             {isCreating ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -600,21 +602,34 @@ export function SessionBoard() {
                       </span>
                     </div>
                   ) : (
-                    colSessions.map((s) => (
-                      <SessionCard
-                        key={s.sessionId}
-                        session={s}
-                        onOpen={() => openSession(s.sessionId)}
-                        isEditing={editingSessionId === s.sessionId}
-                        editTitle={editTitle}
-                        setEditTitle={setEditTitle}
-                        onStartRename={(e) => handleStartRename(e, s)}
-                        onSaveRename={(e) => handleSaveRename(e, s.sessionId)}
-                        onCancelRename={handleCancelRename}
-                        onDelete={(e) => handleDeleteSession(e, s.sessionId)}
-                        isDeleting={deletingId === s.sessionId}
-                      />
-                    ))
+                    <AnimatePresence initial={false}>
+                      {colSessions.map((s, idx) => (
+                        <m.div
+                          key={s.sessionId}
+                          initial={{ opacity: 0, y: 6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.96 }}
+                          transition={{
+                            duration: 0.18,
+                            delay: Math.min(idx * 0.025, 0.18),
+                            ease: EASE_OUT_EXPO,
+                          }}
+                        >
+                          <SessionCard
+                            session={s}
+                            onOpen={() => openSession(s.sessionId)}
+                            isEditing={editingSessionId === s.sessionId}
+                            editTitle={editTitle}
+                            setEditTitle={setEditTitle}
+                            onStartRename={(e) => handleStartRename(e, s)}
+                            onSaveRename={(e) => handleSaveRename(e, s.sessionId)}
+                            onCancelRename={handleCancelRename}
+                            onDelete={(e) => handleDeleteSession(e, s.sessionId)}
+                            isDeleting={deletingId === s.sessionId}
+                          />
+                        </m.div>
+                      ))}
+                    </AnimatePresence>
                   )}
                 </div>
               </div>
@@ -624,148 +639,163 @@ export function SessionBoard() {
       </div>
 
       {/* Create Session Modal */}
-      {createModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-[1px] p-4"
-          onClick={() => {
-            if (!isCreating) setCreateModalOpen(false);
-          }}
-        >
-          <div
-            className="w-full max-w-md rounded-[var(--radius-md)] border border-[var(--border-strong)] bg-[var(--bg-card)] shadow-xl overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
+      <AnimatePresence>
+        {createModalOpen && (
+          <m.div
+            key="create-session-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-[1px] p-4"
+            onClick={() => {
+              if (!isCreating) setCreateModalOpen(false);
+            }}
           >
-            <div className="px-4 py-3 border-b border-[var(--border-default)] flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Cpu className="w-4 h-4 text-[var(--primary)]" />
-                <h3 className="text-sm font-semibold text-[var(--text-primary)]">
-                  新建会话 (New Session)
-                </h3>
-              </div>
-              <button
-                type="button"
-                disabled={isCreating}
-                onClick={() => setCreateModalOpen(false)}
-                className="p-1 rounded-[var(--radius-xs)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                title="关闭"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateSession} className="p-4 space-y-4">
-              {isLoadingRuntimes ? (
-                <div className="py-8 flex items-center justify-center gap-2 text-xs text-[var(--text-muted)] font-mono">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>正在加载可用 Runtime 与模型列表...</span>
+            <m.div
+              initial={{ opacity: 0, scale: 0.96, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 6 }}
+              transition={SPRING_SOFT}
+              className="w-full max-w-md rounded-[var(--radius-md)] border border-[var(--border-strong)] bg-[var(--bg-card)] shadow-xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-4 py-3 border-b border-[var(--border-default)] flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Cpu className="w-4 h-4 text-[var(--primary)]" />
+                  <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+                    新建会话 (New Session)
+                  </h3>
                 </div>
-              ) : (
-                <>
-                  {/* 1. Runtime selector */}
-                  <div className="space-y-1.5">
-                    <label className="block text-[11px] font-medium text-[var(--text-secondary)]">
-                      Runtime
-                    </label>
-                    <select
-                      value={selectedRuntime}
-                      disabled={isCreating || runtimes.length === 0}
-                      onChange={(e) => applyRuntimeSelection(e.target.value, runtimes)}
-                      className="w-full px-2.5 py-2 rounded-[var(--radius-sm)] text-xs font-mono bg-[var(--bg-input)] border border-[var(--border-default)] text-[var(--text-primary)] outline-hidden focus:border-[var(--primary)] disabled:opacity-60 disabled:cursor-not-allowed"
-                    >
-                      {runtimes.map((rt) => (
-                        <option key={rt.type} value={rt.type}>
-                          {rt.name}
-                          {activeProject?.runtime?.type === rt.type ? " (项目默认)" : ""}
-                        </option>
-                      ))}
-                    </select>
-                    {activeRuntimeInfo?.description && (
-                      <p className="text-[11px] text-[var(--text-muted)]">
-                        {activeRuntimeInfo.description}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* 2. Model candidate selector (candidates only, no custom input) */}
-                  <div className="space-y-1.5">
-                    <label className="block text-[11px] font-medium text-[var(--text-secondary)]">
-                      模型 (Model)
-                    </label>
-                    <select
-                      value={selectedModel}
-                      disabled={isCreating}
-                      onChange={(e) => handleModelChange(e.target.value)}
-                      className="w-full px-2.5 py-2 rounded-[var(--radius-sm)] text-xs font-mono bg-[var(--bg-input)] border border-[var(--border-default)] text-[var(--text-primary)] outline-hidden focus:border-[var(--primary)] disabled:opacity-60 disabled:cursor-not-allowed"
-                    >
-                      <option value="">
-                        {activeRuntimeInfo && activeRuntimeInfo.models.length === 0
-                          ? "使用 Runtime 默认模型（暂无候选模型）"
-                          : "使用 Runtime 默认模型"}
-                      </option>
-                      {(activeRuntimeInfo?.models ?? []).map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.displayName !== m.id ? `${m.displayName} (${m.id})` : m.id}
-                          {m.contextWindow ? ` · ${formatTokenCount(m.contextWindow)}` : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* 3. Reasoning Effort selector */}
-                  <div className="space-y-1.5">
-                    <label className="block text-[11px] font-medium text-[var(--text-secondary)]">
-                      思考强度 (Reasoning Effort)
-                    </label>
-                    <select
-                      value={selectedEffort}
-                      disabled={isCreating || availableEfforts.length === 0}
-                      onChange={(e) => setSelectedEffort(e.target.value)}
-                      className="w-full px-2.5 py-2 rounded-[var(--radius-sm)] text-xs font-mono bg-[var(--bg-input)] border border-[var(--border-default)] text-[var(--text-primary)] outline-hidden focus:border-[var(--primary)] disabled:opacity-60 disabled:cursor-not-allowed"
-                    >
-                      {availableEfforts.length === 0 ? (
-                        <option value="">当前模型不支持思考强度</option>
-                      ) : (
-                        <>
-                          <option value="">
-                            默认
-                            {activeModelInfo?.defaultReasoningEffort
-                              ? ` (${activeModelInfo.defaultReasoningEffort})`
-                              : ""}
-                          </option>
-                          {availableEfforts.map((effort) => (
-                            <option key={effort} value={effort}>
-                              {effort}
-                            </option>
-                          ))}
-                        </>
-                      )}
-                    </select>
-                  </div>
-                </>
-              )}
-
-              <div className="pt-2 border-t border-[var(--border-subtle)] flex items-center justify-end gap-2">
                 <button
                   type="button"
                   disabled={isCreating}
                   onClick={() => setCreateModalOpen(false)}
-                  className="px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  className="p-1 rounded-[var(--radius-xs)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  title="关闭"
                 >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  disabled={isCreating || isLoadingRuntimes || !selectedRuntime}
-                  className="px-3.5 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium bg-[var(--primary)] text-[var(--text-inverted)] hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed transition-opacity cursor-pointer inline-flex items-center gap-1.5"
-                >
-                  {isCreating && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  <span>{isCreating ? "创建中..." : "创建会话"}</span>
+                  <X className="w-4 h-4" />
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+
+              <form onSubmit={handleCreateSession} className="p-4 space-y-4">
+                {isLoadingRuntimes ? (
+                  <div className="py-8 flex items-center justify-center gap-2 text-xs text-[var(--text-muted)] font-mono">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>正在加载可用 Runtime 与模型列表...</span>
+                  </div>
+                ) : (
+                  <>
+                    {/* 1. Runtime selector */}
+                    <div className="space-y-1.5">
+                      <label className="block text-[11px] font-medium text-[var(--text-secondary)]">
+                        Runtime
+                      </label>
+                      <select
+                        value={selectedRuntime}
+                        disabled={isCreating || runtimes.length === 0}
+                        onChange={(e) => applyRuntimeSelection(e.target.value, runtimes)}
+                        className="w-full px-2.5 py-2 rounded-[var(--radius-sm)] text-xs font-mono bg-[var(--bg-input)] border border-[var(--border-default)] text-[var(--text-primary)] outline-hidden focus:border-[var(--primary)] disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {runtimes.map((rt) => (
+                          <option key={rt.type} value={rt.type}>
+                            {rt.name}
+                            {activeProject?.runtime?.type === rt.type ? " (项目默认)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                      {activeRuntimeInfo?.description && (
+                        <p className="text-[11px] text-[var(--text-muted)]">
+                          {activeRuntimeInfo.description}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* 2. Model candidate selector (candidates only, no custom input) */}
+                    <div className="space-y-1.5">
+                      <label className="block text-[11px] font-medium text-[var(--text-secondary)]">
+                        模型 (Model)
+                      </label>
+                      <select
+                        value={selectedModel}
+                        disabled={isCreating}
+                        onChange={(e) => handleModelChange(e.target.value)}
+                        className="w-full px-2.5 py-2 rounded-[var(--radius-sm)] text-xs font-mono bg-[var(--bg-input)] border border-[var(--border-default)] text-[var(--text-primary)] outline-hidden focus:border-[var(--primary)] disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        <option value="">
+                          {activeRuntimeInfo && activeRuntimeInfo.models.length === 0
+                            ? "使用 Runtime 默认模型（暂无候选模型）"
+                            : "使用 Runtime 默认模型"}
+                        </option>
+                        {(activeRuntimeInfo?.models ?? []).map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.displayName !== model.id
+                              ? `${model.displayName} (${model.id})`
+                              : model.id}
+                            {model.contextWindow
+                              ? ` · ${formatTokenCount(model.contextWindow)}`
+                              : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* 3. Reasoning Effort selector */}
+                    <div className="space-y-1.5">
+                      <label className="block text-[11px] font-medium text-[var(--text-secondary)]">
+                        思考强度 (Reasoning Effort)
+                      </label>
+                      <select
+                        value={selectedEffort}
+                        disabled={isCreating || availableEfforts.length === 0}
+                        onChange={(e) => setSelectedEffort(e.target.value)}
+                        className="w-full px-2.5 py-2 rounded-[var(--radius-sm)] text-xs font-mono bg-[var(--bg-input)] border border-[var(--border-default)] text-[var(--text-primary)] outline-hidden focus:border-[var(--primary)] disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {availableEfforts.length === 0 ? (
+                          <option value="">当前模型不支持思考强度</option>
+                        ) : (
+                          <>
+                            <option value="">
+                              默认
+                              {activeModelInfo?.defaultReasoningEffort
+                                ? ` (${activeModelInfo.defaultReasoningEffort})`
+                                : ""}
+                            </option>
+                            {availableEfforts.map((effort) => (
+                              <option key={effort} value={effort}>
+                                {effort}
+                              </option>
+                            ))}
+                          </>
+                        )}
+                      </select>
+                    </div>
+                  </>
+                )}
+
+                <div className="pt-2 border-t border-[var(--border-subtle)] flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    disabled={isCreating}
+                    onClick={() => setCreateModalOpen(false)}
+                    className="px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isCreating || isLoadingRuntimes || !selectedRuntime}
+                    className="px-3.5 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium bg-[var(--primary)] text-[var(--text-inverted)] hover:opacity-90 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed transition-all cursor-pointer inline-flex items-center gap-1.5"
+                  >
+                    {isCreating && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                    <span>{isCreating ? "创建中..." : "创建会话"}</span>
+                  </button>
+                </div>
+              </form>
+            </m.div>
+          </m.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { AnimatePresence, m } from "motion/react";
 import { toast } from "sonner";
+import { EASE_OUT_EXPO } from "../../utils/motion";
 import {
   fetchArtifacts,
   fetchSessionEvents,
@@ -367,17 +369,26 @@ function SessionConversationView({ sessionId }: { sessionId: string }) {
       />
 
       {/* Collapsible Inspector Drawer */}
-      {showInspector && (
-        <div className="w-[var(--inspector-width)] border-l border-[var(--border-default)] bg-[var(--bg-inspector)] flex flex-col shrink-0 overflow-hidden">
-          <Inspector
-            events={events}
-            artifacts={artifacts}
-            session={currentSession}
-            project={activeProject}
-            usage={sessionUsage}
-          />
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {showInspector && (
+          <m.div
+            key="inspector-drawer"
+            initial={{ opacity: 0, x: 24 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 24 }}
+            transition={{ duration: 0.18, ease: EASE_OUT_EXPO }}
+            className="w-[var(--inspector-width)] border-l border-[var(--border-default)] bg-[var(--bg-inspector)] flex flex-col shrink-0 overflow-hidden"
+          >
+            <Inspector
+              events={events}
+              artifacts={artifacts}
+              session={currentSession}
+              project={activeProject}
+              usage={sessionUsage}
+            />
+          </m.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

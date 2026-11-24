@@ -1,4 +1,5 @@
 import React from "react";
+import { m } from "motion/react";
 import {
   FolderKanban,
   MessagesSquare,
@@ -7,6 +8,7 @@ import {
 } from "lucide-react";
 import { useStudio } from "../../context/StudioContext";
 import type { StudioView } from "../../types";
+import { SPRING_SNAPPY } from "../../utils/motion";
 
 export function ActivityBar() {
   const { activeView, setActiveView } = useStudio();
@@ -35,15 +37,29 @@ export function ActivityBar() {
       },
     ];
 
+  const activeIndex = Math.max(
+    0,
+    navItems.findIndex((item) => item.view === activeView),
+  );
+
   return (
     <aside className="w-[var(--activity-bar-width)] flex flex-col items-center py-2 bg-[var(--bg-activity-bar)] border-r border-[var(--border-default)] select-none z-20 shrink-0">
-      {/* 4 VSCode-style Icon Buttons */}
-      <nav className="flex flex-col items-center gap-1 w-full">
+      {/* 4 VSCode-style Icon Buttons with GPU-translated spring indicator */}
+      <nav className="relative flex flex-col items-center gap-1 w-full">
+        <m.span
+          aria-hidden
+          animate={{ y: activeIndex * 40 }}
+          transition={SPRING_SNAPPY}
+          className="pointer-events-none absolute left-1.5 top-1.5 h-6 w-0.5 bg-[var(--text-primary)] rounded-r z-10"
+        />
         {navItems.map((item) => {
           const isActive = activeView === item.view;
           return (
-            <button
+            <m.button
               key={item.view}
+              type="button"
+              whileTap={{ scale: 0.92 }}
+              transition={{ duration: 0.1 }}
               onClick={() => setActiveView(item.view)}
               title={item.label}
               className={`relative w-9 h-9 rounded-[var(--radius-sm)] flex items-center justify-center transition-colors cursor-pointer ${
@@ -52,12 +68,8 @@ export function ActivityBar() {
                   : "text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)]"
               }`}
             >
-              {/* VSCode Left Accent Pill */}
-              {isActive && (
-                <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 bg-[var(--text-primary)] rounded-r" />
-              )}
               {item.icon}
-            </button>
+            </m.button>
           );
         })}
       </nav>

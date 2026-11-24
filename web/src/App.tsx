@@ -1,4 +1,5 @@
 import React from "react";
+import { LazyMotion, MotionConfig, domAnimation, m } from "motion/react";
 import { Toaster } from "sonner";
 import { Switch, Route, Redirect } from "wouter";
 import { ActivityBar } from "./components/studio/ActivityBar";
@@ -10,10 +11,12 @@ import { ScheduledJobsView } from "./components/views/ScheduledJobsView";
 import { StudioProvider, useStudio } from "./context/StudioContext";
 import { ThemeProvider, useTheme } from "./context/ThemeContext";
 import { ConfirmProvider } from "./context/ConfirmContext";
+import { EASE_OUT_EXPO } from "./utils/motion";
 
 function StudioLayout() {
-  const { activeProjectId } = useStudio();
+  const { activeProjectId, activeView, activeSessionId } = useStudio();
   const { theme } = useTheme();
+  const viewKey = `${activeProjectId ?? ""}:${activeView}:${activeSessionId ?? ""}`;
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-[var(--bg-canvas)] text-[var(--text-primary)] font-sans select-none">
@@ -27,20 +30,28 @@ function StudioLayout() {
 
         {/* Declarative Path-Based Router */}
         <main className="flex-1 flex overflow-hidden min-w-0">
-          <Switch>
-            <Route path="/:projectId/sessions/:sessionId" component={SessionsView} />
-            <Route path="/:projectId/sessions" component={SessionsView} />
-            <Route path="/:projectId/tasks" component={TasksView} />
-            <Route path="/:projectId/jobs" component={ScheduledJobsView} />
-            <Route path="/:projectId/project" component={ProjectInfoView} />
-            <Route path="/:projectId/overview" component={ProjectInfoView} />
-            <Route path="/:projectId" component={SessionsView} />
-            <Route path="*">
-              {activeProjectId ? (
-                <Redirect to={`/${activeProjectId}/sessions`} replace />
-              ) : null}
-            </Route>
-          </Switch>
+          <m.div
+            key={viewKey}
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.16, ease: EASE_OUT_EXPO }}
+            className="flex-1 flex overflow-hidden min-w-0"
+          >
+            <Switch>
+              <Route path="/:projectId/sessions/:sessionId" component={SessionsView} />
+              <Route path="/:projectId/sessions" component={SessionsView} />
+              <Route path="/:projectId/tasks" component={TasksView} />
+              <Route path="/:projectId/jobs" component={ScheduledJobsView} />
+              <Route path="/:projectId/project" component={ProjectInfoView} />
+              <Route path="/:projectId/overview" component={ProjectInfoView} />
+              <Route path="/:projectId" component={SessionsView} />
+              <Route path="*">
+                {activeProjectId ? (
+                  <Redirect to={`/${activeProjectId}/sessions`} replace />
+                ) : null}
+              </Route>
+            </Switch>
+          </m.div>
         </main>
       </div>
 
@@ -66,13 +77,17 @@ function StudioLayout() {
 
 export function App() {
   return (
-    <ThemeProvider>
-      <ConfirmProvider>
-        <StudioProvider>
-          <StudioLayout />
-        </StudioProvider>
-      </ConfirmProvider>
-    </ThemeProvider>
+    <MotionConfig reducedMotion="user">
+      <LazyMotion features={domAnimation} strict>
+        <ThemeProvider>
+          <ConfirmProvider>
+            <StudioProvider>
+              <StudioLayout />
+            </StudioProvider>
+          </ConfirmProvider>
+        </ThemeProvider>
+      </LazyMotion>
+    </MotionConfig>
   );
 }
 

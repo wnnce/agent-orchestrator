@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import { AnimatePresence, m } from "motion/react";
 import {
   Square,
   ChevronDown,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import type { ChatMessage } from "../types";
 import { calculateCacheHitRate, formatTokenCount } from "../utils/formatters";
+import { SPRING_SNAPPY } from "../utils/motion";
 import { MarkdownRenderer } from "./common/MarkdownRenderer";
 
 interface ChatAreaProps {
@@ -249,7 +251,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                     setInput(item.label);
                     textareaRef.current?.focus();
                   }}
-                  className="p-3 text-left rounded-xl border border-[var(--border-default)] hover:border-[var(--border-strong)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-hover)] transition-all cursor-pointer group"
+                  className="p-3 text-left rounded-xl border border-[var(--border-default)] hover:border-[var(--border-strong)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-hover)] hover:-translate-y-0.5 active:scale-[0.99] transition-all duration-150 cursor-pointer group"
                 >
                   <div className="text-xs font-medium text-[var(--text-primary)]">
                     {item.label}
@@ -262,11 +264,11 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             </div>
           </div>
         ) : (
-          messages.map((m) => {
-            const isUser = m.role === "user";
+          messages.map((msg) => {
+            const isUser = msg.role === "user";
 
             return (
-              <div key={m.id} className="max-w-3xl mx-auto w-full">
+              <div key={msg.id} className="max-w-3xl mx-auto w-full animate-msg-enter">
                 {isUser ? (
                   /* User Message: Aligned strictly on the shared left axis without boxy card */
                   <div className="w-full space-y-2">
@@ -279,14 +281,14 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                       </span>
                       <span>·</span>
                       <span>
-                        {new Date(m.timestamp).toLocaleTimeString([], {
+                        {new Date(msg.timestamp).toLocaleTimeString([], {
                           hour: "2-digit",
                           minute: "2-digit",
                         })}
                       </span>
                     </div>
                     <div className="text-[14px] text-[var(--text-primary)] leading-relaxed break-words font-sans">
-                      <MarkdownRenderer content={m.content} />
+                      <MarkdownRenderer content={msg.content} />
                     </div>
                   </div>
                 ) : (
@@ -301,7 +303,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                       </span>
                       <span>·</span>
                       <span>
-                        {new Date(m.timestamp).toLocaleTimeString([], {
+                        {new Date(msg.timestamp).toLocaleTimeString([], {
                           hour: "2-digit",
                           minute: "2-digit",
                         })}
@@ -309,9 +311,9 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                     </div>
 
                     <div className="w-full space-y-3.5 text-[14px] text-[var(--text-primary)] font-sans">
-                      {m.parts && m.parts.length > 0 ? (
+                      {msg.parts && msg.parts.length > 0 ? (
                         <>
-                          {m.parts.map((part, pIdx) => {
+                          {msg.parts.map((part, pIdx) => {
                           if (part.type === "reasoning") {
                             if (!part.content && part.status !== "streaming") return null;
                             const isCollapsed = collapsedReasoning[part.id] ?? true;
@@ -325,16 +327,14 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => toggleReasoning(part.id)}
-                                  className={`w-full px-3 py-1.5 bg-[var(--bg-table-header)] flex items-center justify-between hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer select-none text-left font-mono ${
-                                    !isCollapsed ? "border-b border-[var(--border-default)]" : ""
-                                  }`}
+                                  className="w-full px-3 py-1.5 bg-[var(--bg-table-header)] flex items-center justify-between hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer select-none text-left font-mono"
                                 >
                                   <div className="flex items-center gap-1.5">
-                                    {isCollapsed ? (
-                                      <ChevronRight className="w-3 h-3 text-[var(--text-muted)] shrink-0" />
-                                    ) : (
-                                      <ChevronDown className="w-3 h-3 text-[var(--text-muted)] shrink-0" />
-                                    )}
+                                    <ChevronRight
+                                      className={`w-3 h-3 text-[var(--text-muted)] shrink-0 transition-transform duration-150 ${
+                                        !isCollapsed ? "rotate-90" : ""
+                                      }`}
+                                    />
                                     <span className="font-semibold text-xs text-[var(--text-primary)]">Thinking Process</span>
                                     {isStreaming && (
                                       <span className="text-[10px] text-amber-500 font-mono animate-pulse">
@@ -346,11 +346,13 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                     {isCollapsed ? "Click to expand" : "Fold"}
                                   </span>
                                 </button>
-                                {!isCollapsed && (
-                                  <div className="p-3 font-mono text-[11.5px] text-[var(--text-secondary)] whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto bg-[var(--bg-code)] select-text">
-                                    {part.content || (isStreaming ? "Thinking..." : "")}
+                                <div className="collapsible-grid" data-open={!isCollapsed}>
+                                  <div className="collapsible-inner">
+                                    <div className="p-3 border-t border-[var(--border-default)] font-mono text-[11.5px] text-[var(--text-secondary)] whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto bg-[var(--bg-code)] select-text">
+                                      {part.content || (isStreaming ? "Thinking..." : "")}
+                                    </div>
                                   </div>
-                                )}
+                                </div>
                               </div>
                             );
                           }
@@ -367,16 +369,14 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => toggleCommand(cmdId)}
-                                  className={`w-full px-3 py-1.5 bg-[var(--bg-table-header)] flex items-center justify-between hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer select-none text-left ${
-                                    !isCollapsed && part.output ? "border-b border-[var(--border-default)]" : ""
-                                  }`}
+                                  className="w-full px-3 py-1.5 bg-[var(--bg-table-header)] flex items-center justify-between hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer select-none text-left"
                                 >
                                   <div className="flex items-center gap-2 min-w-0 pr-2">
-                                    {isCollapsed ? (
-                                      <ChevronRight className="w-3 h-3 text-[var(--text-muted)] shrink-0" />
-                                    ) : (
-                                      <ChevronDown className="w-3 h-3 text-[var(--text-muted)] shrink-0" />
-                                    )}
+                                    <ChevronRight
+                                      className={`w-3 h-3 text-[var(--text-muted)] shrink-0 transition-transform duration-150 ${
+                                        !isCollapsed ? "rotate-90" : ""
+                                      }`}
+                                    />
                                     <Terminal className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
                                     <span className="font-semibold text-[var(--text-primary)] truncate font-mono text-xs" title={part.command}>
                                       {part.command}
@@ -399,11 +399,13 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                     </span>
                                   </div>
                                 </button>
-                                {!isCollapsed && (
-                                  <div className="p-3 text-[11.5px] text-[var(--text-code)] bg-[var(--bg-code)] whitespace-pre-wrap max-h-60 overflow-y-auto leading-relaxed font-mono select-text">
-                                    {part.output || (part.status === "running" ? "Executing..." : "(No output)")}
+                                <div className="collapsible-grid" data-open={!isCollapsed}>
+                                  <div className="collapsible-inner">
+                                    <div className="p-3 border-t border-[var(--border-default)] text-[11.5px] text-[var(--text-code)] bg-[var(--bg-code)] whitespace-pre-wrap max-h-60 overflow-y-auto leading-relaxed font-mono select-text">
+                                      {part.output || (part.status === "running" ? "Executing..." : "(No output)")}
+                                    </div>
                                   </div>
-                                )}
+                                </div>
                               </div>
                             );
                           }
@@ -411,14 +413,16 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                           if (part.type === "tool") {
                             const toolId = part.id || `tool_${pIdx}`;
                             const isCollapsed = collapsedTools[toolId] ?? true;
+                            const hasOpened = toolId in collapsedTools;
                             const toolTitle = part.serverName
                               ? `${part.serverName}/${part.toolName}`
                               : part.toolName;
-                            const formattedArgs = part.args
-                              ? JSON.stringify(part.args, null, 2)
-                              : "";
+                            const formattedArgs =
+                              hasOpened && part.args
+                                ? JSON.stringify(part.args, null, 2)
+                                : "";
                             const formattedResult =
-                              part.result !== undefined
+                              hasOpened && part.result !== undefined
                                 ? typeof part.result === "string"
                                   ? part.result
                                   : JSON.stringify(part.result, null, 2)
@@ -432,16 +436,14 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => toggleTool(toolId)}
-                                  className={`w-full px-3 py-1.5 bg-[var(--bg-table-header)] flex items-center justify-between hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer select-none text-left ${
-                                    !isCollapsed ? "border-b border-[var(--border-default)]" : ""
-                                  }`}
+                                  className="w-full px-3 py-1.5 bg-[var(--bg-table-header)] flex items-center justify-between hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer select-none text-left"
                                 >
                                   <div className="flex items-center gap-2 min-w-0 pr-2">
-                                    {isCollapsed ? (
-                                      <ChevronRight className="w-3 h-3 text-[var(--text-muted)] shrink-0" />
-                                    ) : (
-                                      <ChevronDown className="w-3 h-3 text-[var(--text-muted)] shrink-0" />
-                                    )}
+                                    <ChevronRight
+                                      className={`w-3 h-3 text-[var(--text-muted)] shrink-0 transition-transform duration-150 ${
+                                        !isCollapsed ? "rotate-90" : ""
+                                      }`}
+                                    />
                                     <Wrench className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
                                     <span
                                       className="font-semibold text-[var(--text-primary)] truncate font-mono text-xs"
@@ -467,35 +469,39 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                     </span>
                                   </div>
                                 </button>
-                                {!isCollapsed && (
-                                  <div className="p-3 text-[11.5px] text-[var(--text-code)] bg-[var(--bg-code)] max-h-72 overflow-y-auto leading-relaxed font-mono space-y-3">
-                                    {formattedArgs && (
-                                      <div>
-                                        <div className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1 select-none">
-                                          Parameters
-                                        </div>
-                                        <pre className="p-2.5 rounded-[var(--radius-xs)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[11.5px] text-[var(--text-code)] font-mono overflow-x-auto whitespace-pre leading-relaxed select-text">
-                                          {formattedArgs}
-                                        </pre>
-                                      </div>
-                                    )}
-                                    {formattedResult && (
-                                      <div>
-                                        <div className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1 select-none">
-                                          Result
-                                        </div>
-                                        <pre className="p-2.5 rounded-[var(--radius-xs)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[11.5px] text-[var(--text-code)] font-mono overflow-x-auto whitespace-pre leading-relaxed select-text">
-                                          {formattedResult}
-                                        </pre>
-                                      </div>
-                                    )}
-                                    {!formattedArgs && !formattedResult && (
-                                      <div className="text-xs text-[var(--text-muted)] italic select-none">
-                                        {part.status === "running" ? "Invoking tool..." : "(No output)"}
+                                <div className="collapsible-grid" data-open={!isCollapsed}>
+                                  <div className="collapsible-inner">
+                                    {hasOpened && (
+                                      <div className="p-3 border-t border-[var(--border-default)] text-[11.5px] text-[var(--text-code)] bg-[var(--bg-code)] max-h-72 overflow-y-auto leading-relaxed font-mono space-y-3">
+                                        {formattedArgs && (
+                                          <div>
+                                            <div className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1 select-none">
+                                              Parameters
+                                            </div>
+                                            <pre className="p-2.5 rounded-[var(--radius-xs)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[11.5px] text-[var(--text-code)] font-mono overflow-x-auto whitespace-pre leading-relaxed select-text">
+                                              {formattedArgs}
+                                            </pre>
+                                          </div>
+                                        )}
+                                        {formattedResult && (
+                                          <div>
+                                            <div className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1 select-none">
+                                              Result
+                                            </div>
+                                            <pre className="p-2.5 rounded-[var(--radius-xs)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[11.5px] text-[var(--text-code)] font-mono overflow-x-auto whitespace-pre leading-relaxed select-text">
+                                              {formattedResult}
+                                            </pre>
+                                          </div>
+                                        )}
+                                        {!formattedArgs && !formattedResult && (
+                                          <div className="text-xs text-[var(--text-muted)] italic select-none">
+                                            {part.status === "running" ? "Invoking tool..." : "(No output)"}
+                                          </div>
+                                        )}
                                       </div>
                                     )}
                                   </div>
-                                )}
+                                </div>
                               </div>
                             );
                           }
@@ -511,39 +517,44 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
                           return null;
                         })}
-                        {!m.parts.some((p) => p.type === "text") && m.content && (
-                          <MarkdownRenderer content={m.content} />
+                        {!msg.parts.some((p) => p.type === "text") && msg.content && (
+                          <MarkdownRenderer content={msg.content} />
                         )}
                       </>
                     ) : (
                       /* Fallback legacy rendering */
                         <>
-                          {m.thinking && (
+                          {msg.thinking && (
                             <div className="border border-[var(--border-default)] rounded-[var(--radius-sm)] bg-[var(--bg-surface)] text-xs overflow-hidden">
                               <button
                                 type="button"
-                                onClick={() => toggleThinking(m.id)}
+                                onClick={() => toggleThinking(msg.id)}
                                 className="w-full px-3 py-1.5 flex items-center justify-between text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer font-mono"
                               >
                                 <div className="flex items-center gap-1.5">
-                                  {(collapsedThinking[m.id] ?? true) ? (
-                                    <ChevronRight className="w-3 h-3" />
-                                  ) : (
-                                    <ChevronDown className="w-3 h-3" />
-                                  )}
+                                  <ChevronRight
+                                    className={`w-3 h-3 transition-transform duration-150 ${
+                                      !(collapsedThinking[msg.id] ?? true) ? "rotate-90" : ""
+                                    }`}
+                                  />
                                   <span>Thinking Process</span>
                                 </div>
                               </button>
-                              {!(collapsedThinking[m.id] ?? true) && (
-                                <div className="p-3 border-t border-[var(--border-default)] font-mono text-[11px] text-[var(--text-secondary)] whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto bg-[var(--bg-code)]">
-                                  {m.thinking}
+                              <div
+                                className="collapsible-grid"
+                                data-open={!(collapsedThinking[msg.id] ?? true)}
+                              >
+                                <div className="collapsible-inner">
+                                  <div className="p-3 border-t border-[var(--border-default)] font-mono text-[11px] text-[var(--text-secondary)] whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto bg-[var(--bg-code)]">
+                                    {msg.thinking}
+                                  </div>
                                 </div>
-                              )}
+                              </div>
                             </div>
                           )}
 
-                          {m.commands && m.commands.length > 0 && m.commands.map((cmd, cIdx) => {
-                            const cmdId = cmd.id || `legacy_cmd_${m.id}_${cIdx}`;
+                          {msg.commands && msg.commands.length > 0 && msg.commands.map((cmd, cIdx) => {
+                            const cmdId = cmd.id || `legacy_cmd_${msg.id}_${cIdx}`;
                             const isCollapsed = collapsedCommands[cmdId] ?? true;
 
                             return (
@@ -554,16 +565,14 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => toggleCommand(cmdId)}
-                                  className={`w-full px-3 py-1.5 bg-[var(--bg-table-header)] flex items-center justify-between hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer select-none text-left ${
-                                    !isCollapsed && cmd.output ? "border-b border-[var(--border-default)]" : ""
-                                  }`}
+                                  className="w-full px-3 py-1.5 bg-[var(--bg-table-header)] flex items-center justify-between hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer select-none text-left"
                                 >
                                   <div className="flex items-center gap-2 min-w-0 pr-2">
-                                    {isCollapsed ? (
-                                      <ChevronRight className="w-3 h-3 text-[var(--text-muted)] shrink-0" />
-                                    ) : (
-                                      <ChevronDown className="w-3 h-3 text-[var(--text-muted)] shrink-0" />
-                                    )}
+                                    <ChevronRight
+                                      className={`w-3 h-3 text-[var(--text-muted)] shrink-0 transition-transform duration-150 ${
+                                        !isCollapsed ? "rotate-90" : ""
+                                      }`}
+                                    />
                                     <Terminal className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
                                     <span className="font-semibold text-[var(--text-primary)] truncate font-mono text-xs" title={cmd.command}>
                                       {cmd.command}
@@ -586,33 +595,35 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                     </span>
                                   </div>
                                 </button>
-                                {!isCollapsed && (
-                                  <div className="p-3 text-[11.5px] text-[var(--text-code)] bg-[var(--bg-code)] whitespace-pre-wrap max-h-60 overflow-y-auto leading-relaxed font-mono select-text">
-                                    {cmd.output || (cmd.status === "running" ? "Executing..." : "(No output)")}
+                                <div className="collapsible-grid" data-open={!isCollapsed}>
+                                  <div className="collapsible-inner">
+                                    <div className="p-3 border-t border-[var(--border-default)] text-[11.5px] text-[var(--text-code)] bg-[var(--bg-code)] whitespace-pre-wrap max-h-60 overflow-y-auto leading-relaxed font-mono select-text">
+                                      {cmd.output || (cmd.status === "running" ? "Executing..." : "(No output)")}
+                                    </div>
                                   </div>
-                                )}
+                                </div>
                               </div>
                             );
                           })}
 
-                          {m.content && <MarkdownRenderer content={m.content} />}
+                          {msg.content && <MarkdownRenderer content={msg.content} />}
                         </>
                       )}
 
                       {/* Streaming indicator */}
-                      {m.status === "streaming" && (
+                      {msg.status === "streaming" && (
                         <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] pt-2 select-none">
                           <div className="flex gap-1 items-center">
                             <span className="w-1.5 h-1.5 rounded-full bg-[var(--text-secondary)] animate-bounce [animation-delay:-0.3s]" />
                             <span className="w-1.5 h-1.5 rounded-full bg-[var(--text-secondary)] animate-bounce [animation-delay:-0.15s]" />
                             <span className="w-1.5 h-1.5 rounded-full bg-[var(--text-secondary)] animate-bounce" />
                           </div>
-                          <span className="text-[11px] font-mono">Agent is thinking...</span>
+                          <span className="text-[11px] font-mono thinking-shimmer">Agent is thinking...</span>
                         </div>
                       )}
 
                       {/* Interrupted indicator */}
-                      {m.status === "interrupted" && (
+                      {msg.status === "interrupted" && (
                         <div className="flex items-center gap-1.5 text-xs text-[var(--text-muted)] pt-2 select-none font-mono">
                           <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
                           <span className="text-[11px] text-[var(--text-muted)]">Generation interrupted</span>
@@ -620,20 +631,20 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                       )}
 
                       {/* Failed indicator */}
-                      {m.status === "failed" && (
+                      {msg.status === "failed" && (
                         <div className="flex items-start gap-2 px-3 py-2 rounded-[var(--radius-sm)] border border-red-500/30 bg-red-500/10 text-xs text-red-400 font-mono">
                           <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-red-500" />
                           <span className="break-words leading-relaxed">
-                            {m.error || "Turn failed"}
+                            {msg.error || "Turn failed"}
                           </span>
                         </div>
                       )}
 
                       {/* Per-turn normalized model usage metadata */}
-                      {m.usage && m.usage.totalTokens > 0 && (() => {
-                        const u = m.usage;
+                      {msg.usage && msg.usage.totalTokens > 0 && (() => {
+                        const u = msg.usage;
                         const hitRate = calculateCacheHitRate(u);
-                        const isUsageOpen = !!expandedUsage[m.id];
+                        const isUsageOpen = !!expandedUsage[msg.id];
                         const hasDetails =
                           u.cacheWriteTokens > 0 ||
                           u.reasoningTokens > 0 ||
@@ -659,7 +670,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                           <div className="pt-1 select-none">
                             <button
                               type="button"
-                              onClick={() => toggleUsage(m.id)}
+                              onClick={() => toggleUsage(msg.id)}
                               title={tooltip}
                               className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 px-2 py-0.5 rounded-[var(--radius-xs)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:border-[var(--border-default)] text-[10.5px] font-mono text-[var(--text-muted)] transition-colors cursor-pointer"
                             >
@@ -682,54 +693,57 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                               {u.reasoningTokens > 0 && (
                                 <span>Think {formatTokenCount(u.reasoningTokens)}</span>
                               )}
-                              {hasDetails &&
-                                (isUsageOpen ? (
-                                  <ChevronDown className="w-2.5 h-2.5 opacity-70" />
-                                ) : (
-                                  <ChevronRight className="w-2.5 h-2.5 opacity-70" />
-                                ))}
+                              {hasDetails && (
+                                <ChevronRight
+                                  className={`w-2.5 h-2.5 opacity-70 transition-transform duration-150 ${
+                                    isUsageOpen ? "rotate-90" : ""
+                                  }`}
+                                />
+                              )}
                             </button>
 
-                            {isUsageOpen && (
-                              <div className="mt-1.5 p-2.5 rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-surface)] text-[11px] font-mono text-[var(--text-secondary)] space-y-1.5 select-text">
-                                <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10.5px]">
-                                  <span>Total: <strong className="text-[var(--text-primary)]">{u.totalTokens.toLocaleString()}</strong></span>
-                                  <span>Uncached In: {u.inputTokens.toLocaleString()}</span>
-                                  <span>Cache Read: {u.cacheReadTokens.toLocaleString()}{hitRate !== null ? ` (${hitRate}%)` : ""}</span>
-                                  <span>Cache Write: {u.cacheWriteTokens.toLocaleString()}</span>
-                                  <span>Output: {u.outputTokens.toLocaleString()}</span>
-                                  {u.reasoningTokens > 0 && (
-                                    <span>Reasoning: {u.reasoningTokens.toLocaleString()}</span>
-                                  )}
-                                  {u.contextUsedTokens !== undefined && u.contextWindowTokens !== undefined && (
-                                    <span>
-                                      Context: {formatTokenCount(u.contextUsedTokens)} / {formatTokenCount(u.contextWindowTokens)} (
-                                      {Math.min(100, Math.round((u.contextUsedTokens / u.contextWindowTokens) * 100))}%)
-                                    </span>
+                            <div className="collapsible-grid" data-open={isUsageOpen}>
+                              <div className="collapsible-inner">
+                                <div className="mt-1.5 p-2.5 rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-surface)] text-[11px] font-mono text-[var(--text-secondary)] space-y-1.5 select-text">
+                                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10.5px]">
+                                    <span>Total: <strong className="text-[var(--text-primary)]">{u.totalTokens.toLocaleString()}</strong></span>
+                                    <span>Uncached In: {u.inputTokens.toLocaleString()}</span>
+                                    <span>Cache Read: {u.cacheReadTokens.toLocaleString()}{hitRate !== null ? ` (${hitRate}%)` : ""}</span>
+                                    <span>Cache Write: {u.cacheWriteTokens.toLocaleString()}</span>
+                                    <span>Output: {u.outputTokens.toLocaleString()}</span>
+                                    {u.reasoningTokens > 0 && (
+                                      <span>Reasoning: {u.reasoningTokens.toLocaleString()}</span>
+                                    )}
+                                    {u.contextUsedTokens !== undefined && u.contextWindowTokens !== undefined && (
+                                      <span>
+                                        Context: {formatTokenCount(u.contextUsedTokens)} / {formatTokenCount(u.contextWindowTokens)} (
+                                        {Math.min(100, Math.round((u.contextUsedTokens / u.contextWindowTokens) * 100))}%)
+                                      </span>
+                                    )}
+                                  </div>
+                                  {u.byModel && u.byModel.length > 1 && (
+                                    <div className="pt-1.5 border-t border-[var(--border-subtle)] space-y-1">
+                                      <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
+                                        By Model
+                                      </div>
+                                      {u.byModel.map((entry) => (
+                                        <div
+                                          key={`${entry.provider ?? ""}:${entry.model}`}
+                                          className="flex flex-wrap items-center justify-between gap-2 text-[10.5px]"
+                                        >
+                                          <span className="text-[var(--text-primary)]">
+                                            {entry.model}
+                                          </span>
+                                          <span className="text-[var(--text-muted)]">
+                                            In {formatTokenCount(entry.inputTokens)} · Cache {formatTokenCount(entry.cacheReadTokens)} · Out {formatTokenCount(entry.outputTokens)}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
                                   )}
                                 </div>
-                                {u.byModel && u.byModel.length > 1 && (
-                                  <div className="pt-1.5 border-t border-[var(--border-subtle)] space-y-1">
-                                    <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
-                                      By Model
-                                    </div>
-                                    {u.byModel.map((entry) => (
-                                      <div
-                                        key={`${entry.provider ?? ""}:${entry.model}`}
-                                        className="flex flex-wrap items-center justify-between gap-2 text-[10.5px]"
-                                      >
-                                        <span className="text-[var(--text-primary)]">
-                                          {entry.model}
-                                        </span>
-                                        <span className="text-[var(--text-muted)]">
-                                          In {formatTokenCount(entry.inputTokens)} · Cache {formatTokenCount(entry.cacheReadTokens)} · Out {formatTokenCount(entry.outputTokens)}
-                                        </span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
                               </div>
-                            )}
+                            </div>
                           </div>
                         );
                       })()}
@@ -744,20 +758,31 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       </div>
 
       {/* Floating Scroll-to-Bottom Pill Button (When user scrolled up during or after streaming) */}
-      {showScrollBottomBtn && (
-        <button
-          type="button"
-          onClick={scrollToBottom}
-          className={`absolute ${isClosed ? "bottom-20" : "bottom-44"} left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--bg-surface-elevated)] border border-[var(--border-strong)] shadow-lg hover:bg-[var(--bg-surface-hover)] text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-all cursor-pointer select-none`}
-          title="Scroll to bottom"
-        >
-          <ChevronDown className="w-3.5 h-3.5" />
-          <span className="font-mono text-[11px]">Scroll to bottom</span>
-          {isRunning && (
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse ml-0.5" />
+      <div
+        className={`absolute ${isClosed ? "bottom-20" : "bottom-44"} left-1/2 -translate-x-1/2 z-30 pointer-events-none`}
+      >
+        <AnimatePresence>
+          {showScrollBottomBtn && (
+            <m.button
+              key="scroll-to-bottom"
+              type="button"
+              onClick={scrollToBottom}
+              initial={{ opacity: 0, y: 10, scale: 0.94 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 8, scale: 0.94 }}
+              transition={SPRING_SNAPPY}
+              className="pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--bg-surface-elevated)] border border-[var(--border-strong)] shadow-lg hover:bg-[var(--bg-surface-hover)] active:scale-95 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer select-none"
+              title="Scroll to bottom"
+            >
+              <ChevronDown className="w-3.5 h-3.5" />
+              <span className="font-mono text-[11px]">Scroll to bottom</span>
+              {isRunning && (
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse ml-0.5" />
+              )}
+            </m.button>
           )}
-        </button>
-      )}
+        </AnimatePresence>
+      </div>
 
       {/* Floating Input Composer or Closed Session Banner */}
       <div className="absolute bottom-0 inset-x-0 z-20 pointer-events-none pb-4 pt-12 bg-gradient-to-t from-[var(--bg-canvas)] via-[var(--bg-canvas)]/90 via-50% to-transparent">

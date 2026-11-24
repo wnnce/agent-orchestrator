@@ -1,15 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { m } from "motion/react";
 import { toast } from "sonner";
 import {
   Activity,
   FileCode,
   Info,
-  ChevronDown,
   ChevronRight,
   Download,
   Search,
   Timer,
-  Ban,
   Clock,
 } from "lucide-react";
 import { cancelScheduledJob, fetchScheduledJobs } from "../api/client";
@@ -28,6 +27,7 @@ import {
   formatJobStatus,
   formatTokenCount,
 } from "../utils/formatters";
+import { EASE_OUT_EXPO } from "../utils/motion";
 import { Badge } from "./common/Badge";
 import { Button } from "./common/Button";
 
@@ -153,329 +153,343 @@ export const Inspector: React.FC<InspectorProps> = ({
         </button>
       </div>
 
-      {/* Tab: Events */}
-      {tab === "events" && (
-        <div className="flex-1 flex flex-col min-h-0">
-          <div className="p-2 border-b border-[var(--border-default)]">
-            <div className="relative flex items-center">
-              <Search className="w-3.5 h-3.5 absolute left-2.5 text-[var(--text-muted)]" />
-              <input
-                type="text"
-                placeholder="按类型过滤事件..."
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-                className="w-full bg-[var(--bg-input)] pl-8 pr-3 py-1.5 rounded-[var(--radius-sm)] border border-[var(--border-default)] text-xs text-[var(--text-primary)] outline-hidden focus:border-[var(--primary)]"
-              />
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-2 space-y-1.5 font-mono">
-            {filteredEvents.length === 0 ? (
-              <div className="text-center py-8 text-[var(--text-muted)]">
-                暂无匹配事件
+      {/* Active Tab Content with lightweight enter transition */}
+      <m.div
+        key={tab}
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.14, ease: EASE_OUT_EXPO }}
+        className="flex-1 flex flex-col min-h-0 overflow-hidden"
+      >
+        {/* Tab: Events */}
+        {tab === "events" && (
+          <div className="flex-1 flex flex-col min-h-0">
+            <div className="p-2 border-b border-[var(--border-default)]">
+              <div className="relative flex items-center">
+                <Search className="w-3.5 h-3.5 absolute left-2.5 text-[var(--text-muted)]" />
+                <input
+                  type="text"
+                  placeholder="按类型过滤事件..."
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  className="w-full bg-[var(--bg-input)] pl-8 pr-3 py-1.5 rounded-[var(--radius-sm)] border border-[var(--border-default)] text-xs text-[var(--text-primary)] outline-hidden focus:border-[var(--primary)]"
+                />
               </div>
-            ) : (
-              filteredEvents.map((evt, idx) => {
-                const isExpanded = !!expandedEvents[idx];
-                return (
-                  <div
-                    key={evt.id || idx}
-                    className="border border-[var(--border-subtle)] rounded-[var(--radius-sm)] bg-[var(--bg-surface)] p-2 text-[11px]"
-                  >
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-2 space-y-1.5 font-mono">
+              {filteredEvents.length === 0 ? (
+                <div className="text-center py-8 text-[var(--text-muted)]">
+                  暂无匹配事件
+                </div>
+              ) : (
+                filteredEvents.map((evt, idx) => {
+                  const isExpanded = !!expandedEvents[idx];
+                  const hasOpened = idx in expandedEvents;
+                  return (
                     <div
-                      className="flex items-center justify-between cursor-pointer select-none"
-                      onClick={() => toggleEvent(idx)}
+                      key={evt.id || idx}
+                      className="border border-[var(--border-subtle)] rounded-[var(--radius-sm)] bg-[var(--bg-surface)] p-2 text-[11px]"
                     >
-                      <div className="flex items-center gap-1.5 truncate">
-                        {isExpanded ? (
-                          <ChevronDown className="w-3 h-3 text-[var(--text-muted)] shrink-0" />
-                        ) : (
-                          <ChevronRight className="w-3 h-3 text-[var(--text-muted)] shrink-0" />
-                        )}
-                        <span className="font-semibold text-[var(--text-primary)] truncate">
-                          {evt.type}
+                      <div
+                        className="flex items-center justify-between cursor-pointer select-none"
+                        onClick={() => toggleEvent(idx)}
+                      >
+                        <div className="flex items-center gap-1.5 truncate">
+                          <ChevronRight
+                            className={`w-3 h-3 text-[var(--text-muted)] shrink-0 transition-transform duration-150 ${
+                              isExpanded ? "rotate-90" : ""
+                            }`}
+                          />
+                          <span className="font-semibold text-[var(--text-primary)] truncate">
+                            {evt.type}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-[var(--text-muted)]">
+                          #{evt.sequence ?? idx + 1}
                         </span>
                       </div>
-                      <span className="text-[10px] text-[var(--text-muted)]">
-                        #{evt.sequence ?? idx + 1}
-                      </span>
-                    </div>
 
-                    {isExpanded && (
-                      <div className="mt-2 pt-2 border-t border-[var(--border-subtle)]">
-                        <pre className="text-[10px] bg-[var(--bg-code)] p-1.5 rounded overflow-x-auto text-[var(--text-code)] max-h-48">
-                          {JSON.stringify(evt.payload || {}, null, 2)}
-                        </pre>
+                      <div className="collapsible-grid" data-open={isExpanded}>
+                        <div className="collapsible-inner">
+                          {hasOpened && (
+                            <div className="mt-2 pt-2 border-t border-[var(--border-subtle)]">
+                              <pre className="text-[10px] bg-[var(--bg-code)] p-1.5 rounded overflow-x-auto text-[var(--text-code)] max-h-48">
+                                {JSON.stringify(evt.payload || {}, null, 2)}
+                              </pre>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Tab: Artifacts */}
+        {tab === "artifacts" && (
+          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            {visibleArtifacts.length === 0 ? (
+              <div className="text-center py-8 text-[var(--text-muted)]">
+                当前会话暂无生成产物
+              </div>
+            ) : (
+              visibleArtifacts.map((art) => (
+                <div
+                  key={art.id}
+                  className="border border-[var(--border-default)] rounded-[var(--radius-md)] bg-[var(--bg-surface)] p-2.5 flex items-center justify-between gap-2"
+                >
+                  <div className="truncate">
+                    <div className="font-semibold text-xs text-[var(--text-primary)] truncate">
+                      {art.path.split("/").pop()}
+                    </div>
+                    <div className="text-[10px] text-[var(--text-muted)] font-mono">
+                      {(art.sizeBytes / 1024).toFixed(1)} KB | {art.contentType}
+                    </div>
+                  </div>
+                  <a
+                    href={`/sessions/${encodeURIComponent(art.sessionId)}/artifacts/${encodeURIComponent(art.id)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="p-1.5 rounded bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-default)] text-[var(--text-secondary)]"
+                    title="查看/下载产物"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                  </a>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {/* Tab: Jobs */}
+        {tab === "jobs" && (
+          <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
+            {jobs.length === 0 ? (
+              <div className="text-center py-8 text-[var(--text-muted)]">
+                此会话暂未调度延迟任务
+              </div>
+            ) : (
+              jobs.map((job) => {
+                const statusInfo = formatJobStatus(job.status);
+                const isPending = job.status === 1;
+                return (
+                  <div
+                    key={job.jobId}
+                    className="border border-[var(--border-default)] rounded-[var(--radius-md)] bg-[var(--bg-surface)] p-2.5 space-y-2 text-xs"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-[var(--text-primary)] truncate">
+                        {job.name}
+                      </span>
+                      <Badge variant={statusInfo.variant} size="xs" dot={isPending}>
+                        {statusInfo.label}
+                      </Badge>
+                    </div>
+                    <p className="text-[11px] font-mono text-[var(--text-secondary)] bg-[var(--bg-code)] p-1.5 rounded">
+                      "{job.prompt}"
+                    </p>
+                    <div className="flex items-center justify-between text-[10px] text-[var(--text-muted)] pt-1 border-t border-[var(--border-subtle)]">
+                      <div className="flex items-center gap-1">
+                        <Clock className="w-3 h-3 text-[var(--primary)]" />
+                        <span>{formatDateTime(job.triggerAt)}</span>
+                      </div>
+                      {isPending && (
+                        <Button
+                          variant="danger"
+                          size="xs"
+                          loading={cancellingJobId === job.jobId}
+                          onClick={() => handleCancelJob(job.jobId)}
+                        >
+                          取消
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 );
               })
             )}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Tab: Artifacts */}
-      {tab === "artifacts" && (
-        <div className="flex-1 overflow-y-auto p-3 space-y-2">
-          {visibleArtifacts.length === 0 ? (
-            <div className="text-center py-8 text-[var(--text-muted)]">
-              当前会话暂无生成产物
-            </div>
-          ) : (
-            visibleArtifacts.map((art) => (
-              <div
-                key={art.id}
-                className="border border-[var(--border-default)] rounded-[var(--radius-md)] bg-[var(--bg-surface)] p-2.5 flex items-center justify-between gap-2"
-              >
-                <div className="truncate">
-                  <div className="font-semibold text-xs text-[var(--text-primary)] truncate">
-                    {art.path.split("/").pop()}
-                  </div>
-                  <div className="text-[10px] text-[var(--text-muted)] font-mono">
-                    {(art.sizeBytes / 1024).toFixed(1)} KB | {art.contentType}
-                  </div>
-                </div>
-                <a
-                  href={`/sessions/${encodeURIComponent(art.sessionId)}/artifacts/${encodeURIComponent(art.id)}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="p-1.5 rounded bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-default)] text-[var(--text-secondary)]"
-                  title="查看/下载产物"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                </a>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      {/* Tab: Jobs */}
-      {tab === "jobs" && (
-        <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
-          {jobs.length === 0 ? (
-            <div className="text-center py-8 text-[var(--text-muted)]">
-              此会话暂未调度延迟任务
-            </div>
-          ) : (
-            jobs.map((job) => {
-              const statusInfo = formatJobStatus(job.status);
-              const isPending = job.status === 1;
-              return (
-                <div
-                  key={job.jobId}
-                  className="border border-[var(--border-default)] rounded-[var(--radius-md)] bg-[var(--bg-surface)] p-2.5 space-y-2 text-xs"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-[var(--text-primary)] truncate">
-                      {job.name}
-                    </span>
-                    <Badge variant={statusInfo.variant} size="xs" dot={isPending}>
-                      {statusInfo.label}
-                    </Badge>
-                  </div>
-                  <p className="text-[11px] font-mono text-[var(--text-secondary)] bg-[var(--bg-code)] p-1.5 rounded">
-                    "{job.prompt}"
-                  </p>
-                  <div className="flex items-center justify-between text-[10px] text-[var(--text-muted)] pt-1 border-t border-[var(--border-subtle)]">
-                    <div className="flex items-center gap-1">
-                      <Clock className="w-3 h-3 text-[var(--primary)]" />
-                      <span>{formatDateTime(job.triggerAt)}</span>
-                    </div>
-                    {isPending && (
-                      <Button
-                        variant="danger"
-                        size="xs"
-                        loading={cancellingJobId === job.jobId}
-                        onClick={() => handleCancelJob(job.jobId)}
-                      >
-                        取消
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-      )}
-
-      {/* Tab: Info */}
-      {tab === "info" && (
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
-          {/* Model Usage & Context Summary */}
-          <div>
-            <h4 className="font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
-              模型用量 (Usage)
-            </h4>
-            {usage ? (
-              (() => {
-                const hitRate = calculateCacheHitRate(usage);
-                const ctxRatio =
-                  usage.contextUsedTokens !== undefined &&
-                  usage.contextWindowTokens !== undefined &&
-                  usage.contextWindowTokens > 0
-                    ? Math.min(100, (usage.contextUsedTokens / usage.contextWindowTokens) * 100)
-                    : null;
-                return (
-                  <div className="space-y-2.5 font-mono text-[11px] bg-[var(--bg-surface)] p-2.5 rounded-[var(--radius-md)] border border-[var(--border-default)]">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[var(--text-muted)]">累计总计</span>
-                      <span className="text-[var(--text-primary)] font-semibold">
-                        {formatTokenCount(usage.totalTokens)} tokens ({usage.turnCount} 轮)
-                      </span>
-                    </div>
-                    {usage.lastModel && (
+        {/* Tab: Info */}
+        {tab === "info" && (
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
+            {/* Model Usage & Context Summary */}
+            <div>
+              <h4 className="font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
+                模型用量 (Usage)
+              </h4>
+              {usage ? (
+                (() => {
+                  const hitRate = calculateCacheHitRate(usage);
+                  const ctxRatio =
+                    usage.contextUsedTokens !== undefined &&
+                    usage.contextWindowTokens !== undefined &&
+                    usage.contextWindowTokens > 0
+                      ? Math.min(100, (usage.contextUsedTokens / usage.contextWindowTokens) * 100)
+                      : null;
+                  return (
+                    <div className="space-y-2.5 font-mono text-[11px] bg-[var(--bg-surface)] p-2.5 rounded-[var(--radius-md)] border border-[var(--border-default)]">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[var(--text-muted)]">最近模型</span>
-                        <span className="text-[var(--text-primary)] truncate" title={usage.lastModel}>
-                          {usage.lastModel}
+                        <span className="text-[var(--text-muted)]">累计总计</span>
+                        <span className="text-[var(--text-primary)] font-semibold">
+                          {formatTokenCount(usage.totalTokens)} tokens ({usage.turnCount} 轮)
                         </span>
                       </div>
-                    )}
-                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 pt-1.5 border-t border-[var(--border-subtle)] text-[10.5px]">
-                      <div className="flex justify-between">
-                        <span className="text-[var(--text-muted)]">新输入</span>
-                        <span className="text-[var(--text-primary)]">
-                          {formatTokenCount(usage.inputTokens)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-[var(--text-muted)]">缓存读</span>
-                        <span className="text-emerald-500">
-                          {formatTokenCount(usage.cacheReadTokens)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-[var(--text-muted)]">缓存写</span>
-                        <span className="text-[var(--text-primary)]">
-                          {formatTokenCount(usage.cacheWriteTokens)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-[var(--text-muted)]">输出</span>
-                        <span className="text-[var(--text-primary)]">
-                          {formatTokenCount(usage.outputTokens)}
-                        </span>
-                      </div>
-                      {usage.reasoningTokens > 0 && (
-                        <div className="flex justify-between">
-                          <span className="text-[var(--text-muted)]">思考</span>
-                          <span className="text-[var(--text-primary)]">
-                            {formatTokenCount(usage.reasoningTokens)}
+                      {usage.lastModel && (
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[var(--text-muted)]">最近模型</span>
+                          <span className="text-[var(--text-primary)] truncate" title={usage.lastModel}>
+                            {usage.lastModel}
                           </span>
                         </div>
                       )}
-                      {hitRate !== null && (
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-1 pt-1.5 border-t border-[var(--border-subtle)] text-[10.5px]">
                         <div className="flex justify-between">
-                          <span className="text-[var(--text-muted)]">命中率</span>
-                          <span className="text-emerald-500 font-semibold">{hitRate}%</span>
+                          <span className="text-[var(--text-muted)]">新输入</span>
+                          <span className="text-[var(--text-primary)]">
+                            {formatTokenCount(usage.inputTokens)}
+                          </span>
                         </div>
-                      )}
-                    </div>
-                    {ctxRatio !== null &&
-                      usage.contextUsedTokens !== undefined &&
-                      usage.contextWindowTokens !== undefined && (
-                        <div className="pt-1.5 border-t border-[var(--border-subtle)] space-y-1">
-                          <div className="flex items-center justify-between text-[10.5px]">
-                            <span className="text-[var(--text-muted)]">上下文水位</span>
+                        <div className="flex justify-between">
+                          <span className="text-[var(--text-muted)]">缓存读</span>
+                          <span className="text-emerald-500">
+                            {formatTokenCount(usage.cacheReadTokens)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-[var(--text-muted)]">缓存写</span>
+                          <span className="text-[var(--text-primary)]">
+                            {formatTokenCount(usage.cacheWriteTokens)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-[var(--text-muted)]">输出</span>
+                          <span className="text-[var(--text-primary)]">
+                            {formatTokenCount(usage.outputTokens)}
+                          </span>
+                        </div>
+                        {usage.reasoningTokens > 0 && (
+                          <div className="flex justify-between">
+                            <span className="text-[var(--text-muted)]">思考</span>
                             <span className="text-[var(--text-primary)]">
-                              {formatTokenCount(usage.contextUsedTokens)} /{" "}
-                              {formatTokenCount(usage.contextWindowTokens)} ({ctxRatio.toFixed(1)}%)
+                              {formatTokenCount(usage.reasoningTokens)}
                             </span>
                           </div>
-                          <div className="w-full h-1.5 rounded-full bg-[var(--bg-code)] overflow-hidden">
-                            <div
-                              className={`h-full rounded-full transition-all ${
-                                ctxRatio >= 85
-                                  ? "bg-red-500"
-                                  : ctxRatio >= 65
-                                    ? "bg-amber-500"
-                                    : "bg-emerald-500"
-                              }`}
-                              style={{ width: `${Math.max(2, ctxRatio)}%` }}
-                            />
+                        )}
+                        {hitRate !== null && (
+                          <div className="flex justify-between">
+                            <span className="text-[var(--text-muted)]">命中率</span>
+                            <span className="text-emerald-500 font-semibold">{hitRate}%</span>
                           </div>
-                        </div>
-                      )}
+                        )}
+                      </div>
+                      {ctxRatio !== null &&
+                        usage.contextUsedTokens !== undefined &&
+                        usage.contextWindowTokens !== undefined && (
+                          <div className="pt-1.5 border-t border-[var(--border-subtle)] space-y-1">
+                            <div className="flex items-center justify-between text-[10.5px]">
+                              <span className="text-[var(--text-muted)]">上下文水位</span>
+                              <span className="text-[var(--text-primary)]">
+                                {formatTokenCount(usage.contextUsedTokens)} /{" "}
+                                {formatTokenCount(usage.contextWindowTokens)} ({ctxRatio.toFixed(1)}%)
+                              </span>
+                            </div>
+                            <div className="w-full h-1.5 rounded-full bg-[var(--bg-code)] overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-[width] duration-300 ease-out ${
+                                  ctxRatio >= 85
+                                    ? "bg-red-500"
+                                    : ctxRatio >= 65
+                                      ? "bg-amber-500"
+                                      : "bg-emerald-500"
+                                }`}
+                                style={{ width: `${Math.max(2, ctxRatio)}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                    </div>
+                  );
+                })()
+              ) : (
+                <div className="font-mono text-[11px] text-[var(--text-muted)] bg-[var(--bg-surface)] p-2.5 rounded-[var(--radius-md)] border border-[var(--border-default)]">
+                  暂无用量记录
+                </div>
+              )}
+            </div>
+
+            <div>
+              <h4 className="font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
+                当前会话 (Session)
+              </h4>
+              <div className="space-y-1.5 font-mono text-[11px] bg-[var(--bg-surface)] p-2.5 rounded-[var(--radius-md)] border border-[var(--border-default)]">
+                <div>
+                  <span className="text-[var(--text-muted)]">ID: </span>
+                  <span className="text-[var(--text-primary)] break-all">
+                    {session?.sessionId || "-"}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[var(--text-muted)]">状态: </span>
+                  <span className="text-[var(--text-primary)]">{session?.status || "-"}</span>
+                </div>
+                {session?.runtime && session.runtime !== "unknown" && (
+                  <div>
+                    <span className="text-[var(--text-muted)]">Runtime: </span>
+                    <span className="text-[var(--text-primary)]">{session.runtime}</span>
                   </div>
-                );
-              })()
-            ) : (
-              <div className="font-mono text-[11px] text-[var(--text-muted)] bg-[var(--bg-surface)] p-2.5 rounded-[var(--radius-md)] border border-[var(--border-default)]">
-                暂无用量记录
+                )}
+                {session?.model && (
+                  <div>
+                    <span className="text-[var(--text-muted)]">模型: </span>
+                    <span className="text-[var(--text-primary)] break-all">{session.model}</span>
+                  </div>
+                )}
+                {session?.reasoningEffort && (
+                  <div>
+                    <span className="text-[var(--text-muted)]">思考强度: </span>
+                    <span className="text-[var(--text-primary)]">{session.reasoningEffort}</span>
+                  </div>
+                )}
+                <div>
+                  <span className="text-[var(--text-muted)]">创建时间: </span>
+                  <span className="text-[var(--text-primary)]">
+                    {formatDateTime(session?.createdAt)}
+                  </span>
+                </div>
               </div>
-            )}
-          </div>
+            </div>
 
-          <div>
-            <h4 className="font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
-              当前会话 (Session)
-            </h4>
-            <div className="space-y-1.5 font-mono text-[11px] bg-[var(--bg-surface)] p-2.5 rounded-[var(--radius-md)] border border-[var(--border-default)]">
-              <div>
-                <span className="text-[var(--text-muted)]">ID: </span>
-                <span className="text-[var(--text-primary)] break-all">
-                  {session?.sessionId || "-"}
-                </span>
-              </div>
-              <div>
-                <span className="text-[var(--text-muted)]">状态: </span>
-                <span className="text-[var(--text-primary)]">{session?.status || "-"}</span>
-              </div>
-              {session?.runtime && session.runtime !== "unknown" && (
+            <div>
+              <h4 className="font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
+                所属项目 (Project)
+              </h4>
+              <div className="space-y-1.5 text-xs bg-[var(--bg-surface)] p-2.5 rounded-[var(--radius-md)] border border-[var(--border-default)]">
                 <div>
-                  <span className="text-[var(--text-muted)]">Runtime: </span>
-                  <span className="text-[var(--text-primary)]">{session.runtime}</span>
+                  <span className="text-[var(--text-muted)]">名称: </span>
+                  <span className="text-[var(--text-primary)] font-medium">
+                    {project?.displayName || project?.projectId || "-"}
+                  </span>
                 </div>
-              )}
-              {session?.model && (
                 <div>
-                  <span className="text-[var(--text-muted)]">模型: </span>
-                  <span className="text-[var(--text-primary)] break-all">{session.model}</span>
+                  <span className="text-[var(--text-muted)]">ID: </span>
+                  <code className="text-[var(--text-primary)] font-mono text-[11px]">
+                    {project?.projectId || "-"}
+                  </code>
                 </div>
-              )}
-              {session?.reasoningEffort && (
-                <div>
-                  <span className="text-[var(--text-muted)]">思考强度: </span>
-                  <span className="text-[var(--text-primary)]">{session.reasoningEffort}</span>
-                </div>
-              )}
-              <div>
-                <span className="text-[var(--text-muted)]">创建时间: </span>
-                <span className="text-[var(--text-primary)]">
-                  {formatDateTime(session?.createdAt)}
-                </span>
+                <p className="text-[11px] text-[var(--text-secondary)] mt-1">
+                  {project?.summary || ""}
+                </p>
               </div>
             </div>
           </div>
-
-          <div>
-            <h4 className="font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
-              所属项目 (Project)
-            </h4>
-            <div className="space-y-1.5 text-xs bg-[var(--bg-surface)] p-2.5 rounded-[var(--radius-md)] border border-[var(--border-default)]">
-              <div>
-                <span className="text-[var(--text-muted)]">名称: </span>
-                <span className="text-[var(--text-primary)] font-medium">
-                  {project?.displayName || project?.projectId || "-"}
-                </span>
-              </div>
-              <div>
-                <span className="text-[var(--text-muted)]">ID: </span>
-                <code className="text-[var(--text-primary)] font-mono text-[11px]">
-                  {project?.projectId || "-"}
-                </code>
-              </div>
-              <p className="text-[11px] text-[var(--text-secondary)] mt-1">
-                {project?.summary || ""}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
+        )}
+      </m.div>
       {/* Compact persistent usage footer strip */}
       {usage && tab !== "info" && (
         <button

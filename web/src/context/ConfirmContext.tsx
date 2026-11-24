@@ -63,8 +63,8 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
         }}
       >
         <AlertDialog.Portal>
-          <AlertDialog.Overlay className="fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px] transition-opacity" />
-          <AlertDialog.Content className="fixed left-1/2 top-1/2 z-50 grid w-full max-w-[420px] -translate-x-1/2 -translate-y-1/2 gap-4 border border-[var(--border-default)] bg-[var(--bg-card)] p-5 shadow-2xl rounded-[var(--radius-md)] select-none">
+          <AlertDialog.Overlay className="fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px] animate-dialog-overlay" />
+          <AlertDialog.Content className="fixed left-1/2 top-1/2 z-50 grid w-full max-w-[420px] -translate-x-1/2 -translate-y-1/2 gap-4 border border-[var(--border-default)] bg-[var(--bg-card)] p-5 shadow-2xl rounded-[var(--radius-md)] select-none animate-dialog-content">
             <div className="flex items-start gap-3">
               <div
                 className={`w-8 h-8 rounded-[var(--radius-sm)] flex items-center justify-center shrink-0 border ${

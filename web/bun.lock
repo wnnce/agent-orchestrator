@@ -9,6 +9,7 @@
         "@speed-highlight/core": "^2.1.0",
         "beautiful-mermaid": "^1.1.3",
         "lucide-react": "^1.16.0",
+        "motion": "^14.14.0",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
         "sonner": "^2.0.8",
@@ -339,6 +340,8 @@
 
     "fdir": ["fdir@6.5.0", "", { "peerDependencies": { "picomatch": "^3 || ^4" }, "optionalPeers": ["picomatch"] }, "sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg=="],
 
+    "framer-motion": ["framer-motion@14.14.0", "", { "dependencies": { "motion-dom": "14.14.0", "motion-utils": "14.7.0", "tslib": "^2.4.0" }, "peerDependencies": { "react": "^18.0.0 || ^19.0.0", "react-dom": "^18.0.0 || ^19.0.0", "remix": "^3.1.0" }, "optionalPeers": ["react", "react-dom", "remix"] }, "sha512-fidRX0VzkZdA9OovFiBSzJtt9/jLcJpna78Z+KCqQQZIWoIpN3tOhEXAhhAw/FObUUh+o3Y18yx1F4BP0mVJ8Q=="],
+
     "fsevents": ["fsevents@2.3.3", "", { "os": "darwin", "hasInstallScript": true }, "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw=="],
 
     "gensync": ["gensync@1.0.0-beta.2", "", {}, "sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg=="],
@@ -510,6 +513,12 @@
     "micromark-util-symbol": ["micromark-util-symbol@2.0.1", "", {}, "sha512-vs5t8Apaud9N28kgCrRUdEed4UJ+wWNvicHLPxCa9ENlYuAY31M0ETy5y1vA33YoNPDFTghEbnh6efaE8h4x0Q=="],
 
     "micromark-util-types": ["micromark-util-types@2.0.3", "", {}, "sha512-oxB2Ik03hI0gv+VNn9tnh1t1YEe9MDPptViAEgfdf3YQHsn0pzGTgCdlSCJXcwhqm8phaEuM7zeEu3QQzVBrPg=="],
+
+    "motion": ["motion@14.14.0", "", { "dependencies": { "framer-motion": "14.14.0", "tslib": "^2.4.0" }, "peerDependencies": { "react": "^18.0.0 || ^19.0.0", "react-dom": "^18.0.0 || ^19.0.0", "remix": "^3.1.0" }, "optionalPeers": ["react", "react-dom", "remix"] }, "sha512-a306U6sV5VKq1abtzKiinB+UQjiY88jrsvQzWORP3WPv/DFANyoYVlPbdnmJPMEbusyPXB4GyQJVANaq/pSIYQ=="],
+
+    "motion-dom": ["motion-dom@14.14.0", "", { "dependencies": { "motion-utils": "14.7.0" } }, "sha512-IAxcKhYkuQA2W0Tlx1AvVgImfqEoF3/t3IovbPQJlYkefmGsmrXjn967lMII5VmFmLpQEab4+ZkHo/ijJ4Esig=="],
+
+    "motion-utils": ["motion-utils@14.7.0", "", {}, "sha512-woO0/Nb7ys75f94fjvQi/6leiHGvZUYkeHUPEZ3vxsV+9OpEVhkxp01x8MlRwX0zt31EqgXsKDAoBoJLC148Tw=="],
 
     "ms": ["ms@2.1.3", "", {}, "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA=="],
 
