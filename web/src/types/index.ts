@@ -72,6 +72,12 @@ export interface SessionRoute {
   metadata?: Record<string, any>;
 }
 
+export interface TaskRuntimeConfig {
+  type?: string;
+  model?: string;
+  reasoningEffort?: string;
+}
+
 export interface TaskDefinition {
   taskKey: string;
   projectId: string;
@@ -84,6 +90,7 @@ export interface TaskDefinition {
   promptTemplate: string;
   filePath: string;
   type?: string;
+  runtime?: TaskRuntimeConfig;
   isScheduled?: boolean;
   nextRun?: string | null;
 }

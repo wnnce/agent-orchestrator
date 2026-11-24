@@ -122,6 +122,17 @@ export class ProjectRuntime {
     const taskRegistry = new TaskExecutorRegistry(logger);
     const agentRunner: AgentSessionRunner = {
       createSession: async (task) => {
+        const runtimeOverride: SessionRuntimeOverride | undefined =
+          task.runtime &&
+          (task.runtime.type || task.runtime.model || task.runtime.reasoningEffort)
+            ? {
+                ...(task.runtime.type ? { runtime: task.runtime.type } : {}),
+                ...(task.runtime.model ? { model: task.runtime.model } : {}),
+                ...(task.runtime.reasoningEffort
+                  ? { reasoningEffort: task.runtime.reasoningEffort }
+                  : {}),
+              }
+            : undefined;
         const sessionRoute = await this.createSession(
           {
             title: `Task: ${task.name}`,
@@ -129,6 +140,7 @@ export class ProjectRuntime {
             taskId: task.taskId,
           },
           "task",
+          runtimeOverride,
         );
         return { sessionId: sessionRoute.sessionId };
       },
@@ -220,6 +232,8 @@ export class ProjectRuntime {
         );
       },
       onDispatchTask: async (dispatchParams) => {
+        // Sessions dispatched via actions intentionally follow the project's default
+        // runtime, model, and reasoningEffort instead of inheriting a task's override.
         const sessionRoute = await this.createSession(
           {
             title: dispatchParams.title,

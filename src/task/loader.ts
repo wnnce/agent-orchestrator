@@ -44,6 +44,15 @@ export function parseTaskMarkdown(
   const taskId = result.data.id || baseName;
   const taskKey = `${projectId}:${taskId}`;
   const executorType = result.data.executor ?? result.data.type ?? "agent";
+  const rawRuntime = result.data.runtime;
+  const taskRuntime =
+    rawRuntime && (rawRuntime.type || rawRuntime.model || rawRuntime.reasoningEffort)
+      ? {
+          ...(rawRuntime.type ? { type: rawRuntime.type } : {}),
+          ...(rawRuntime.model ? { model: rawRuntime.model } : {}),
+          ...(rawRuntime.reasoningEffort ? { reasoningEffort: rawRuntime.reasoningEffort } : {}),
+        }
+      : undefined;
 
   return {
     taskKey,
@@ -62,6 +71,7 @@ export function parseTaskMarkdown(
     ...(result.data.action !== undefined ? { action: result.data.action } : {}),
     ...(result.data.actionParams !== undefined ? { actionParams: result.data.actionParams } : {}),
     ...(result.data.timeoutMs !== undefined ? { timeoutMs: result.data.timeoutMs } : {}),
+    ...(taskRuntime ? { runtime: taskRuntime } : {}),
   };
 }
 

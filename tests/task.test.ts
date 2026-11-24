@@ -148,6 +148,69 @@ Task two prompt
     const tasks = await loader.loadProjectTasks("/non/existent/dir", "test-proj");
     expect(tasks).toEqual([]);
   });
+
+  it("parses nested runtime, model, and reasoningEffort override from frontmatter", () => {
+    const markdown = `---
+id: triage-issues
+name: Triage Issues
+cron: "*/30 * * * *"
+runtime:
+  type: claude
+  model: claude-haiku-5-5
+  reasoningEffort: low
+---
+Inspect open issues.
+`;
+
+    const task = parseTaskMarkdown(
+      markdown,
+      "/projects/my-project/tasks/triage-issues.md",
+      "my-project",
+    );
+
+    expect(task.runtime).toEqual({
+      type: "claude",
+      model: "claude-haiku-5-5",
+      reasoningEffort: "low",
+    });
+  });
+
+  it("omits runtime when frontmatter runtime object is empty and rejects invalid keys or effort", () => {
+    const emptyRuntime = `---
+name: Empty Runtime
+cron: "0 * * * *"
+runtime: {}
+---
+Prompt body
+`;
+    expect(parseTaskMarkdown(emptyRuntime, "/dummy/empty.md", "proj").runtime).toBeUndefined();
+
+    const invalidEffort = `---
+name: Bad Effort
+cron: "0 * * * *"
+runtime:
+  type: claude
+  reasoningEffort: turbo
+---
+Prompt body
+`;
+    expect(() => parseTaskMarkdown(invalidEffort, "/dummy/bad-effort.md", "proj")).toThrow(
+      /Frontmatter validation failed/,
+    );
+
+    const unknownKey = `---
+name: Unknown Runtime Key
+cron: "0 * * * *"
+runtime:
+  type: claude
+  mode: claude-haiku-5-5
+---
+Prompt body
+`;
+    expect(() => parseTaskMarkdown(unknownKey, "/dummy/bad-key.md", "proj")).toThrow(
+      /Frontmatter validation failed/,
+    );
+  });
 });
 
 describe("TaskEngine", () => {

@@ -1,5 +1,31 @@
 import { z } from "zod";
 import type { ActionContext } from "../actions/types.ts";
+import { REASONING_EFFORTS, type ReasoningEffort } from "../domain/types.ts";
+
+/**
+ * Optional per-task runtime override schema (mirrors project.yaml `runtime:` shape).
+ */
+export const taskRuntimeSchema = z
+  .object({
+    type: z
+      .string()
+      .trim()
+      .min(1)
+      .optional()
+      .describe("Runtime adapter override (e.g. codex, claude, pi, acp)"),
+    model: z.string().trim().min(1).optional().describe("Model identifier override for this task"),
+    reasoningEffort: z
+      .enum(REASONING_EFFORTS)
+      .optional()
+      .describe("Reasoning effort override for this task"),
+  })
+  .strict();
+
+export interface TaskRuntimeConfig {
+  readonly type?: string | undefined;
+  readonly model?: string | undefined;
+  readonly reasoningEffort?: ReasoningEffort | undefined;
+}
 
 /**
  * Task markdown YAML frontmatter validation schema.
@@ -28,6 +54,9 @@ export const taskFrontmatterSchema = z.object({
     .optional()
     .describe("Invocation parameters when type is action"),
   timeoutMs: z.number().positive().optional().describe("Task execution timeout in milliseconds"),
+  runtime: taskRuntimeSchema
+    .optional()
+    .describe("Optional runtime, model, and reasoningEffort override for agent tasks"),
 });
 
 export type TaskFrontmatter = z.infer<typeof taskFrontmatterSchema>;
@@ -52,6 +81,7 @@ export interface TaskDefinition {
   readonly action?: string | undefined;
   readonly actionParams?: Record<string, unknown> | undefined;
   readonly timeoutMs?: number | undefined;
+  readonly runtime?: TaskRuntimeConfig | undefined;
 }
 
 /**

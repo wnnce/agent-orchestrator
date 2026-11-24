@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
-  ListTodo,
   Play,
   RotateCw,
   Clock,
   Calendar,
   ChevronDown,
   ChevronUp,
+  Cpu,
 } from "lucide-react";
 import { fetchProjectTasks, fetchTaskExecutions, runProjectTask } from "../../api/client";
 import { useStudio } from "../../context/StudioContext";
@@ -15,7 +15,7 @@ import type { TaskDefinition, TaskExecutionRecord } from "../../types";
 import { formatDateTime, formatDuration, formatTimeAgo } from "../../utils/formatters";
 
 export function TasksView() {
-  const { activeProjectId } = useStudio();
+  const { activeProjectId, activeProject } = useStudio();
   const [tasks, setTasks] = useState<TaskDefinition[]>([]);
   const [executions, setExecutions] = useState<TaskExecutionRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -101,56 +101,98 @@ export function TasksView() {
             </div>
           ) : (
             <div className="divide-y divide-[var(--border-default)]">
-              {tasks.map((task) => (
-                <div
-                  key={task.taskKey}
-                  className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-[var(--bg-surface-hover)] transition-colors"
-                >
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-xs text-[var(--text-primary)] font-mono">
-                        {task.name}
-                      </span>
-                      <span
-                        className={`text-[10px] font-mono px-1.5 py-0.2 rounded-[var(--radius-xs)] border ${
-                          task.enabled
-                            ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
-                            : "text-[var(--text-muted)] bg-[var(--bg-surface-elevated)] border-[var(--border-default)]"
-                        }`}
-                      >
-                        {task.enabled ? "ENABLED" : "DISABLED"}
-                      </span>
-                    </div>
+              {tasks.map((task) => {
+                const isAgentTask = !task.type || task.type === "agent";
+                const override = task.runtime;
+                const hasOverride = Boolean(
+                  override && (override.type || override.model || override.reasoningEffort),
+                );
+                const projectRuntime = activeProject?.runtime;
+                const effectiveType = override?.type ?? projectRuntime?.type;
+                const sameAsDefaultRuntime =
+                  !override?.type ||
+                  !projectRuntime?.type ||
+                  override.type.toLowerCase() === projectRuntime.type.toLowerCase();
+                const effectiveModel =
+                  override?.model ?? (sameAsDefaultRuntime ? projectRuntime?.model : undefined);
+                const effectiveEffort =
+                  override?.reasoningEffort ??
+                  (sameAsDefaultRuntime ? projectRuntime?.reasoningEffort : undefined);
+                const runtimeParts = [effectiveType, effectiveModel, effectiveEffort].filter(
+                  Boolean,
+                );
 
-                    <p className="text-xs text-[var(--text-secondary)] line-clamp-1">
-                      {task.description || "No description provided."}
-                    </p>
-
-                    <div className="flex flex-wrap items-center gap-3 text-[11px] text-[var(--text-muted)] font-mono pt-0.5">
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-3 h-3" />
-                        <span>cron: {task.cron}</span>
-                      </span>
-                      {task.nextRun && (
-                        <span className="flex items-center gap-1 text-[var(--text-secondary)]">
-                          <Calendar className="w-3 h-3" />
-                          <span>next: {formatDateTime(task.nextRun)}</span>
-                        </span>
-                      )}
-                      <span>file: {task.filePath.split("/").pop()}</span>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => handleRunTask(task.taskId)}
-                    disabled={runningTaskId === task.taskId}
-                    className="px-3 py-1.5 rounded-[var(--radius-sm)] bg-[var(--primary)] text-[var(--text-inverted)] hover:opacity-90 disabled:opacity-40 text-xs font-mono font-medium transition-opacity cursor-pointer shrink-0 flex items-center gap-1.5"
+                return (
+                  <div
+                    key={task.taskKey}
+                    className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-[var(--bg-surface-hover)] transition-colors"
                   >
-                    <Play className="w-3 h-3 fill-current" />
-                    <span>{runningTaskId === task.taskId ? "Running..." : "Run Now"}</span>
-                  </button>
-                </div>
-              ))}
+                    <div className="space-y-1.5 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold text-xs text-[var(--text-primary)] font-mono">
+                          {task.name}
+                        </span>
+                        <span
+                          className={`text-[10px] font-mono px-1.5 py-0.2 rounded-[var(--radius-xs)] border ${
+                            task.enabled
+                              ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
+                              : "text-[var(--text-muted)] bg-[var(--bg-surface-elevated)] border-[var(--border-default)]"
+                          }`}
+                        >
+                          {task.enabled ? "ENABLED" : "DISABLED"}
+                        </span>
+                        {isAgentTask && runtimeParts.length > 0 && (
+                          <span
+                            title={
+                              hasOverride
+                                ? `Task 自定义运行配置: ${runtimeParts.join(" · ")}`
+                                : `跟随项目默认运行配置: ${runtimeParts.join(" · ")}`
+                            }
+                            className={`inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.2 rounded-[var(--radius-xs)] border max-w-full ${
+                              hasOverride
+                                ? "text-indigo-500 dark:text-indigo-400 bg-indigo-500/10 border-indigo-500/25"
+                                : "text-[var(--text-secondary)] bg-[var(--bg-surface-elevated)] border-[var(--border-default)]"
+                            }`}
+                          >
+                            <Cpu className="w-2.5 h-2.5 shrink-0" />
+                            <span className="truncate">{runtimeParts.join(" · ")}</span>
+                            {!hasOverride && (
+                              <span className="text-[var(--text-muted)] shrink-0">(default)</span>
+                            )}
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="text-xs text-[var(--text-secondary)] line-clamp-1">
+                        {task.description || "No description provided."}
+                      </p>
+
+                      <div className="flex flex-wrap items-center gap-3 text-[11px] text-[var(--text-muted)] font-mono pt-0.5">
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          <span>cron: {task.cron}</span>
+                        </span>
+                        {task.nextRun && (
+                          <span className="flex items-center gap-1 text-[var(--text-secondary)]">
+                            <Calendar className="w-3 h-3" />
+                            <span>next: {formatDateTime(task.nextRun)}</span>
+                          </span>
+                        )}
+                        <span>file: {task.filePath.split("/").pop()}</span>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => handleRunTask(task.taskId)}
+                      disabled={runningTaskId === task.taskId}
+                      className="px-3 py-1.5 rounded-[var(--radius-sm)] bg-[var(--primary)] text-[var(--text-inverted)] hover:opacity-90 active:scale-95 disabled:opacity-40 text-xs font-mono font-medium transition-all cursor-pointer shrink-0 flex items-center gap-1.5"
+                    >
+                      <Play className="w-3 h-3 fill-current" />
+                      <span>{runningTaskId === task.taskId ? "Running..." : "Run Now"}</span>
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
