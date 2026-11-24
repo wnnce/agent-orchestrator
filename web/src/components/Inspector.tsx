@@ -425,6 +425,24 @@ export const Inspector: React.FC<InspectorProps> = ({
                 <span className="text-[var(--text-muted)]">状态: </span>
                 <span className="text-[var(--text-primary)]">{session?.status || "-"}</span>
               </div>
+              {session?.runtime && session.runtime !== "unknown" && (
+                <div>
+                  <span className="text-[var(--text-muted)]">Runtime: </span>
+                  <span className="text-[var(--text-primary)]">{session.runtime}</span>
+                </div>
+              )}
+              {session?.model && (
+                <div>
+                  <span className="text-[var(--text-muted)]">模型: </span>
+                  <span className="text-[var(--text-primary)] break-all">{session.model}</span>
+                </div>
+              )}
+              {session?.reasoningEffort && (
+                <div>
+                  <span className="text-[var(--text-muted)]">思考强度: </span>
+                  <span className="text-[var(--text-primary)]">{session.reasoningEffort}</span>
+                </div>
+              )}
               <div>
                 <span className="text-[var(--text-muted)]">创建时间: </span>
                 <span className="text-[var(--text-primary)]">

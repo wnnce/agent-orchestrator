@@ -3,6 +3,7 @@ import type {
   ProjectRouting,
   ProjectSkill,
   RuntimeEvent,
+  RuntimeInfo,
   ScheduledJobRecord,
   SessionRoute,
   SessionUsageSummary,
@@ -15,6 +16,13 @@ export async function fetchProjects(): Promise<ProjectRouting[]> {
   if (!res.ok) throw new Error(`Failed to fetch projects: ${res.statusText}`);
   const data = await res.json();
   return data.projects || [];
+}
+
+export async function fetchRuntimes(): Promise<RuntimeInfo[]> {
+  const res = await fetch("/runtimes?includeInternal=false");
+  if (!res.ok) throw new Error(`Failed to fetch runtimes: ${res.statusText}`);
+  const data = await res.json();
+  return data.runtimes || [];
 }
 
 export async function fetchProjectSkills(projectId: string): Promise<ProjectSkill[]> {
@@ -117,6 +125,9 @@ export async function createSession(params: {
   projectId?: string;
   title?: string;
   query?: string;
+  runtime?: string;
+  model?: string;
+  reasoningEffort?: string;
 }): Promise<{ session: SessionRoute; routedProject: string; turn?: any }> {
   const res = await fetch("/sessions", {
     method: "POST",

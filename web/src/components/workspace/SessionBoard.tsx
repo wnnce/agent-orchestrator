@@ -16,12 +16,14 @@ import {
   MessageSquare,
   Radio,
   Calendar,
+  Cpu,
+  Loader2,
 } from "lucide-react";
-import { createSession, deleteSession, renameSession } from "../../api/client";
+import { createSession, deleteSession, fetchRuntimes, renameSession } from "../../api/client";
 import { useStudio } from "../../context/StudioContext";
 import { useConfirm } from "../../context/ConfirmContext";
-import type { SessionRoute } from "../../types";
-import { formatTimeAgo, formatDateTime } from "../../utils/formatters";
+import type { RuntimeInfo, SessionRoute } from "../../types";
+import { formatTimeAgo, formatDateTime, formatTokenCount } from "../../utils/formatters";
 import { copyToClipboard } from "../../utils/clipboard";
 
 interface ColumnDef {
@@ -233,6 +235,19 @@ function SessionCard({
             <span>Web</span>
           </span>
         )}
+
+        {s.runtime && s.runtime !== "unknown" && (
+          <span
+            title={[s.runtime, s.model, s.reasoningEffort].filter(Boolean).join(" · ")}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[var(--radius-xs)] font-mono bg-[var(--bg-surface)] border border-[var(--border-default)] text-[var(--text-secondary)] max-w-[180px]"
+          >
+            <Cpu className="w-2.5 h-2.5 text-[var(--text-muted)] shrink-0" />
+            <span className="truncate">
+              {s.runtime}
+              {s.model ? ` · ${s.model}` : ""}
+            </span>
+          </span>
+        )}
       </div>
 
       {/* 4. Card Footer: Timestamps & Enter Affordance */}
@@ -270,6 +285,7 @@ function SessionCard({
 export function SessionBoard() {
   const {
     activeProjectId,
+    activeProject,
     sessions,
     setSessions,
     openSession,
@@ -279,6 +295,12 @@ export function SessionBoard() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreating, setIsCreating] = useState(false);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [runtimes, setRuntimes] = useState<RuntimeInfo[]>([]);
+  const [isLoadingRuntimes, setIsLoadingRuntimes] = useState(false);
+  const [selectedRuntime, setSelectedRuntime] = useState("");
+  const [selectedModel, setSelectedModel] = useState("");
+  const [selectedEffort, setSelectedEffort] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState<string>("");
@@ -330,19 +352,112 @@ export function SessionBoard() {
     );
   }, [sessions, searchQuery]);
 
-  const handleCreateSession = async () => {
-    if (isCreating) return;
+  const activeRuntimeInfo = useMemo(
+    () => runtimes.find((rt) => rt.type === selectedRuntime) ?? null,
+    [runtimes, selectedRuntime],
+  );
+  const activeModelInfo = useMemo(
+    () => activeRuntimeInfo?.models.find((m) => m.id === selectedModel) ?? null,
+    [activeRuntimeInfo, selectedModel],
+  );
+  const availableEfforts = useMemo(() => {
+    if (activeModelInfo) return activeModelInfo.reasoningEfforts;
+    return activeRuntimeInfo?.defaultReasoningEfforts ?? [];
+  }, [activeModelInfo, activeRuntimeInfo]);
+
+  const applyRuntimeSelection = (
+    runtimeType: string,
+    runtimeList: RuntimeInfo[],
+  ) => {
+    setSelectedRuntime(runtimeType);
+    const rtInfo = runtimeList.find((r) => r.type === runtimeType);
+    const projectDefault = activeProject?.runtime;
+    const isProjectDefaultRuntime = projectDefault?.type === runtimeType;
+
+    let nextModel = "";
+    if (
+      isProjectDefaultRuntime &&
+      projectDefault?.model &&
+      rtInfo?.models.some((m) => m.id === projectDefault.model)
+    ) {
+      nextModel = projectDefault.model;
+    } else if (rtInfo && rtInfo.models.length > 0) {
+      nextModel = rtInfo.models[0]!.id;
+    }
+    setSelectedModel(nextModel);
+
+    const modelObj = rtInfo?.models.find((m) => m.id === nextModel);
+    const efforts = modelObj ? modelObj.reasoningEfforts : (rtInfo?.defaultReasoningEfforts ?? []);
+    if (
+      isProjectDefaultRuntime &&
+      projectDefault?.reasoningEffort &&
+      efforts.includes(projectDefault.reasoningEffort)
+    ) {
+      setSelectedEffort(projectDefault.reasoningEffort);
+    } else if (
+      modelObj?.defaultReasoningEffort &&
+      efforts.includes(modelObj.defaultReasoningEffort)
+    ) {
+      setSelectedEffort(modelObj.defaultReasoningEffort);
+    } else {
+      setSelectedEffort("");
+    }
+  };
+
+  const handleOpenCreateModal = async () => {
+    setCreateModalOpen(true);
+    setIsLoadingRuntimes(true);
+    try {
+      const list = await fetchRuntimes();
+      setRuntimes(list);
+      const preferredRuntime =
+        activeProject?.runtime?.type && list.some((r) => r.type === activeProject.runtime?.type)
+          ? activeProject.runtime.type
+          : (list[0]?.type ?? "");
+      applyRuntimeSelection(preferredRuntime, list);
+    } catch (err: any) {
+      console.error("Failed to load runtimes:", err);
+      toast.error(`加载 Runtime 列表失败: ${err.message || String(err)}`);
+    } finally {
+      setIsLoadingRuntimes(false);
+    }
+  };
+
+  const handleModelChange = (modelId: string) => {
+    setSelectedModel(modelId);
+    const modelObj = activeRuntimeInfo?.models.find((m) => m.id === modelId);
+    const efforts = modelObj
+      ? modelObj.reasoningEfforts
+      : (activeRuntimeInfo?.defaultReasoningEfforts ?? []);
+    if (selectedEffort && efforts.includes(selectedEffort)) {
+      return;
+    }
+    if (modelObj?.defaultReasoningEffort && efforts.includes(modelObj.defaultReasoningEffort)) {
+      setSelectedEffort(modelObj.defaultReasoningEffort);
+    } else {
+      setSelectedEffort("");
+    }
+  };
+
+  const handleCreateSession = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (isCreating || isLoadingRuntimes) return;
     try {
       setIsCreating(true);
       const res = await createSession({
         projectId: activeProjectId || undefined,
+        ...(selectedRuntime ? { runtime: selectedRuntime } : {}),
+        ...(selectedModel ? { model: selectedModel } : {}),
+        ...(selectedEffort ? { reasoningEffort: selectedEffort } : {}),
       });
+      setCreateModalOpen(false);
       await refreshSessions();
       if (res?.session?.sessionId) {
         openSession(res.session.sessionId);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to create session:", err);
+      toast.error(`创建会话失败: ${err.message || String(err)}`);
     } finally {
       setIsCreating(false);
     }
@@ -432,11 +547,15 @@ export function SessionBoard() {
           </div>
 
           <button
-            onClick={handleCreateSession}
+            onClick={handleOpenCreateModal}
             disabled={isCreating}
-            className="px-3 py-1 rounded-[var(--radius-sm)] text-xs font-medium bg-[var(--primary)] text-[var(--text-inverted)] hover:opacity-90 transition-opacity cursor-pointer flex items-center gap-1.5 shrink-0"
+            className="px-3 py-1 rounded-[var(--radius-sm)] text-xs font-medium bg-[var(--primary)] text-[var(--text-inverted)] hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity cursor-pointer flex items-center gap-1.5 shrink-0"
           >
-            <Plus className="w-3.5 h-3.5" />
+            {isCreating ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Plus className="w-3.5 h-3.5" />
+            )}
             <span>{isCreating ? "Creating..." : "New Session"}</span>
           </button>
         </div>
@@ -503,6 +622,150 @@ export function SessionBoard() {
           })}
         </div>
       </div>
+
+      {/* Create Session Modal */}
+      {createModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-[1px] p-4"
+          onClick={() => {
+            if (!isCreating) setCreateModalOpen(false);
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-[var(--radius-md)] border border-[var(--border-strong)] bg-[var(--bg-card)] shadow-xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-3 border-b border-[var(--border-default)] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Cpu className="w-4 h-4 text-[var(--primary)]" />
+                <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+                  新建会话 (New Session)
+                </h3>
+              </div>
+              <button
+                type="button"
+                disabled={isCreating}
+                onClick={() => setCreateModalOpen(false)}
+                className="p-1 rounded-[var(--radius-xs)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                title="关闭"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateSession} className="p-4 space-y-4">
+              {isLoadingRuntimes ? (
+                <div className="py-8 flex items-center justify-center gap-2 text-xs text-[var(--text-muted)] font-mono">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>正在加载可用 Runtime 与模型列表...</span>
+                </div>
+              ) : (
+                <>
+                  {/* 1. Runtime selector */}
+                  <div className="space-y-1.5">
+                    <label className="block text-[11px] font-medium text-[var(--text-secondary)]">
+                      Runtime
+                    </label>
+                    <select
+                      value={selectedRuntime}
+                      disabled={isCreating || runtimes.length === 0}
+                      onChange={(e) => applyRuntimeSelection(e.target.value, runtimes)}
+                      className="w-full px-2.5 py-2 rounded-[var(--radius-sm)] text-xs font-mono bg-[var(--bg-input)] border border-[var(--border-default)] text-[var(--text-primary)] outline-hidden focus:border-[var(--primary)] disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {runtimes.map((rt) => (
+                        <option key={rt.type} value={rt.type}>
+                          {rt.name}
+                          {activeProject?.runtime?.type === rt.type ? " (项目默认)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                    {activeRuntimeInfo?.description && (
+                      <p className="text-[11px] text-[var(--text-muted)]">
+                        {activeRuntimeInfo.description}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* 2. Model candidate selector (candidates only, no custom input) */}
+                  <div className="space-y-1.5">
+                    <label className="block text-[11px] font-medium text-[var(--text-secondary)]">
+                      模型 (Model)
+                    </label>
+                    <select
+                      value={selectedModel}
+                      disabled={isCreating}
+                      onChange={(e) => handleModelChange(e.target.value)}
+                      className="w-full px-2.5 py-2 rounded-[var(--radius-sm)] text-xs font-mono bg-[var(--bg-input)] border border-[var(--border-default)] text-[var(--text-primary)] outline-hidden focus:border-[var(--primary)] disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      <option value="">
+                        {activeRuntimeInfo && activeRuntimeInfo.models.length === 0
+                          ? "使用 Runtime 默认模型（暂无候选模型）"
+                          : "使用 Runtime 默认模型"}
+                      </option>
+                      {(activeRuntimeInfo?.models ?? []).map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.displayName !== m.id ? `${m.displayName} (${m.id})` : m.id}
+                          {m.contextWindow ? ` · ${formatTokenCount(m.contextWindow)}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* 3. Reasoning Effort selector */}
+                  <div className="space-y-1.5">
+                    <label className="block text-[11px] font-medium text-[var(--text-secondary)]">
+                      思考强度 (Reasoning Effort)
+                    </label>
+                    <select
+                      value={selectedEffort}
+                      disabled={isCreating || availableEfforts.length === 0}
+                      onChange={(e) => setSelectedEffort(e.target.value)}
+                      className="w-full px-2.5 py-2 rounded-[var(--radius-sm)] text-xs font-mono bg-[var(--bg-input)] border border-[var(--border-default)] text-[var(--text-primary)] outline-hidden focus:border-[var(--primary)] disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {availableEfforts.length === 0 ? (
+                        <option value="">当前模型不支持思考强度</option>
+                      ) : (
+                        <>
+                          <option value="">
+                            默认
+                            {activeModelInfo?.defaultReasoningEffort
+                              ? ` (${activeModelInfo.defaultReasoningEffort})`
+                              : ""}
+                          </option>
+                          {availableEfforts.map((effort) => (
+                            <option key={effort} value={effort}>
+                              {effort}
+                            </option>
+                          ))}
+                        </>
+                      )}
+                    </select>
+                  </div>
+                </>
+              )}
+
+              <div className="pt-2 border-t border-[var(--border-subtle)] flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={isCreating}
+                  onClick={() => setCreateModalOpen(false)}
+                  className="px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  disabled={isCreating || isLoadingRuntimes || !selectedRuntime}
+                  className="px-3.5 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium bg-[var(--primary)] text-[var(--text-inverted)] hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed transition-opacity cursor-pointer inline-flex items-center gap-1.5"
+                >
+                  {isCreating && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>{isCreating ? "创建中..." : "创建会话"}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
