@@ -309,6 +309,13 @@ export interface ArtifactRecord extends BaseLogRecord<string> {
   createdAt: string;
 }
 
+export type TaskExecutionStatus = "success" | "failed" | "skipped_overlapping" | "timeout";
+
+export interface ListTaskExecutionsOptions {
+  readonly beforeId?: number | undefined;
+  readonly status?: TaskExecutionStatus | undefined;
+}
+
 export interface TaskExecutionRecord extends BaseLogRecord {
   readonly executionId: string;
   readonly taskKey: string;
@@ -317,7 +324,7 @@ export interface TaskExecutionRecord extends BaseLogRecord {
   readonly taskType: "project_task" | "scheduled_job";
   readonly sessionId?: string | undefined;
   readonly turnId?: string | undefined;
-  readonly status: "success" | "failed" | "skipped_overlapping" | "timeout";
+  readonly status: TaskExecutionStatus;
   readonly startedAt?: string | undefined;
   readonly finishedAt?: string | undefined;
   readonly durationMs?: number | undefined;

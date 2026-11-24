@@ -4,6 +4,7 @@ import {
   type ActionExecutionFilter,
   type ActionExecutionRecord,
   type ListTaskExecutionLogsFilter,
+  type ListTaskExecutionsOptions,
   type NotificationDelivery,
   type ScheduledJobRecord,
   type ScheduledJobStatusCode,
@@ -23,6 +24,7 @@ export class MemoryTaskAuditStore {
   readonly taskExecutionLogs = new Map<string, TaskExecutionLogRecord[]>();
   readonly scheduledJobs = new Map<string, ScheduledJobRecord>();
   readonly actionExecutions: ActionExecutionRecord[] = [];
+  private nextTaskExecutionId = 1;
 
   async recordNotificationDelivery(delivery: NotificationDelivery): Promise<void> {
     this.notifications.set(delivery.id, structuredClone(delivery));
@@ -43,7 +45,12 @@ export class MemoryTaskAuditStore {
   }
 
   async recordTaskExecution(execution: TaskExecutionRecord): Promise<void> {
-    this.taskExecutions.unshift(structuredClone(execution));
+    const cloned = structuredClone(execution);
+    const assignedId = typeof cloned.id === "number" ? cloned.id : this.nextTaskExecutionId++;
+    if (assignedId >= this.nextTaskExecutionId) {
+      this.nextTaskExecutionId = assignedId + 1;
+    }
+    this.taskExecutions.unshift({ ...cloned, id: assignedId });
   }
 
   async getLatestTaskExecutionState(taskKey: string): Promise<Record<string, unknown> | null> {
@@ -57,12 +64,21 @@ export class MemoryTaskAuditStore {
     taskKey?: string | undefined,
     limit = 20,
     projectId?: string | undefined,
+    options?: ListTaskExecutionsOptions | undefined,
   ): Promise<TaskExecutionRecord[]> {
     const result: TaskExecutionRecord[] = [];
-    const max = clampLimit(limit, 20, 200);
+    const max = clampLimit(limit, 20, 201);
+    const beforeId =
+      options?.beforeId !== undefined && Number.isFinite(options.beforeId) && options.beforeId > 0
+        ? Math.trunc(options.beforeId)
+        : undefined;
     for (const item of this.taskExecutions) {
       if (taskKey && item.taskKey !== taskKey) continue;
       if (projectId && item.projectId !== projectId) continue;
+      if (options?.status && item.status !== options.status) continue;
+      if (beforeId !== undefined && (typeof item.id !== "number" || item.id >= beforeId)) {
+        continue;
+      }
       result.push(structuredClone(item));
       if (result.length >= max) break;
     }

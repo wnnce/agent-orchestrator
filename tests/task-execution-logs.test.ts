@@ -331,4 +331,90 @@ export default function (api) {
       "warn:step 2 unstable",
     ]);
   });
+
+  test("paginates task executions with stable beforeId cursors and server-side status filtering", async () => {
+    for (let i = 1; i <= 7; i++) {
+      await store.recordTaskExecution({
+        executionId: `exec-page-${i}`,
+        taskKey: "demo:paged-task",
+        projectId: "demo",
+        taskId: "paged-task",
+        taskType: "project_task",
+        status: i % 2 === 0 ? "failed" : "success",
+        durationMs: i * 10,
+      });
+    }
+
+    type ExecPage = {
+      executions: Array<{ id: number; executionId: string; status: string }>;
+      hasMore: boolean;
+      nextBeforeId: number | null;
+    };
+
+    // Page 1 (latest 3: 7, 6, 5)
+    const p1Res = await gateway.app.request("/tasks/executions?taskKey=demo:paged-task&limit=3");
+    expect(p1Res.status).toBe(200);
+    const p1 = (await p1Res.json()) as ExecPage;
+    expect(p1.executions.map((e) => e.executionId)).toEqual([
+      "exec-page-7",
+      "exec-page-6",
+      "exec-page-5",
+    ]);
+    expect(p1.hasMore).toBe(true);
+    expect(p1.nextBeforeId).toBe(p1.executions[2]!.id);
+
+    // Insert a brand-new execution mid-pagination — cursor must stay stable (no duplicates/shifts)
+    await store.recordTaskExecution({
+      executionId: "exec-page-8",
+      taskKey: "demo:paged-task",
+      projectId: "demo",
+      taskId: "paged-task",
+      taskType: "project_task",
+      status: "success",
+      durationMs: 80,
+    });
+
+    // Page 2 (4, 3, 2)
+    const p2Res = await gateway.app.request(
+      `/tasks/executions?taskKey=demo:paged-task&limit=3&beforeId=${p1.nextBeforeId}`,
+    );
+    expect(p2Res.status).toBe(200);
+    const p2 = (await p2Res.json()) as ExecPage;
+    expect(p2.executions.map((e) => e.executionId)).toEqual([
+      "exec-page-4",
+      "exec-page-3",
+      "exec-page-2",
+    ]);
+    expect(p2.hasMore).toBe(true);
+    expect(p2.nextBeforeId).toBe(p2.executions[2]!.id);
+
+    // Page 3 (1) via cursor alias
+    const p3Res = await gateway.app.request(
+      `/tasks/executions?taskKey=demo:paged-task&limit=3&cursor=${p2.nextBeforeId}`,
+    );
+    expect(p3Res.status).toBe(200);
+    const p3 = (await p3Res.json()) as ExecPage;
+    expect(p3.executions.map((e) => e.executionId)).toEqual(["exec-page-1"]);
+    expect(p3.hasMore).toBe(false);
+    expect(p3.nextBeforeId).toBeNull();
+
+    // Server-side status filtering + cursor pagination on project route (failed runs: 6, 4, 2)
+    const f1Res = await gateway.app.request(
+      "/projects/demo/tasks/paged-task/executions?status=failed&limit=2",
+    );
+    expect(f1Res.status).toBe(200);
+    const f1 = (await f1Res.json()) as ExecPage;
+    expect(f1.executions.map((e) => e.executionId)).toEqual(["exec-page-6", "exec-page-4"]);
+    expect(f1.hasMore).toBe(true);
+    expect(f1.nextBeforeId).toBe(f1.executions[1]!.id);
+
+    const f2Res = await gateway.app.request(
+      `/projects/demo/tasks/paged-task/executions?status=failed&limit=2&beforeId=${f1.nextBeforeId}`,
+    );
+    expect(f2Res.status).toBe(200);
+    const f2 = (await f2Res.json()) as ExecPage;
+    expect(f2.executions.map((e) => e.executionId)).toEqual(["exec-page-2"]);
+    expect(f2.hasMore).toBe(false);
+    expect(f2.nextBeforeId).toBeNull();
+  });
 });

@@ -1,9 +1,28 @@
 import { Hono } from "hono";
-import type { TaskExecutionLogLevel } from "../../domain/types.ts";
+import type { TaskExecutionLogLevel, TaskExecutionStatus } from "../../domain/types.ts";
 import type { Store } from "../../persistence/store.ts";
 import type { ProjectManager } from "../../project/manager.ts";
 
 const VALID_LOG_LEVELS = new Set<TaskExecutionLogLevel>(["debug", "info", "warn", "error"]);
+const VALID_EXECUTION_STATUSES = new Set<TaskExecutionStatus>([
+  "success",
+  "failed",
+  "skipped_overlapping",
+  "timeout",
+]);
+
+function parsePositiveInt(raw: string | undefined): number | undefined {
+  if (raw === undefined || raw === "") return undefined;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : undefined;
+}
+
+function parseExecutionStatus(raw: string | undefined): TaskExecutionStatus | undefined {
+  if (!raw) return undefined;
+  return VALID_EXECUTION_STATUSES.has(raw as TaskExecutionStatus)
+    ? (raw as TaskExecutionStatus)
+    : undefined;
+}
 
 export interface TasksRouteDeps {
   projects: ProjectManager;
@@ -54,23 +73,40 @@ export function createTasksRouter(deps: TasksRouteDeps): Hono {
   router.get("/projects/:projectId/tasks/:taskId/executions", async (c) => {
     const projectId = c.req.param("projectId");
     const taskId = c.req.param("taskId");
-    const limit = Number(c.req.query("limit") ?? 20);
+    const rawLimit = parsePositiveInt(c.req.query("limit"));
+    const effectiveLimit = Math.max(1, Math.min(rawLimit ?? 20, 200));
+    const beforeId = parsePositiveInt(c.req.query("beforeId") ?? c.req.query("cursor"));
+    const status = parseExecutionStatus(c.req.query("status"));
     const taskKey = `${projectId}:${taskId}`;
-    const executions = await deps.store.listTaskExecutions(taskKey, limit);
-    return c.json({ taskKey, executions });
+    const rows = await deps.store.listTaskExecutions(taskKey, effectiveLimit + 1, undefined, {
+      beforeId,
+      status,
+    });
+    const hasMore = rows.length > effectiveLimit;
+    const executions = hasMore ? rows.slice(0, effectiveLimit) : rows;
+    const lastId = executions.length > 0 ? executions[executions.length - 1]?.id : undefined;
+    const nextBeforeId = hasMore && typeof lastId === "number" ? lastId : null;
+    return c.json({ taskKey, executions, hasMore, nextBeforeId });
   });
 
   router.get("/tasks/executions", async (c) => {
     const projectId = c.req.query("projectId");
     const taskKey = c.req.query("taskKey");
-    const limitStr = c.req.query("limit");
-    const limit = limitStr !== undefined ? Number(limitStr) : 50;
-    const executions = await deps.store.listTaskExecutions(
+    const rawLimit = parsePositiveInt(c.req.query("limit"));
+    const effectiveLimit = Math.max(1, Math.min(rawLimit ?? 50, 200));
+    const beforeId = parsePositiveInt(c.req.query("beforeId") ?? c.req.query("cursor"));
+    const status = parseExecutionStatus(c.req.query("status"));
+    const rows = await deps.store.listTaskExecutions(
       taskKey || undefined,
-      limit,
+      effectiveLimit + 1,
       projectId || undefined,
+      { beforeId, status },
     );
-    return c.json({ executions });
+    const hasMore = rows.length > effectiveLimit;
+    const executions = hasMore ? rows.slice(0, effectiveLimit) : rows;
+    const lastId = executions.length > 0 ? executions[executions.length - 1]?.id : undefined;
+    const nextBeforeId = hasMore && typeof lastId === "number" ? lastId : null;
+    return c.json({ executions, hasMore, nextBeforeId });
   });
 
   router.get("/tasks/executions/:executionId/logs", async (c) => {

@@ -6,6 +6,7 @@ import type {
   EventRecord,
   InboundMessageRecord,
   ListTaskExecutionLogsFilter,
+  ListTaskExecutionsOptions,
   NotificationDelivery,
   ScheduledJobRecord,
   ScheduledJobStatusCode,
@@ -78,6 +79,7 @@ export interface Store {
     taskKey?: string | undefined,
     limit?: number | undefined,
     projectId?: string | undefined,
+    options?: ListTaskExecutionsOptions | undefined,
   ): Promise<TaskExecutionRecord[]>;
   appendTaskExecutionLogs(logs: readonly TaskExecutionLogRecord[]): Promise<void>;
   listTaskExecutionLogs(

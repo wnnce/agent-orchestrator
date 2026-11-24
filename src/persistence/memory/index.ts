@@ -5,6 +5,7 @@ import type {
   EventRecord,
   InboundMessageRecord,
   ListTaskExecutionLogsFilter,
+  ListTaskExecutionsOptions,
   NotificationDelivery,
   ScheduledJobRecord,
   ScheduledJobStatusCode,
@@ -178,8 +179,9 @@ export class MemoryStore implements Store {
     taskKey?: string | undefined,
     limit?: number | undefined,
     projectId?: string | undefined,
+    options?: ListTaskExecutionsOptions | undefined,
   ): Promise<TaskExecutionRecord[]> {
-    return this.taskAuditStore.listTaskExecutions(taskKey, limit, projectId);
+    return this.taskAuditStore.listTaskExecutions(taskKey, limit, projectId, options);
   }
 
   appendTaskExecutionLogs(logs: readonly TaskExecutionLogRecord[]): Promise<void> {

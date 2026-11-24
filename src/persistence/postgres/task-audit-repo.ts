@@ -1,10 +1,11 @@
-import { and, asc, desc, eq, gt, isNotNull, lte, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNotNull, lt, lte, or } from "drizzle-orm";
 import {
   NOT_DELETED,
   ScheduledJobStatus,
   type ActionExecutionFilter,
   type ActionExecutionRecord,
   type ListTaskExecutionLogsFilter,
+  type ListTaskExecutionsOptions,
   type NotificationDelivery,
   type ScheduledJobRecord,
   type ScheduledJobStatusCode,
@@ -125,6 +126,7 @@ export class PostgresTaskAuditRepo {
     taskKey?: string | undefined,
     limit = 20,
     projectId?: string | undefined,
+    options?: ListTaskExecutionsOptions | undefined,
   ): Promise<TaskExecutionRecord[]> {
     const conditions = [];
     if (taskKey) {
@@ -133,13 +135,23 @@ export class PostgresTaskAuditRepo {
     if (projectId) {
       conditions.push(eq(taskExecutions.projectId, projectId));
     }
+    if (options?.status) {
+      conditions.push(eq(taskExecutions.status, options.status));
+    }
+    if (
+      options?.beforeId !== undefined &&
+      Number.isFinite(options.beforeId) &&
+      options.beforeId > 0
+    ) {
+      conditions.push(lt(taskExecutions.id, Math.trunc(options.beforeId)));
+    }
 
     const rows = await this.db
       .select()
       .from(taskExecutions)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(taskExecutions.id))
-      .limit(clampLimit(limit, 20, 200));
+      .limit(clampLimit(limit, 20, 201));
 
     return rows.map(toTaskExecutionRecord);
   }
