@@ -31,6 +31,12 @@ import {
   type ACPProfile,
 } from "./profile.ts";
 import { prepareACPSkillDirectories } from "./skills.ts";
+import {
+  extractACPActiveModel,
+  extractACPPromptUsage,
+  extractACPResponseModels,
+  normalizeACPPromptUsage,
+} from "./usage.ts";
 
 interface ActiveACPTurn {
   readonly id: string;
@@ -47,6 +53,9 @@ interface ManagedACPSession {
   readonly orchestratorTools: Set<string>;
   context: RuntimeContext;
   activeTurn?: ActiveACPTurn | undefined;
+  activeModel?: string | undefined;
+  contextUsedTokens?: number | undefined;
+  contextWindowTokens?: number | undefined;
   compacting: boolean;
   compactionReported: boolean;
   eventChain: Promise<void>;
@@ -159,9 +168,12 @@ export class ACPRuntime implements AgentRuntime {
       const initialized: ManagedACPSession = {
         ...managed,
         sessionId: response.sessionId,
+        activeModel:
+          extractACPActiveModel(response.configOptions, extractACPResponseModels(response)) ??
+          context.project.runtime?.model,
       };
       this.sessions.set(response.sessionId, initialized);
-      await this.applySessionSettings(client, response.sessionId, context, response.configOptions);
+      await this.applySessionSettings(client, initialized, context, response.configOptions);
       return { id: response.sessionId, workspacePath: context.workspacePath };
     } catch (error) {
       this.mcpBridge.unregisterSession(bridgeSessionId);
@@ -208,6 +220,7 @@ export class ACPRuntime implements AgentRuntime {
     try {
       const caps = client.agentCapabilities;
       let configOptions: readonly SessionConfigOption[] | null | undefined;
+      let models: { currentModelId?: string | null | undefined } | null | undefined;
       if (caps.sessionCapabilities?.resume) {
         const res = await client.resumeSession({
           sessionId: runtimeSessionId,
@@ -216,6 +229,7 @@ export class ACPRuntime implements AgentRuntime {
           additionalDirectories,
         });
         configOptions = res.configOptions;
+        models = extractACPResponseModels(res);
       } else if (caps.loadSession) {
         const res = await client.loadSession({
           sessionId: runtimeSessionId,
@@ -224,12 +238,15 @@ export class ACPRuntime implements AgentRuntime {
           additionalDirectories,
         });
         configOptions = res && typeof res === "object" ? res.configOptions : undefined;
+        models = extractACPResponseModels(res);
       } else {
         throw new RuntimeSessionNotFoundError(runtimeSessionId);
       }
 
+      managed.activeModel =
+        extractACPActiveModel(configOptions, models) ?? context.project.runtime?.model;
       this.sessions.set(runtimeSessionId, managed);
-      await this.applySessionSettings(client, runtimeSessionId, context, configOptions);
+      await this.applySessionSettings(client, managed, context, configOptions);
       return { id: runtimeSessionId, workspacePath: context.workspacePath };
     } catch (error) {
       this.mcpBridge.unregisterSession(bridgeSessionId);
@@ -451,6 +468,20 @@ export class ACPRuntime implements AgentRuntime {
     if (!session) return;
 
     const update = notification.update;
+    if (update.sessionUpdate === "usage_update") {
+      if (typeof update.used === "number" && Number.isFinite(update.used)) {
+        session.contextUsedTokens = update.used;
+      }
+      if (typeof update.size === "number" && Number.isFinite(update.size) && update.size > 0) {
+        session.contextWindowTokens = update.size;
+      }
+    } else if (update.sessionUpdate === "config_option_update") {
+      const updatedModel = extractACPActiveModel(update.configOptions);
+      if (updatedModel) {
+        session.activeModel = updatedModel;
+      }
+    }
+
     if (session.compacting) {
       if (update.sessionUpdate === "compaction_update" && update.status === "completed") {
         session.compactionReported = true;
@@ -560,6 +591,12 @@ export class ACPRuntime implements AgentRuntime {
 
       const interrupted = turn.canceled || result.stopReason === "cancelled";
       const finalText = turn.finalText ?? (openText || undefined);
+      const usage = normalizeACPPromptUsage(extractACPPromptUsage(result), {
+        model: session.activeModel,
+        provider: this.profile.name,
+        contextUsedTokens: session.contextUsedTokens,
+        contextWindowTokens: session.contextWindowTokens,
+      });
       await this.enqueueEvent(session, {
         type: interrupted ? "turn.interrupted" : "turn.completed",
         sessionId: session.sessionId,
@@ -569,6 +606,7 @@ export class ACPRuntime implements AgentRuntime {
           status: interrupted ? "interrupted" : "completed",
           durationMs: Date.now() - startedAt,
           ...(finalText !== undefined ? { finalText } : {}),
+          ...(usage ? { usage } : {}),
         },
       });
     } catch (error) {
@@ -602,10 +640,11 @@ export class ACPRuntime implements AgentRuntime {
 
   private async applySessionSettings(
     client: ACPClient,
-    sessionId: string,
+    session: ManagedACPSession,
     context: RuntimeContext,
     configOptions: readonly SessionConfigOption[] | null | undefined,
   ): Promise<void> {
+    const sessionId = session.sessionId;
     if (context.readOnly && this.profile.readOnlyModeId) {
       await client.setMode(sessionId, this.profile.readOnlyModeId).catch((error) => {
         this.logger.warn("failed to set ACP read-only mode", {
@@ -626,14 +665,20 @@ export class ACPRuntime implements AgentRuntime {
     });
 
     for (const update of updates) {
-      await client.setConfigOption(sessionId, update.configId, update.value).catch((error) => {
+      try {
+        const res = await client.setConfigOption(sessionId, update.configId, update.value);
+        const updatedModel = extractACPActiveModel(res?.configOptions);
+        if (updatedModel) {
+          session.activeModel = updatedModel;
+        }
+      } catch (error) {
         this.logger.warn("failed to apply ACP session config option", {
           sessionId,
           configId: update.configId,
           value: update.value,
           error,
         });
-      });
+      }
     }
   }
 

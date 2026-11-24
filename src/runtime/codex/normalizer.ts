@@ -1,4 +1,5 @@
 import type { FileChangeCompletedPayload } from "../../domain/events.ts";
+import type { TurnUsage } from "../../domain/types.ts";
 import type { ServerNotification } from "./generated/ServerNotification.ts";
 import type { PatchChangeKind } from "./generated/v2/PatchChangeKind.ts";
 import type { ThreadItem } from "./generated/v2/ThreadItem.ts";
@@ -28,6 +29,7 @@ export function finalTextOfTurn(turn: Turn): string | undefined {
 export function normalizeCodexNotification(
   notification: ServerNotification,
   sessionId: string,
+  turnUsage?: TurnUsage,
 ): RuntimeEvent[] {
   switch (notification.method) {
     case "turn/completed": {
@@ -46,6 +48,7 @@ export function normalizeCodexNotification(
             finalText: finalTextOfTurn(turn),
             error: turn.error?.message,
             durationMs: turn.durationMs ?? undefined,
+            ...(turnUsage ? { usage: turnUsage } : {}),
           },
         },
       ];

@@ -20,6 +20,7 @@ import type {
   RuntimeEvent,
 } from "../runtime/runtime.ts";
 import { RuntimeSessionNotFoundError } from "../runtime/runtime.ts";
+import { isTurnUsage } from "../runtime/usage.ts";
 import { WorkspaceManager } from "../workspace/workspace.ts";
 import { ArtifactStore } from "../artifacts/store.ts";
 import { NotificationHub, NotificationOutbox } from "../notifications/index.ts";
@@ -984,10 +985,16 @@ export class ProjectRuntime {
     active.settled = true;
     try {
       const entity = await this.entity(id);
+      const rawUsage =
+        event?.payload && typeof event.payload === "object" && "usage" in event.payload
+          ? (event.payload as { usage?: unknown }).usage
+          : undefined;
+      const usage = isTurnUsage(rawUsage) ? rawUsage : undefined;
       await this.store.updateTurn(active.turn.id, {
         status,
         finishedAt: new Date().toISOString(),
         ...(error ? { error } : {}),
+        ...(usage ? { usage } : {}),
       });
       entity.touch();
       await entity.flush(this.store);

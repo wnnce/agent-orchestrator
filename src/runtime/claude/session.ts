@@ -11,6 +11,7 @@ import type { Logger } from "../../observability/logger.ts";
 import type { ApprovalDecision, RuntimeContext, RuntimeEvent } from "../runtime.ts";
 import { RuntimeSessionNotFoundError } from "../runtime.ts";
 import { ClaudeNormalizer, toolKind } from "./normalizer.ts";
+import { ClaudeUsageTracker } from "./usage.ts";
 
 /** The parts of the SDK's Query a session uses; tests substitute a scripted one. */
 export type ClaudeQuery = AsyncIterable<SDKMessage> &
@@ -60,6 +61,7 @@ export class ClaudeSession {
 
   private readonly input = new InputQueue();
   private readonly normalizer: ClaudeNormalizer;
+  private readonly usageTracker: ClaudeUsageTracker;
   private readonly approvals = new Map<string, PendingApproval>();
   private readonly query: ClaudeQuery;
   private turn: ActiveTurn | undefined;
@@ -74,6 +76,7 @@ export class ClaudeSession {
     this.id = params.id;
     this.context = params.context;
     this.normalizer = new ClaudeNormalizer(params.id, params.context.workspacePath);
+    this.usageTracker = new ClaudeUsageTracker(params.resume);
     this.query = params.query({
       prompt: this.input,
       options: params.options((toolName, input, options) =>
@@ -231,12 +234,16 @@ export class ClaudeSession {
       return;
     }
     if (message.type === "system" && message.subtype === "init") {
+      this.usageTracker.onSystemInit(message.model);
       this.params.logger.debug("claude code session initialized", {
         sessionId: this.id,
         model: message.model,
         tools: message.tools.length,
         mcpServers: message.mcp_servers.map((server) => `${server.name}:${server.status}`),
       });
+    }
+    if (message.type === "assistant") {
+      this.usageTracker.onAssistantMessage(message);
     }
     const turn = this.turn;
     for (const event of this.normalizer.normalize(message, turn?.turnId)) {
@@ -251,6 +258,7 @@ export class ClaudeSession {
     const answered = result.user_message_uuids ?? [];
     const turn = this.turn;
     if (turn && (answered.length === 0 || answered.some((id) => turn.pending.includes(id)))) {
+      this.usageTracker.recordResult(result);
       // Results from older CLIs carry no uuids; they answer the oldest input.
       turn.pending =
         answered.length === 0
@@ -261,11 +269,13 @@ export class ClaudeSession {
     }
     const compaction = this.compaction;
     if (!turn && compaction && (answered.length === 0 || answered.includes(compaction.uuid))) {
+      this.usageTracker.syncBaseline(result);
       this.compaction = undefined;
       const error = resultError(result);
       compaction.done(error ? new Error(error) : undefined);
       return;
     }
+    this.usageTracker.syncBaseline(result);
     this.params.logger.debug("ignoring claude code result for an earlier input", {
       sessionId: this.id,
     });
@@ -274,6 +284,7 @@ export class ClaudeSession {
   private async finishTurn(turn: ActiveTurn, result: SDKResultMessage): Promise<void> {
     this.turn = undefined;
     this.normalizer.endTurn();
+    const usage = this.usageTracker.consumeTurnUsage();
     this.params.logger.debug("claude code turn finished", {
       sessionId: this.id,
       turnId: turn.turnId,
@@ -282,7 +293,11 @@ export class ClaudeSession {
       numTurns: result.num_turns,
       costUsd: result.total_cost_usd,
     });
-    const base = { turnId: turn.turnId, runtimeTurnId: turn.runtimeTurnId };
+    const base = {
+      turnId: turn.turnId,
+      runtimeTurnId: turn.runtimeTurnId,
+      ...(usage ? { usage } : {}),
+    };
     const error = resultError(result);
     if (turn.canceled) {
       await this.emit({

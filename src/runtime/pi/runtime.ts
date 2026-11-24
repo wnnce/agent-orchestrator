@@ -9,9 +9,10 @@ import {
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { Model } from "@earendil-works/pi-ai/compat";
 import type { ActionRegistry } from "../../actions/registry.ts";
-import type { ProjectConfig } from "../../domain/types.ts";
+import type { ProjectConfig, TurnUsage } from "../../domain/types.ts";
 import { Logger } from "../../observability/logger.ts";
 import type {
   AgentRuntime,
@@ -23,6 +24,7 @@ import type {
 } from "../runtime.ts";
 import { RuntimeSessionNotFoundError } from "../runtime.ts";
 import { projectSkillSources } from "../skills.ts";
+import { buildTurnUsage, normalizeTokenUsage } from "../usage.ts";
 import { PI_CAPABILITIES } from "./capabilities.ts";
 import { PiNormalizer, asAssistantMessage, assistantText } from "./normalizer.ts";
 import { bridgeActionsToPiTools } from "./tools.ts";
@@ -95,6 +97,8 @@ export class PiRuntime implements AgentRuntime {
     const runtimeTurnId = `pi_turn_${crypto.randomUUID()}`;
     wrapper.currentRuntimeTurnId = runtimeTurnId;
     wrapper.lastAssistantText = undefined;
+    wrapper.turnUsageEntries = [];
+    wrapper.turnLastContextUsed = undefined;
     wrapper.isTurnEnded = false;
 
     // Run prompt asynchronously so startTurn returns immediately with runtimeTurnId
@@ -104,6 +108,7 @@ export class PiRuntime implements AgentRuntime {
       } catch (err) {
         if (!wrapper.isTurnEnded) {
           wrapper.isTurnEnded = true;
+          const usage = consumePiTurnUsage(wrapper);
           const errorMsg = err instanceof Error ? err.message : String(err);
           this.logger.error("Pi session prompt execution failed", {
             sessionId,
@@ -119,6 +124,7 @@ export class PiRuntime implements AgentRuntime {
               runtimeTurnId,
               status: "failed",
               error: errorMsg,
+              ...(usage ? { usage } : {}),
             },
           });
         }
@@ -156,6 +162,7 @@ export class PiRuntime implements AgentRuntime {
 
     wrapper.isTurnEnded = true;
     await wrapper.session.abort();
+    const usage = consumePiTurnUsage(wrapper);
 
     await context.onEvent({
       type: "turn.interrupted",
@@ -165,6 +172,7 @@ export class PiRuntime implements AgentRuntime {
         turnId: wrapper.currentTurnId,
         runtimeTurnId,
         status: "interrupted",
+        ...(usage ? { usage } : {}),
       },
     });
   }
@@ -327,8 +335,12 @@ export class PiRuntime implements AgentRuntime {
         }
 
         const finished = event.type === "message_end" && asAssistantMessage(event.message);
-        if (finished && assistantText(finished))
-          wrapper.lastAssistantText = assistantText(finished);
+        if (finished) {
+          if (assistantText(finished)) {
+            wrapper.lastAssistantText = assistantText(finished);
+          }
+          recordPiAssistantUsage(wrapper, finished);
+        }
 
         const canonicalEvents = PiNormalizer.normalize(
           event,
@@ -347,6 +359,7 @@ export class PiRuntime implements AgentRuntime {
           }
 
           const lastMsg = asAssistantMessage(event.messages.at(-1));
+          const usage = consumePiTurnUsage(wrapper);
           if (lastMsg?.stopReason === "error") {
             wrapper.isTurnEnded = true;
             const error = lastMsg.errorMessage ?? "Turn failed";
@@ -359,6 +372,7 @@ export class PiRuntime implements AgentRuntime {
                 runtimeTurnId: wrapper.currentRuntimeTurnId,
                 status: "failed",
                 error,
+                ...(usage ? { usage } : {}),
               },
             });
             return;
@@ -374,10 +388,12 @@ export class PiRuntime implements AgentRuntime {
               runtimeTurnId: wrapper.currentRuntimeTurnId,
               status: "completed",
               finalText: wrapper.lastAssistantText,
+              ...(usage ? { usage } : {}),
             },
           });
         } else if (event.type === "auto_retry_end" && !event.success && !wrapper.isTurnEnded) {
           wrapper.isTurnEnded = true;
+          const usage = consumePiTurnUsage(wrapper);
           const error = event.finalError ?? "Auto retry failed";
           await wrapper.context.onEvent({
             type: "turn.failed",
@@ -388,10 +404,12 @@ export class PiRuntime implements AgentRuntime {
               runtimeTurnId: wrapper.currentRuntimeTurnId,
               status: "failed",
               error,
+              ...(usage ? { usage } : {}),
             },
           });
         } else if (event.type === "agent_settled" && event.aborted && !wrapper.isTurnEnded) {
           wrapper.isTurnEnded = true;
+          const usage = consumePiTurnUsage(wrapper);
           await wrapper.context.onEvent({
             type: "turn.interrupted",
             sessionId: wrapper.sessionId,
@@ -400,6 +418,7 @@ export class PiRuntime implements AgentRuntime {
               turnId: wrapper.currentTurnId,
               runtimeTurnId: wrapper.currentRuntimeTurnId,
               status: "interrupted",
+              ...(usage ? { usage } : {}),
             },
           });
         }
@@ -455,4 +474,44 @@ export class PiRuntime implements AgentRuntime {
 function isNothingToCompact(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes("Nothing to compact") || message.includes("Already compacted");
+}
+
+function recordPiAssistantUsage(wrapper: PiSessionWrapper, message: AssistantMessage): void {
+  const raw = message.usage as
+    | (AssistantMessage["usage"] & { reasoning?: number | undefined })
+    | undefined;
+  if (!raw) return;
+  const normalized = normalizeTokenUsage({
+    inputTokens: raw.input,
+    cacheReadTokens: raw.cacheRead,
+    cacheWriteTokens: raw.cacheWrite,
+    outputTokens: raw.output,
+    reasoningTokens: raw.reasoning,
+    inputIncludesCache: false,
+  });
+  if (normalized.totalTokens <= 0 && normalized.reasoningTokens <= 0) return;
+
+  const model = message.model || wrapper.session.model?.id || "unknown";
+  const provider = message.provider || wrapper.session.model?.provider;
+  wrapper.turnUsageEntries ??= [];
+  wrapper.turnUsageEntries.push({
+    model,
+    ...(provider ? { provider } : {}),
+    ...normalized,
+  });
+  wrapper.turnLastContextUsed = normalized.totalTokens;
+}
+
+function consumePiTurnUsage(wrapper: PiSessionWrapper): TurnUsage | undefined {
+  const entries = wrapper.turnUsageEntries ?? [];
+  const contextUsedTokens = wrapper.turnLastContextUsed;
+  wrapper.turnUsageEntries = [];
+  wrapper.turnLastContextUsed = undefined;
+  if (entries.length === 0) return undefined;
+
+  return buildTurnUsage(entries, {
+    primaryModel: wrapper.session.model?.id,
+    contextUsedTokens,
+    contextWindowTokens: wrapper.session.model?.contextWindow,
+  });
 }

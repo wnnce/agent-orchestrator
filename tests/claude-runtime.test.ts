@@ -359,4 +359,67 @@ describe("ClaudeRuntime", () => {
     await new Promise((r) => setTimeout(r, 5));
     expect(types()).not.toContain("runtime.disconnected");
   });
+
+  test("emits normalized per-turn usage on turn.completed across multi-turn sessions", async () => {
+    const session = await runtime.startSession(context);
+    const query = queries[0]!;
+    query.emit({
+      type: "system",
+      subtype: "init",
+      model: "claude-sonnet-4-6",
+      tools: [],
+      mcp_servers: [],
+    } as unknown as SDKMessage);
+
+    await runtime.startTurn(context, session.id, "t-usage-1", "hello");
+    const first = await query.input(1);
+    query.emit(
+      {
+        type: "assistant",
+        parent_tool_use_id: null,
+        message: {
+          id: "m1",
+          model: "claude-sonnet-4-6",
+          content: [{ type: "text", text: "hi" }],
+          usage: {
+            input_tokens: 200,
+            cache_read_input_tokens: 1000,
+            cache_creation_input_tokens: 100,
+            output_tokens: 50,
+          },
+        },
+      } as unknown as SDKMessage,
+      result([first.uuid!], {
+        usage: {
+          input_tokens: 200,
+          cache_read_input_tokens: 1000,
+          cache_creation_input_tokens: 100,
+          output_tokens: 50,
+        },
+        modelUsage: {
+          "claude-sonnet-4-6": {
+            inputTokens: 200,
+            cacheReadInputTokens: 1000,
+            cacheCreationInputTokens: 100,
+            outputTokens: 50,
+            contextWindow: 200000,
+          },
+        },
+      }),
+    );
+
+    await until(() => events.some((e) => e.type === "turn.completed" && e.turnId === "t-usage-1"));
+    const completed = events.find((e) => e.type === "turn.completed" && e.turnId === "t-usage-1");
+    expect(completed).toBeDefined();
+    expect((completed!.payload as { usage?: unknown }).usage).toMatchObject({
+      model: "claude-sonnet-4-6",
+      inputTokens: 200,
+      cacheReadTokens: 1000,
+      cacheWriteTokens: 100,
+      outputTokens: 50,
+      totalTokens: 1350,
+      contextUsedTokens: 1350,
+      contextWindowTokens: 200000,
+    });
+  });
 });

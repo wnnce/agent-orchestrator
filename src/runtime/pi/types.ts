@@ -1,4 +1,5 @@
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { ModelTokenUsage } from "../../domain/types.ts";
 import type { RuntimeContext } from "../runtime.ts";
 
 export const PI_THINKING_LEVELS = [
@@ -22,6 +23,8 @@ export interface PiSessionWrapper {
   currentTurnId?: string | undefined;
   currentRuntimeTurnId?: string | undefined;
   lastAssistantText?: string | undefined;
+  turnUsageEntries?: ModelTokenUsage[] | undefined;
+  turnLastContextUsed?: number | undefined;
   isTurnEnded?: boolean | undefined;
   activeTurnPromise?: Promise<void> | undefined;
   unsubscribe?: (() => void) | undefined;

@@ -12,6 +12,7 @@ import { RuntimeSessionNotFoundError } from "../runtime.ts";
 import { defaultActionRegistry, ActionRegistry } from "../../actions/index.ts";
 import { actionContextFor, actionResultText, actionScopeFor } from "../action-bridge.ts";
 import { normalizeCodexNotification, notificationThreadId } from "./normalizer.ts";
+import { CodexUsageTracker } from "./usage.ts";
 import { CodexConnection } from "./connection.ts";
 import { codexMcpServers } from "./mcp.ts";
 import { projectSkillSources } from "../skills.ts";
@@ -20,6 +21,7 @@ import type { ServerNotification } from "./generated/ServerNotification.ts";
 import type { ServerRequest } from "./generated/ServerRequest.ts";
 import type { DynamicToolCallParams } from "./generated/v2/DynamicToolCallParams.ts";
 import type { DynamicToolCallResponse } from "./generated/v2/DynamicToolCallResponse.ts";
+import type { ThreadResumeResponse } from "./generated/v2/ThreadResumeResponse.ts";
 import type { ThreadStartResponse } from "./generated/v2/ThreadStartResponse.ts";
 import type { TurnStartResponse } from "./generated/v2/TurnStartResponse.ts";
 
@@ -60,6 +62,7 @@ export class CodexRuntime implements AgentRuntime {
   /** Threads this process serves, by thread id. */
   private readonly contexts = new Map<string, RuntimeContext>();
   private readonly approvals = new Map<string, PendingApproval>();
+  private readonly usageTracker = new CodexUsageTracker();
 
   constructor(
     private readonly binary: string,
@@ -75,13 +78,19 @@ export class CodexRuntime implements AgentRuntime {
       this.threadParams(context),
     );
     this.contexts.set(result.thread.id, context);
+    this.usageTracker.initThread(result.thread.id, {
+      model: result.model || context.project.runtime?.model,
+      provider: result.modelProvider || undefined,
+      resumed: false,
+    });
     return { id: result.thread.id, workspacePath: context.workspacePath };
   }
 
   async resumeSession(context: RuntimeContext, runtimeSessionId: string): Promise<RuntimeSession> {
     const connection = await this.connect(context.project);
+    let resumed: ThreadResumeResponse | undefined;
     try {
-      await connection.request("thread/resume", {
+      resumed = await connection.request<ThreadResumeResponse>("thread/resume", {
         threadId: runtimeSessionId,
         ...this.threadOverrides(context),
       });
@@ -92,6 +101,11 @@ export class CodexRuntime implements AgentRuntime {
       throw error;
     }
     this.contexts.set(runtimeSessionId, context);
+    this.usageTracker.initThread(runtimeSessionId, {
+      model: resumed?.model || context.project.runtime?.model,
+      provider: resumed?.modelProvider || undefined,
+      resumed: true,
+    });
     return { id: runtimeSessionId, workspacePath: context.workspacePath };
   }
 
@@ -102,6 +116,7 @@ export class CodexRuntime implements AgentRuntime {
     input: string,
   ): Promise<RuntimeTurn> {
     const connection = await this.connect(context.project);
+    this.usageTracker.onTurnStarted(sessionId);
     const effort = context.project.runtime?.reasoningEffort;
     const result = await connection.request<TurnStartResponse>("turn/start", {
       threadId: sessionId,
@@ -154,6 +169,7 @@ export class CodexRuntime implements AgentRuntime {
 
   async releaseSession(_context: RuntimeContext, sessionId: string): Promise<void> {
     if (!this.contexts.delete(sessionId)) return;
+    this.usageTracker.deleteThread(sessionId);
     this.cancelApprovals(sessionId);
     await this.connection?.request("thread/unsubscribe", { threadId: sessionId });
   }
@@ -162,6 +178,7 @@ export class CodexRuntime implements AgentRuntime {
     const connection = this.connection;
     this.connection = undefined;
     this.contexts.clear();
+    this.usageTracker.clear();
     this.approvals.clear();
     if (connection) {
       this.logger.info("stopping Codex app-server");
@@ -216,6 +233,7 @@ export class CodexRuntime implements AgentRuntime {
     else this.logger.error("Codex app-server exited unexpectedly");
     const contexts = [...this.contexts];
     this.contexts.clear();
+    this.usageTracker.clear();
     this.approvals.clear();
     for (const [sessionId, context] of contexts) {
       void Promise.resolve(
@@ -232,7 +250,26 @@ export class CodexRuntime implements AgentRuntime {
     const threadId = notificationThreadId(notification);
     const context = threadId ? this.contexts.get(threadId) : undefined;
     if (!threadId || !context) return;
-    for (const event of normalizeCodexNotification(notification, threadId)) {
+
+    if (notification.method === "model/rerouted") {
+      this.usageTracker.onModelRerouted(threadId, notification.params.toModel);
+      return;
+    }
+    if (notification.method === "rawResponse/completed") {
+      this.usageTracker.onRawResponseCompleted(threadId, notification.params.usage);
+      return;
+    }
+    if (notification.method === "thread/tokenUsage/updated") {
+      this.usageTracker.onThreadTokenUsageUpdated(threadId, notification.params.tokenUsage);
+      return;
+    }
+
+    const turnUsage =
+      notification.method === "turn/completed"
+        ? this.usageTracker.consumeTurnUsage(threadId)
+        : undefined;
+
+    for (const event of normalizeCodexNotification(notification, threadId, turnUsage)) {
       void Promise.resolve(context.onEvent(event)).catch((error) =>
         this.logger.error("failed to deliver Codex event", { threadId, type: event.type, error }),
       );

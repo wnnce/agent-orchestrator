@@ -592,5 +592,46 @@ describe("Pi Agent Native SDK Runtime", () => {
         rmSync(tmpWorkspace, { recursive: true, force: true });
       }
     });
+
+    it("emits normalized per-turn usage including contextWindowTokens on turn.completed", async () => {
+      const tmpWorkspace = mkdtempSync(join(tmpdir(), "pi-rt-usage-"));
+      try {
+        const mockMR = await createMockModelRuntime(["Usage ", "check"]);
+        const runtime = new PiRuntime(new Logger({ sink: () => {} }), undefined, undefined, mockMR);
+        const events: RuntimeEvent[] = [];
+        const context: RuntimeContext = {
+          project: DUMMY_PROJECT,
+          workspacePath: tmpWorkspace,
+          onEvent: (event) => {
+            events.push(event);
+          },
+        };
+
+        const session = await runtime.startSession(context);
+        await runtime.startTurn(context, session.id, "turn_usage_1", "count tokens");
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        const completed = events.find(
+          (e) => e.type === "turn.completed" && e.turnId === "turn_usage_1",
+        );
+        expect(completed).toBeDefined();
+        expect((completed!.payload as { usage?: unknown }).usage).toMatchObject({
+          model: "mock-model",
+          inputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          outputTokens: 1,
+          reasoningTokens: 0,
+          totalTokens: 2,
+          contextUsedTokens: 2,
+          contextWindowTokens: 128000,
+        });
+
+        await runtime.releaseSession(context, session.id);
+        await runtime.stop();
+      } finally {
+        rmSync(tmpWorkspace, { recursive: true, force: true });
+      }
+    });
   });
 });
