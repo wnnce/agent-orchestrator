@@ -134,9 +134,9 @@ describe("per-runtime Zod model parsers", () => {
     expect(nested.get("agy")?.[0]?.id).toBe("gemini-4-neon");
 
     const flat = parseRuntimeModelsFile({
-      claude: [{ id: "claude-opus-4-6", disabled: true }],
+      claude: [{ id: "claude-opus-5-5", disabled: true }],
     });
-    expect(flat.get("claude")).toEqual([{ id: "claude-opus-4-6", disabled: true }]);
+    expect(flat.get("claude")).toEqual([{ id: "claude-opus-5-5", disabled: true }]);
   });
 });
 
@@ -279,7 +279,9 @@ describe("RuntimeRegistry per-runtime discovery + RuntimeModelCatalog merge & /r
     ]);
 
     const claude = publicData.runtimes.find((r) => r.type === "claude");
-    expect(claude?.models.some((m) => m.id === "claude-opus-4-6")).toBe(true);
+    expect(claude?.models.some((m) => m.id === "claude-opus-5-5")).toBe(true);
+    expect(claude?.models.some((m) => m.id === "claude-sonnet-5-5")).toBe(true);
+    expect(claude?.models.some((m) => m.id === "claude-haiku-5-5")).toBe(true);
 
     const agy = publicData.runtimes.find((r) => r.type === "agy");
     expect(agy?.models).toEqual([
