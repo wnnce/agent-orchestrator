@@ -159,6 +159,34 @@ export type MessagePart =
       status?: "streaming" | "completed";
     };
 
+export interface TokenUsage {
+  inputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  totalTokens: number;
+}
+
+export interface ModelTokenUsage extends TokenUsage {
+  model: string;
+  provider?: string;
+}
+
+export interface TurnUsage extends TokenUsage {
+  model?: string;
+  byModel?: ModelTokenUsage[];
+  contextUsedTokens?: number;
+  contextWindowTokens?: number;
+}
+
+export interface SessionUsageSummary extends TokenUsage {
+  turnCount: number;
+  lastModel?: string;
+  contextUsedTokens?: number;
+  contextWindowTokens?: number;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "system";
@@ -166,6 +194,7 @@ export interface ChatMessage {
   parts?: MessagePart[];
   thinking?: string;
   commands?: CommandExecution[];
+  usage?: TurnUsage;
   status?: "pending" | "streaming" | "completed" | "failed" | "interrupted";
   timestamp: number;
 }

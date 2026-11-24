@@ -10,9 +10,17 @@ import {
   subscribeEvents,
 } from "../../api/client";
 import { useStudio } from "../../context/StudioContext";
-import type { ArtifactRecord, ChatMessage, RuntimeEvent, SessionRoute } from "../../types";
+import type {
+  ArtifactRecord,
+  ChatMessage,
+  RuntimeEvent,
+  SessionRoute,
+  SessionUsageSummary,
+} from "../../types";
+import { mergeTurnUsageIntoSummary } from "../../utils/formatters";
 import {
   applyEventToAssistantMessage,
+  parseTurnUsage,
   reconstructMessagesFromEvents,
 } from "../../utils/messageParser";
 import { ChatArea } from "../ChatArea";
@@ -33,6 +41,7 @@ function SessionConversationView({ sessionId }: { sessionId: string }) {
   const [artifacts, setArtifacts] = useState<ArtifactRecord[]>([]);
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [sessionDetail, setSessionDetail] = useState<SessionRoute | null>(null);
+  const [sessionUsage, setSessionUsage] = useState<SessionUsageSummary | null>(null);
   const [sessionNotFound, setSessionNotFound] = useState(false);
 
   const unsubscribeRef = useRef<(() => void) | null>(null);
@@ -83,9 +92,11 @@ function SessionConversationView({ sessionId }: { sessionId: string }) {
   // Load session detail and check if it's archived/deleted/closed
   useEffect(() => {
     setSessionNotFound(false);
+    setSessionUsage(null);
     getSession(sessionId)
       .then((data) => {
         setSessionDetail(data.session);
+        setSessionUsage(data.usage ?? null);
       })
       .catch((err) => {
         console.warn("Session not found or error loading session info:", err);
@@ -156,6 +167,10 @@ function SessionConversationView({ sessionId }: { sessionId: string }) {
           updated[idx] = asst;
           return updated;
         });
+        const turnUsage = parseTurnUsage(evt.payload?.usage);
+        if (turnUsage) {
+          setSessionUsage((prev) => mergeTurnUsageIntoSummary(prev, turnUsage));
+        }
         fetchArtifacts(sessionId).then(setArtifacts);
         fetchSessions(activeProjectId || undefined).then(setSessions);
       } else if (evt.type === "session.closed" || evt.type === "session.archived") {
@@ -359,6 +374,7 @@ function SessionConversationView({ sessionId }: { sessionId: string }) {
             artifacts={artifacts}
             session={currentSession}
             project={activeProject}
+            usage={sessionUsage}
           />
         </div>
       )}

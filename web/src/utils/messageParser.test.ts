@@ -1,5 +1,10 @@
 import { test, expect } from "bun:test";
 import { reconstructMessagesFromEvents, applyEventToAssistantMessage } from "./messageParser";
+import {
+  calculateCacheHitRate,
+  formatTokenCount,
+  mergeTurnUsageIntoSummary,
+} from "./formatters";
 import type { ChatMessage, RuntimeEvent } from "../types";
 
 test("reconstructMessagesFromEvents properly interleaves canonical reasoning, commands, and text parts chronologically", () => {
@@ -377,4 +382,64 @@ test("preserves chronological ordering when assistant outputs preliminary text, 
 
   expect(asst.parts![3].type).toBe("text");
   expect((asst.parts![3] as any).content).toBe("Everything looks good in the database.");
+});
+
+test("extracts TurnUsage from turn.completed events and formats usage metrics cleanly", () => {
+  const usage = {
+    model: "gemini-4-neon",
+    inputTokens: 15709,
+    cacheReadTokens: 11432,
+    cacheWriteTokens: 0,
+    outputTokens: 124,
+    reasoningTokens: 109,
+    totalTokens: 27265,
+    contextUsedTokens: 27265,
+    contextWindowTokens: 1048576,
+  };
+
+  const events: RuntimeEvent[] = [
+    { sequence: 1, type: "turn.queued", payload: { turnId: "t_u1", input: "hello" } },
+    { sequence: 2, type: "turn.started", payload: { turnId: "t_u1" } },
+    {
+      sequence: 3,
+      type: "turn.completed",
+      payload: { turnId: "t_u1", status: "completed", finalText: "hi", usage },
+    },
+  ];
+
+  const { messages } = reconstructMessagesFromEvents(events);
+  expect(messages[1].usage).toEqual(usage);
+  expect(formatTokenCount(124)).toBe("124");
+  expect(formatTokenCount(15709)).toBe("15.7k");
+  expect(formatTokenCount(1048576)).toBe("1.0M");
+  expect(calculateCacheHitRate(usage)).toBe(42);
+
+  const summary1 = mergeTurnUsageIntoSummary(null, usage);
+  expect(summary1.turnCount).toBe(1);
+  expect(summary1.lastModel).toBe("gemini-4-neon");
+  expect(summary1.totalTokens).toBe(27265);
+
+  const summary2 = mergeTurnUsageIntoSummary(summary1, {
+    ...usage,
+    model: "claude-sonnet-4-6",
+    inputTokens: 1000,
+    cacheReadTokens: 3000,
+    outputTokens: 200,
+    reasoningTokens: 0,
+    totalTokens: 4200,
+    contextUsedTokens: 31000,
+    contextWindowTokens: 200000,
+  });
+  expect(summary2).toEqual({
+    turnCount: 2,
+    inputTokens: 16709,
+    cacheReadTokens: 14432,
+    cacheWriteTokens: 0,
+    outputTokens: 324,
+    reasoningTokens: 109,
+    totalTokens: 31465,
+    lastModel: "claude-sonnet-4-6",
+    contextUsedTokens: 31000,
+    contextWindowTokens: 200000,
+  });
 });

@@ -1,4 +1,63 @@
-import type { ScheduledJobStatusCode } from "../types";
+import type {
+  ScheduledJobStatusCode,
+  SessionUsageSummary,
+  TokenUsage,
+  TurnUsage,
+} from "../types";
+
+export function formatTokenCount(count?: number): string {
+  if (count === undefined || count === null || !Number.isFinite(count)) return "0";
+  const abs = Math.abs(count);
+  if (abs >= 1_000_000) {
+    return `${(count / 1_000_000).toFixed(1)}M`;
+  }
+  if (abs >= 1_000) {
+    return `${(count / 1_000).toFixed(1)}k`;
+  }
+  return String(Math.trunc(count));
+}
+
+export function calculateCacheHitRate(usage: TokenUsage): number | null {
+  const totalInput = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
+  if (totalInput <= 0) return null;
+  return Math.round((usage.cacheReadTokens / totalInput) * 100);
+}
+
+export function mergeTurnUsageIntoSummary(
+  prev: SessionUsageSummary | null,
+  turnUsage: TurnUsage,
+): SessionUsageSummary {
+  if (!prev) {
+    return {
+      turnCount: 1,
+      inputTokens: turnUsage.inputTokens,
+      cacheReadTokens: turnUsage.cacheReadTokens,
+      cacheWriteTokens: turnUsage.cacheWriteTokens,
+      outputTokens: turnUsage.outputTokens,
+      reasoningTokens: turnUsage.reasoningTokens,
+      totalTokens: turnUsage.totalTokens,
+      ...(turnUsage.model ? { lastModel: turnUsage.model } : {}),
+      ...(turnUsage.contextUsedTokens !== undefined
+        ? { contextUsedTokens: turnUsage.contextUsedTokens }
+        : {}),
+      ...(turnUsage.contextWindowTokens !== undefined
+        ? { contextWindowTokens: turnUsage.contextWindowTokens }
+        : {}),
+    };
+  }
+  return {
+    turnCount: prev.turnCount + 1,
+    inputTokens: prev.inputTokens + turnUsage.inputTokens,
+    cacheReadTokens: prev.cacheReadTokens + turnUsage.cacheReadTokens,
+    cacheWriteTokens: prev.cacheWriteTokens + turnUsage.cacheWriteTokens,
+    outputTokens: prev.outputTokens + turnUsage.outputTokens,
+    reasoningTokens: prev.reasoningTokens + turnUsage.reasoningTokens,
+    totalTokens: prev.totalTokens + turnUsage.totalTokens,
+    lastModel: turnUsage.model ?? prev.lastModel,
+    contextUsedTokens: turnUsage.contextUsedTokens ?? prev.contextUsedTokens,
+    contextWindowTokens: turnUsage.contextWindowTokens ?? prev.contextWindowTokens,
+  };
+}
 
 export function formatDuration(ms?: number): string {
   if (ms === undefined || ms === null) return "-";

@@ -12,6 +12,7 @@ import {
   Loader2,
 } from "lucide-react";
 import type { ChatMessage } from "../types";
+import { calculateCacheHitRate, formatTokenCount } from "../utils/formatters";
 import { MarkdownRenderer } from "./common/MarkdownRenderer";
 
 interface ChatAreaProps {
@@ -44,6 +45,11 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   const [collapsedThinking, setCollapsedThinking] = useState<Record<string, boolean>>({});
   const [collapsedCommands, setCollapsedCommands] = useState<Record<string, boolean>>({});
   const [collapsedTools, setCollapsedTools] = useState<Record<string, boolean>>({});
+  const [expandedUsage, setExpandedUsage] = useState<Record<string, boolean>>({});
+
+  const toggleUsage = (id: string) => {
+    setExpandedUsage((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
 
   const toggleTool = (id: string) => {
     setCollapsedTools((prev) => ({ ...prev, [id]: !(prev[id] ?? true) }));
@@ -611,6 +617,111 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                           <span className="text-[11px] text-[var(--text-muted)]">Generation interrupted</span>
                         </div>
                       )}
+
+                      {/* Per-turn normalized model usage metadata */}
+                      {m.usage && m.usage.totalTokens > 0 && (() => {
+                        const u = m.usage;
+                        const hitRate = calculateCacheHitRate(u);
+                        const isUsageOpen = !!expandedUsage[m.id];
+                        const hasDetails =
+                          u.cacheWriteTokens > 0 ||
+                          u.reasoningTokens > 0 ||
+                          (u.byModel && u.byModel.length > 1) ||
+                          (u.contextUsedTokens !== undefined && u.contextWindowTokens !== undefined);
+                        const tooltip = [
+                          u.model ? `Model: ${u.model}` : null,
+                          `Input (uncached): ${u.inputTokens.toLocaleString()}`,
+                          `Cache Read: ${u.cacheReadTokens.toLocaleString()}${hitRate !== null ? ` (${hitRate}%)` : ""}`,
+                          u.cacheWriteTokens > 0
+                            ? `Cache Write: ${u.cacheWriteTokens.toLocaleString()}`
+                            : null,
+                          `Output: ${u.outputTokens.toLocaleString()}`,
+                          u.reasoningTokens > 0
+                            ? `Reasoning: ${u.reasoningTokens.toLocaleString()}`
+                            : null,
+                          `Total: ${u.totalTokens.toLocaleString()}`,
+                        ]
+                          .filter(Boolean)
+                          .join(" | ");
+
+                        return (
+                          <div className="pt-1 select-none">
+                            <button
+                              type="button"
+                              onClick={() => toggleUsage(m.id)}
+                              title={tooltip}
+                              className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 px-2 py-0.5 rounded-[var(--radius-xs)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:border-[var(--border-default)] text-[10.5px] font-mono text-[var(--text-muted)] transition-colors cursor-pointer"
+                            >
+                              {u.model && (
+                                <span className="text-[var(--text-secondary)] font-medium">
+                                  {u.model}
+                                </span>
+                              )}
+                              <span>In {formatTokenCount(u.inputTokens)}</span>
+                              {u.cacheReadTokens > 0 && (
+                                <span className="text-emerald-500">
+                                  Cache {formatTokenCount(u.cacheReadTokens)}
+                                  {hitRate !== null ? ` (${hitRate}%)` : ""}
+                                </span>
+                              )}
+                              {u.cacheWriteTokens > 0 && (
+                                <span>Write {formatTokenCount(u.cacheWriteTokens)}</span>
+                              )}
+                              <span>Out {formatTokenCount(u.outputTokens)}</span>
+                              {u.reasoningTokens > 0 && (
+                                <span>Think {formatTokenCount(u.reasoningTokens)}</span>
+                              )}
+                              {hasDetails &&
+                                (isUsageOpen ? (
+                                  <ChevronDown className="w-2.5 h-2.5 opacity-70" />
+                                ) : (
+                                  <ChevronRight className="w-2.5 h-2.5 opacity-70" />
+                                ))}
+                            </button>
+
+                            {isUsageOpen && (
+                              <div className="mt-1.5 p-2.5 rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-surface)] text-[11px] font-mono text-[var(--text-secondary)] space-y-1.5 select-text">
+                                <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10.5px]">
+                                  <span>Total: <strong className="text-[var(--text-primary)]">{u.totalTokens.toLocaleString()}</strong></span>
+                                  <span>Uncached In: {u.inputTokens.toLocaleString()}</span>
+                                  <span>Cache Read: {u.cacheReadTokens.toLocaleString()}{hitRate !== null ? ` (${hitRate}%)` : ""}</span>
+                                  <span>Cache Write: {u.cacheWriteTokens.toLocaleString()}</span>
+                                  <span>Output: {u.outputTokens.toLocaleString()}</span>
+                                  {u.reasoningTokens > 0 && (
+                                    <span>Reasoning: {u.reasoningTokens.toLocaleString()}</span>
+                                  )}
+                                  {u.contextUsedTokens !== undefined && u.contextWindowTokens !== undefined && (
+                                    <span>
+                                      Context: {formatTokenCount(u.contextUsedTokens)} / {formatTokenCount(u.contextWindowTokens)} (
+                                      {Math.min(100, Math.round((u.contextUsedTokens / u.contextWindowTokens) * 100))}%)
+                                    </span>
+                                  )}
+                                </div>
+                                {u.byModel && u.byModel.length > 1 && (
+                                  <div className="pt-1.5 border-t border-[var(--border-subtle)] space-y-1">
+                                    <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
+                                      By Model
+                                    </div>
+                                    {u.byModel.map((entry) => (
+                                      <div
+                                        key={`${entry.provider ?? ""}:${entry.model}`}
+                                        className="flex flex-wrap items-center justify-between gap-2 text-[10.5px]"
+                                      >
+                                        <span className="text-[var(--text-primary)]">
+                                          {entry.model}
+                                        </span>
+                                        <span className="text-[var(--text-muted)]">
+                                          In {formatTokenCount(entry.inputTokens)} · Cache {formatTokenCount(entry.cacheReadTokens)} · Out {formatTokenCount(entry.outputTokens)}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 )}

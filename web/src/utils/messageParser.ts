@@ -1,4 +1,21 @@
-import type { ChatMessage, MessagePart, RuntimeEvent } from "../types";
+import type { ChatMessage, MessagePart, RuntimeEvent, TurnUsage } from "../types";
+
+export function parseTurnUsage(raw: unknown): TurnUsage | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const u = raw as Record<string, unknown>;
+  if (
+    typeof u.inputTokens !== "number" ||
+    typeof u.cacheReadTokens !== "number" ||
+    typeof u.cacheWriteTokens !== "number" ||
+    typeof u.outputTokens !== "number" ||
+    typeof u.reasoningTokens !== "number" ||
+    typeof u.totalTokens !== "number"
+  ) {
+    return undefined;
+  }
+  if (!Number.isFinite(u.totalTokens) || u.totalTokens <= 0) return undefined;
+  return u as unknown as TurnUsage;
+}
 
 export function ensureParts(msg: ChatMessage): MessagePart[] {
   if (!msg.parts) {
@@ -305,6 +322,11 @@ export function applyEventToAssistantMessage(msg: ChatMessage, evt: RuntimeEvent
             status: "completed",
           });
         }
+      }
+
+      const usage = parseTurnUsage(payload.usage);
+      if (usage) {
+        msg.usage = usage;
       }
 
       for (const part of parts) {

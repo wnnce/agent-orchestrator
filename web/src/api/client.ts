@@ -5,6 +5,7 @@ import type {
   RuntimeEvent,
   ScheduledJobRecord,
   SessionRoute,
+  SessionUsageSummary,
   TaskDefinition,
   TaskExecutionRecord,
 } from "../types";
@@ -131,7 +132,11 @@ export async function createSession(params: {
 
 export async function getSession(
   sessionId: string,
-): Promise<{ session: SessionRoute; project: ProjectRouting }> {
+): Promise<{
+  session: SessionRoute;
+  project: ProjectRouting;
+  usage?: SessionUsageSummary | null;
+}> {
   const res = await fetch(`/sessions/${encodeURIComponent(sessionId)}`);
   if (!res.ok) throw new Error(`Failed to get session: ${res.statusText}`);
   return res.json();

@@ -68,7 +68,8 @@ export function createSessionsRouter(deps: SessionsRouteDeps): Hono {
     const route = await deps.store.getSession(sessionId);
     if (!route) return c.json({ error: "session_not_found" }, 404);
     const project = deps.projects.get(route.projectId);
-    return c.json({ session: route, project: project.project.routing });
+    const usage = await deps.store.getSessionUsage(sessionId);
+    return c.json({ session: route, project: project.project.routing, usage });
   });
 
   router.delete("/sessions/:sessionId", async (c) => {

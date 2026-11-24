@@ -20,8 +20,14 @@ import type {
   RuntimeEvent,
   ScheduledJobRecord,
   SessionRoute,
+  SessionUsageSummary,
 } from "../types";
-import { formatDateTime, formatJobStatus } from "../utils/formatters";
+import {
+  calculateCacheHitRate,
+  formatDateTime,
+  formatJobStatus,
+  formatTokenCount,
+} from "../utils/formatters";
 import { Badge } from "./common/Badge";
 import { Button } from "./common/Button";
 
@@ -30,6 +36,7 @@ interface InspectorProps {
   artifacts: ArtifactRecord[];
   session: SessionRoute | null;
   project: ProjectRouting | null;
+  usage?: SessionUsageSummary | null;
 }
 
 export const Inspector: React.FC<InspectorProps> = ({
@@ -37,6 +44,7 @@ export const Inspector: React.FC<InspectorProps> = ({
   artifacts,
   session,
   project,
+  usage = null,
 }) => {
   const confirm = useConfirm();
   const [tab, setTab] = useState<"events" | "artifacts" | "jobs" | "info">("artifacts");
@@ -297,6 +305,111 @@ export const Inspector: React.FC<InspectorProps> = ({
       {/* Tab: Info */}
       {tab === "info" && (
         <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
+          {/* Model Usage & Context Summary */}
+          <div>
+            <h4 className="font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
+              模型用量 (Usage)
+            </h4>
+            {usage ? (
+              (() => {
+                const hitRate = calculateCacheHitRate(usage);
+                const ctxRatio =
+                  usage.contextUsedTokens !== undefined &&
+                  usage.contextWindowTokens !== undefined &&
+                  usage.contextWindowTokens > 0
+                    ? Math.min(100, (usage.contextUsedTokens / usage.contextWindowTokens) * 100)
+                    : null;
+                return (
+                  <div className="space-y-2.5 font-mono text-[11px] bg-[var(--bg-surface)] p-2.5 rounded-[var(--radius-md)] border border-[var(--border-default)]">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[var(--text-muted)]">累计总计</span>
+                      <span className="text-[var(--text-primary)] font-semibold">
+                        {formatTokenCount(usage.totalTokens)} tokens ({usage.turnCount} 轮)
+                      </span>
+                    </div>
+                    {usage.lastModel && (
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[var(--text-muted)]">最近模型</span>
+                        <span className="text-[var(--text-primary)] truncate" title={usage.lastModel}>
+                          {usage.lastModel}
+                        </span>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 pt-1.5 border-t border-[var(--border-subtle)] text-[10.5px]">
+                      <div className="flex justify-between">
+                        <span className="text-[var(--text-muted)]">新输入</span>
+                        <span className="text-[var(--text-primary)]">
+                          {formatTokenCount(usage.inputTokens)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-[var(--text-muted)]">缓存读</span>
+                        <span className="text-emerald-500">
+                          {formatTokenCount(usage.cacheReadTokens)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-[var(--text-muted)]">缓存写</span>
+                        <span className="text-[var(--text-primary)]">
+                          {formatTokenCount(usage.cacheWriteTokens)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-[var(--text-muted)]">输出</span>
+                        <span className="text-[var(--text-primary)]">
+                          {formatTokenCount(usage.outputTokens)}
+                        </span>
+                      </div>
+                      {usage.reasoningTokens > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-[var(--text-muted)]">思考</span>
+                          <span className="text-[var(--text-primary)]">
+                            {formatTokenCount(usage.reasoningTokens)}
+                          </span>
+                        </div>
+                      )}
+                      {hitRate !== null && (
+                        <div className="flex justify-between">
+                          <span className="text-[var(--text-muted)]">命中率</span>
+                          <span className="text-emerald-500 font-semibold">{hitRate}%</span>
+                        </div>
+                      )}
+                    </div>
+                    {ctxRatio !== null &&
+                      usage.contextUsedTokens !== undefined &&
+                      usage.contextWindowTokens !== undefined && (
+                        <div className="pt-1.5 border-t border-[var(--border-subtle)] space-y-1">
+                          <div className="flex items-center justify-between text-[10.5px]">
+                            <span className="text-[var(--text-muted)]">上下文水位</span>
+                            <span className="text-[var(--text-primary)]">
+                              {formatTokenCount(usage.contextUsedTokens)} /{" "}
+                              {formatTokenCount(usage.contextWindowTokens)} ({ctxRatio.toFixed(1)}%)
+                            </span>
+                          </div>
+                          <div className="w-full h-1.5 rounded-full bg-[var(--bg-code)] overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${
+                                ctxRatio >= 85
+                                  ? "bg-red-500"
+                                  : ctxRatio >= 65
+                                    ? "bg-amber-500"
+                                    : "bg-emerald-500"
+                              }`}
+                              style={{ width: `${Math.max(2, ctxRatio)}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                  </div>
+                );
+              })()
+            ) : (
+              <div className="font-mono text-[11px] text-[var(--text-muted)] bg-[var(--bg-surface)] p-2.5 rounded-[var(--radius-md)] border border-[var(--border-default)]">
+                暂无用量记录
+              </div>
+            )}
+          </div>
+
           <div>
             <h4 className="font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
               当前会话 (Session)
@@ -344,6 +457,32 @@ export const Inspector: React.FC<InspectorProps> = ({
             </div>
           </div>
         </div>
+      )}
+      {/* Compact persistent usage footer strip */}
+      {usage && tab !== "info" && (
+        <button
+          type="button"
+          onClick={() => setTab("info")}
+          className="border-t border-[var(--border-default)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-hover)] px-3 py-2 flex items-center justify-between gap-2 text-[10.5px] font-mono text-[var(--text-muted)] transition-colors cursor-pointer select-none"
+          title="查看会话模型用量详情"
+        >
+          <span className="truncate">
+            Total <strong className="text-[var(--text-primary)]">{formatTokenCount(usage.totalTokens)}</strong>
+            {(() => {
+              const rate = calculateCacheHitRate(usage);
+              return rate !== null && usage.cacheReadTokens > 0 ? (
+                <span className="text-emerald-500 ml-1.5">· Cache {rate}%</span>
+              ) : null;
+            })()}
+          </span>
+          {usage.contextUsedTokens !== undefined &&
+            usage.contextWindowTokens !== undefined &&
+            usage.contextWindowTokens > 0 && (
+              <span className="shrink-0 text-[var(--text-secondary)]">
+                Ctx {Math.min(100, Math.round((usage.contextUsedTokens / usage.contextWindowTokens) * 100))}%
+              </span>
+            )}
+        </button>
       )}
     </aside>
   );
