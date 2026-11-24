@@ -98,13 +98,14 @@ export class TaskScheduler {
       newTaskKeys.add(task.taskKey);
       const existing = this.definitions.get(task.taskKey);
 
-      // Reschedule if task is new or schedule properties changed
+      // Reschedule if task is new or schedule/content properties changed
       if (
         !existing ||
         existing.cron !== task.cron ||
         existing.timezone !== task.timezone ||
         existing.enabled !== task.enabled ||
-        existing.promptTemplate !== task.promptTemplate
+        existing.promptTemplate !== task.promptTemplate ||
+        existing.fileMtimeMs !== task.fileMtimeMs
       ) {
         this.scheduleTask(task);
       }

@@ -148,6 +148,7 @@ export class TaskEngine {
 
     this.activeWorkers++;
     const startedAt = new Date();
+    const executionId = `exec_${randomUUID()}`;
 
     const abortController = new AbortController();
     let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
@@ -163,6 +164,7 @@ export class TaskEngine {
       const stateBefore = await this.getState(queued.taskKey);
 
       const context: TaskExecutionContext = {
+        executionId,
         task: queued.task,
         stateBefore,
         signal: abortController.signal,
@@ -208,7 +210,7 @@ export class TaskEngine {
       // 4. Record task execution audit into store
       if (this.store) {
         await this.store.recordTaskExecution({
-          executionId: `exec_${randomUUID()}`,
+          executionId,
           taskKey: queued.taskKey,
           projectId: queued.projectId,
           taskId: queued.taskId,
@@ -226,6 +228,7 @@ export class TaskEngine {
       }
 
       this.logger.info("task execution completed", {
+        executionId,
         taskKey: queued.taskKey,
         success: result.success,
         durationMs: result.durationMs,
@@ -233,6 +236,7 @@ export class TaskEngine {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.error("task worker execution error", {
+        executionId,
         taskKey: queued.taskKey,
         error: msg,
       });
@@ -241,7 +245,7 @@ export class TaskEngine {
       if (this.store) {
         const stateBefore = await this.getState(queued.taskKey);
         await this.store.recordTaskExecution({
-          executionId: `exec_${randomUUID()}`,
+          executionId,
           taskKey: queued.taskKey,
           projectId: queued.projectId,
           taskId: queued.taskId,

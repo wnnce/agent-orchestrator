@@ -4,11 +4,13 @@ import type {
   ArtifactRecord,
   EventRecord,
   InboundMessageRecord,
+  ListTaskExecutionLogsFilter,
   NotificationDelivery,
   ScheduledJobRecord,
   ScheduledJobStatusCode,
   SessionRoute,
   SessionUsageSummary,
+  TaskExecutionLogRecord,
   TaskExecutionRecord,
   TurnRecord,
 } from "../../domain/types.ts";
@@ -55,6 +57,10 @@ export class MemoryStore implements Store {
 
   get taskExecutions(): TaskExecutionRecord[] {
     return this.taskAuditStore.taskExecutions;
+  }
+
+  get taskExecutionLogs(): Map<string, TaskExecutionLogRecord[]> {
+    return this.taskAuditStore.taskExecutionLogs;
   }
 
   get scheduledJobs(): Map<string, ScheduledJobRecord> {
@@ -174,6 +180,17 @@ export class MemoryStore implements Store {
     projectId?: string | undefined,
   ): Promise<TaskExecutionRecord[]> {
     return this.taskAuditStore.listTaskExecutions(taskKey, limit, projectId);
+  }
+
+  appendTaskExecutionLogs(logs: readonly TaskExecutionLogRecord[]): Promise<void> {
+    return this.taskAuditStore.appendTaskExecutionLogs(logs);
+  }
+
+  listTaskExecutionLogs(
+    executionId: string,
+    filter?: ListTaskExecutionLogsFilter | undefined,
+  ): Promise<TaskExecutionLogRecord[]> {
+    return this.taskAuditStore.listTaskExecutionLogs(executionId, filter);
   }
 
   createScheduledJob(job: ScheduledJobRecord): Promise<void> {

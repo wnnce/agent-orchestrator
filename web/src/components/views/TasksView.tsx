@@ -8,11 +8,48 @@ import {
   ChevronDown,
   ChevronUp,
   Cpu,
+  Terminal,
+  Loader2,
 } from "lucide-react";
-import { fetchProjectTasks, fetchTaskExecutions, runProjectTask } from "../../api/client";
+import {
+  fetchProjectTasks,
+  fetchTaskExecutionLogs,
+  fetchTaskExecutions,
+  runProjectTask,
+} from "../../api/client";
 import { useStudio } from "../../context/StudioContext";
-import type { TaskDefinition, TaskExecutionRecord } from "../../types";
+import type {
+  TaskDefinition,
+  TaskExecutionLogLevel,
+  TaskExecutionLogRecord,
+  TaskExecutionRecord,
+} from "../../types";
 import { formatDateTime, formatDuration, formatTimeAgo } from "../../utils/formatters";
+
+interface ExecutionLogsState {
+  logs: TaskExecutionLogRecord[];
+  hasMore: boolean;
+  nextAfterSeq: number;
+  level: TaskExecutionLogLevel | "all";
+  loading: boolean;
+  loadingMore: boolean;
+  loaded: boolean;
+}
+
+const LOG_LEVEL_BADGE: Record<TaskExecutionLogLevel, string> = {
+  debug: "text-zinc-400 bg-zinc-500/10 border-zinc-500/20",
+  info: "text-sky-500 dark:text-sky-400 bg-sky-500/10 border-sky-500/25",
+  warn: "text-amber-500 dark:text-amber-400 bg-amber-500/10 border-amber-500/25",
+  error: "text-red-500 dark:text-red-400 bg-red-500/10 border-red-500/25",
+};
+
+function formatLogTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  const pad3 = (n: number) => String(n).padStart(3, "0");
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}.${pad3(d.getMilliseconds())}`;
+}
 
 export function TasksView() {
   const { activeProjectId, activeProject } = useStudio();
@@ -21,6 +58,83 @@ export function TasksView() {
   const [loading, setLoading] = useState(false);
   const [runningTaskId, setRunningTaskId] = useState<string | null>(null);
   const [expandedExecId, setExpandedExecId] = useState<string | null>(null);
+  const [logsByExecId, setLogsByExecId] = useState<Record<string, ExecutionLogsState>>({});
+
+  const loadExecutionLogs = async (
+    executionId: string,
+    options?: { level?: TaskExecutionLogLevel | "all"; append?: boolean; afterSeq?: number },
+  ) => {
+    const level = options?.level ?? logsByExecId[executionId]?.level ?? "all";
+    const append = options?.append ?? false;
+    const afterSeq = append ? (options?.afterSeq ?? logsByExecId[executionId]?.nextAfterSeq ?? 0) : 0;
+
+    setLogsByExecId((prev) => {
+      const existing = prev[executionId];
+      return {
+        ...prev,
+        [executionId]: {
+          logs: append ? (existing?.logs ?? []) : [],
+          hasMore: append ? (existing?.hasMore ?? false) : false,
+          nextAfterSeq: append ? (existing?.nextAfterSeq ?? 0) : 0,
+          level,
+          loading: !append,
+          loadingMore: append,
+          loaded: existing?.loaded ?? false,
+        },
+      };
+    });
+
+    try {
+      const res = await fetchTaskExecutionLogs(executionId, {
+        ...(afterSeq > 0 ? { afterSeq } : {}),
+        ...(level !== "all" ? { level } : {}),
+        limit: 200,
+      });
+      setLogsByExecId((prev) => {
+        const existing = prev[executionId];
+        return {
+          ...prev,
+          [executionId]: {
+            logs: append ? [...(existing?.logs ?? []), ...res.logs] : res.logs,
+            hasMore: res.hasMore,
+            nextAfterSeq: res.nextAfterSeq,
+            level,
+            loading: false,
+            loadingMore: false,
+            loaded: true,
+          },
+        };
+      });
+    } catch (err) {
+      console.error("Failed to load task execution logs:", err);
+      setLogsByExecId((prev) => {
+        const existing = prev[executionId];
+        return {
+          ...prev,
+          [executionId]: {
+            logs: existing?.logs ?? [],
+            hasMore: existing?.hasMore ?? false,
+            nextAfterSeq: existing?.nextAfterSeq ?? 0,
+            level,
+            loading: false,
+            loadingMore: false,
+            loaded: true,
+          },
+        };
+      });
+    }
+  };
+
+  const handleToggleInspect = (executionId: string) => {
+    if (expandedExecId === executionId) {
+      setExpandedExecId(null);
+      return;
+    }
+    setExpandedExecId(executionId);
+    if (!logsByExecId[executionId]?.loaded) {
+      void loadExecutionLogs(executionId, { level: "all", append: false });
+    }
+  };
 
   const loadData = async () => {
     if (!activeProjectId) return;
@@ -91,18 +205,27 @@ export function TasksView() {
               Configured Tasks ({tasks.length})
             </span>
             <span className="text-[11px] font-mono text-[var(--text-muted)]">
-              tasks/*.md
+              tasks/*.md · tasks/*.ts
             </span>
           </div>
 
           {tasks.length === 0 ? (
             <div className="p-8 text-center text-xs text-[var(--text-muted)] font-mono">
-              No tasks configured in projects/{activeProjectId}/tasks/*.md
+              No tasks configured in projects/{activeProjectId}/tasks/
             </div>
           ) : (
             <div className="divide-y divide-[var(--border-default)]">
               {tasks.map((task) => {
-                const isAgentTask = !task.type || task.type === "agent";
+                const taskType = (task.type ?? "agent").toLowerCase();
+                const isAgentTask = taskType === "agent";
+                const typeBadgeClass =
+                  taskType === "ts"
+                    ? "text-sky-500 dark:text-sky-400 bg-sky-500/10 border-sky-500/25"
+                    : taskType === "script"
+                      ? "text-amber-500 dark:text-amber-400 bg-amber-500/10 border-amber-500/25"
+                      : taskType === "action"
+                        ? "text-purple-500 dark:text-purple-400 bg-purple-500/10 border-purple-500/25"
+                        : "text-[var(--text-secondary)] bg-[var(--bg-surface-elevated)] border-[var(--border-default)]";
                 const override = task.runtime;
                 const hasOverride = Boolean(
                   override && (override.type || override.model || override.reasoningEffort),
@@ -140,6 +263,11 @@ export function TasksView() {
                           }`}
                         >
                           {task.enabled ? "ENABLED" : "DISABLED"}
+                        </span>
+                        <span
+                          className={`text-[10px] font-mono uppercase px-1.5 py-0.2 rounded-[var(--radius-xs)] border ${typeBadgeClass}`}
+                        >
+                          {taskType}
                         </span>
                         {isAgentTask && runtimeParts.length > 0 && (
                           <span
@@ -256,9 +384,7 @@ export function TasksView() {
                           </td>
                           <td className="py-2 px-3 text-right">
                             <button
-                              onClick={() =>
-                                setExpandedExecId(isExpanded ? null : exec.executionId)
-                              }
+                              onClick={() => handleToggleInspect(exec.executionId)}
                               className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer inline-flex items-center gap-0.5"
                             >
                               <span>{isExpanded ? "Hide" : "Inspect"}</span>
@@ -271,37 +397,172 @@ export function TasksView() {
                           </td>
                         </tr>
 
-                        {isExpanded && (
-                          <tr className="bg-[var(--bg-code)]">
-                            <td colSpan={6} className="p-4 border-b border-[var(--border-default)]">
-                              <div className="space-y-3 text-[11px] font-mono">
-                                {exec.errorMessage && (
-                                  <div className="p-2.5 rounded-[var(--radius-xs)] bg-red-500/10 border border-red-500/20 text-red-400">
-                                    Error: {exec.errorMessage}
+                        {isExpanded && (() => {
+                          const logState = logsByExecId[exec.executionId];
+                          const hasSummary =
+                            exec.actionsSummary && Object.keys(exec.actionsSummary).length > 0;
+                          return (
+                            <tr className="bg-[var(--bg-code)]">
+                              <td colSpan={6} className="p-4 border-b border-[var(--border-default)]">
+                                <div className="space-y-3 text-[11px] font-mono">
+                                  {exec.errorMessage && (
+                                    <div className="p-2.5 rounded-[var(--radius-xs)] bg-red-500/10 border border-red-500/20 text-red-400">
+                                      Error: {exec.errorMessage}
+                                    </div>
+                                  )}
+
+                                  {/* Execution Logs Viewer */}
+                                  <div className="space-y-1.5">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <span className="text-[var(--text-muted)] inline-flex items-center gap-1.5">
+                                        <Terminal className="w-3 h-3" />
+                                        <span>
+                                          Execution Logs ({logState?.logs.length ?? 0}
+                                          {logState?.hasMore ? "+" : ""})
+                                        </span>
+                                      </span>
+                                      <div className="flex items-center gap-1">
+                                        {(["all", "debug", "info", "warn", "error"] as const).map(
+                                          (lvl) => {
+                                            const active = (logState?.level ?? "all") === lvl;
+                                            return (
+                                              <button
+                                                key={lvl}
+                                                type="button"
+                                                onClick={() =>
+                                                  void loadExecutionLogs(exec.executionId, {
+                                                    level: lvl,
+                                                    append: false,
+                                                  })
+                                                }
+                                                className={`px-1.5 py-0.5 rounded-[var(--radius-xs)] text-[10px] uppercase border transition-colors cursor-pointer ${
+                                                  active
+                                                    ? "bg-[var(--primary)] text-[var(--text-inverted)] border-[var(--primary)]"
+                                                    : "bg-[var(--bg-canvas)] text-[var(--text-muted)] border-[var(--border-default)] hover:text-[var(--text-primary)]"
+                                                }`}
+                                              >
+                                                {lvl}
+                                              </button>
+                                            );
+                                          },
+                                        )}
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            void loadExecutionLogs(exec.executionId, {
+                                              level: logState?.level ?? "all",
+                                              append: false,
+                                            })
+                                          }
+                                          disabled={logState?.loading}
+                                          title="Refresh logs"
+                                          className="p-1 rounded-[var(--radius-xs)] bg-[var(--bg-canvas)] border border-[var(--border-default)] text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer disabled:opacity-50"
+                                        >
+                                          <RotateCw
+                                            className={`w-3 h-3 ${logState?.loading ? "animate-spin" : ""}`}
+                                          />
+                                        </button>
+                                      </div>
+                                    </div>
+
+                                    <div className="rounded-[var(--radius-xs)] bg-[var(--bg-canvas)] border border-[var(--border-default)] max-h-64 overflow-y-auto">
+                                      {logState?.loading ? (
+                                        <div className="p-4 flex items-center justify-center gap-2 text-[var(--text-muted)]">
+                                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                          <span>Loading logs...</span>
+                                        </div>
+                                      ) : !logState || logState.logs.length === 0 ? (
+                                        <div className="p-3 text-[var(--text-muted)] text-[11px]">
+                                          No execution logs recorded.
+                                        </div>
+                                      ) : (
+                                        <div className="divide-y divide-[var(--border-subtle)]">
+                                          {logState.logs.map((entry) => (
+                                            <div
+                                              key={`${entry.executionId}:${entry.sequence}`}
+                                              className="px-2.5 py-1.5 flex items-start gap-2 text-[11px] leading-relaxed hover:bg-[var(--bg-surface-hover)]/40"
+                                            >
+                                              <span className="text-[10px] text-[var(--text-muted)] shrink-0 tabular-nums">
+                                                {formatLogTime(entry.createdAt)}
+                                              </span>
+                                              <span
+                                                className={`text-[9.5px] uppercase px-1 py-0 rounded-[var(--radius-xs)] border shrink-0 ${LOG_LEVEL_BADGE[entry.level]}`}
+                                              >
+                                                {entry.level}
+                                              </span>
+                                              <div className="min-w-0 flex-1 break-words">
+                                                <span className="text-[var(--text-primary)]">
+                                                  {entry.message}
+                                                </span>
+                                                {entry.fields &&
+                                                  Object.keys(entry.fields).length > 0 && (
+                                                    <span className="ml-2 text-[10.5px] text-[var(--text-muted)]">
+                                                      {JSON.stringify(entry.fields)}
+                                                    </span>
+                                                  )}
+                                              </div>
+                                            </div>
+                                          ))}
+                                          {logState.hasMore && (
+                                            <div className="p-2 text-center">
+                                              <button
+                                                type="button"
+                                                disabled={logState.loadingMore}
+                                                onClick={() =>
+                                                  void loadExecutionLogs(exec.executionId, {
+                                                    level: logState.level,
+                                                    append: true,
+                                                    afterSeq: logState.nextAfterSeq,
+                                                  })
+                                                }
+                                                className="px-2.5 py-1 rounded-[var(--radius-xs)] border border-[var(--border-default)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-hover)] text-[10.5px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer disabled:opacity-50 inline-flex items-center gap-1.5"
+                                              >
+                                                {logState.loadingMore && (
+                                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                                )}
+                                                <span>Load more logs</span>
+                                              </button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
                                   </div>
-                                )}
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                  <div>
-                                    <span className="text-[var(--text-muted)] block mb-1">
-                                      stateBefore:
-                                    </span>
-                                    <pre className="p-2.5 rounded-[var(--radius-xs)] bg-[var(--bg-canvas)] border border-[var(--border-default)] text-[var(--text-primary)] overflow-x-auto max-h-40">
-                                      {JSON.stringify(exec.stateBefore || {}, null, 2)}
-                                    </pre>
-                                  </div>
-                                  <div>
-                                    <span className="text-[var(--text-muted)] block mb-1">
-                                      stateAfter:
-                                    </span>
-                                    <pre className="p-2.5 rounded-[var(--radius-xs)] bg-[var(--bg-canvas)] border border-[var(--border-default)] text-[var(--text-primary)] overflow-x-auto max-h-40">
-                                      {JSON.stringify(exec.stateAfter || {}, null, 2)}
-                                    </pre>
+
+                                  {hasSummary && (
+                                    <div>
+                                      <span className="text-[var(--text-muted)] block mb-1">
+                                        actionsSummary:
+                                      </span>
+                                      <pre className="p-2.5 rounded-[var(--radius-xs)] bg-[var(--bg-canvas)] border border-[var(--border-default)] text-[var(--text-primary)] overflow-x-auto max-h-40">
+                                        {JSON.stringify(exec.actionsSummary, null, 2)}
+                                      </pre>
+                                    </div>
+                                  )}
+
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <div>
+                                      <span className="text-[var(--text-muted)] block mb-1">
+                                        stateBefore:
+                                      </span>
+                                      <pre className="p-2.5 rounded-[var(--radius-xs)] bg-[var(--bg-canvas)] border border-[var(--border-default)] text-[var(--text-primary)] overflow-x-auto max-h-40">
+                                        {JSON.stringify(exec.stateBefore || {}, null, 2)}
+                                      </pre>
+                                    </div>
+                                    <div>
+                                      <span className="text-[var(--text-muted)] block mb-1">
+                                        stateAfter:
+                                      </span>
+                                      <pre className="p-2.5 rounded-[var(--radius-xs)] bg-[var(--bg-canvas)] border border-[var(--border-default)] text-[var(--text-primary)] overflow-x-auto max-h-40">
+                                        {JSON.stringify(exec.stateAfter || {}, null, 2)}
+                                      </pre>
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
+                              </td>
+                            </tr>
+                          );
+                        })()}
                       </React.Fragment>
                     );
                   })}

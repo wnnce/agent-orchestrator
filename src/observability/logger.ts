@@ -3,6 +3,15 @@ export type LogLevel = "debug" | "info" | "warn" | "error";
 export type LogFields = Record<string, unknown>;
 export type LogSink = (line: string) => void;
 
+export interface LogEntry {
+  readonly timestamp: string;
+  readonly level: LogLevel;
+  readonly message: string;
+  readonly fields?: LogFields | undefined;
+}
+
+export type LogEntryListener = (entry: LogEntry) => void;
+
 const levels: Record<LogLevel, number> = {
   debug: 10,
   info: 20,
@@ -34,6 +43,9 @@ export interface LoggerOptions {
   level?: LogLevel;
   sink?: LogSink;
   fields?: LogFields;
+  onEntry?: LogEntryListener | undefined;
+  captureAllLevels?: boolean | undefined;
+  listenerFields?: LogFields | undefined;
 }
 
 export class Logger {
@@ -41,12 +53,18 @@ export class Logger {
   private readonly minimum: number;
   private readonly sink: LogSink;
   private readonly fields: LogFields;
+  private readonly onEntry?: LogEntryListener | undefined;
+  private readonly captureAllLevels: boolean;
+  private readonly listenerFields: LogFields;
 
   constructor(options: LoggerOptions = {}) {
     this.service = options.service ?? "agent-orchestrator";
     this.minimum = levels[options.level ?? "info"];
     this.sink = options.sink ?? ((line) => console.log(line));
     this.fields = options.fields ?? {};
+    this.onEntry = options.onEntry;
+    this.captureAllLevels = options.captureAllLevels ?? false;
+    this.listenerFields = options.listenerFields ?? {};
   }
 
   child(fields: LogFields): Logger {
@@ -55,6 +73,29 @@ export class Logger {
       level: this.levelName(),
       sink: this.sink,
       fields: { ...this.fields, ...fields },
+      ...(this.onEntry ? { onEntry: this.onEntry } : {}),
+      captureAllLevels: this.captureAllLevels,
+      listenerFields: this.onEntry ? { ...this.listenerFields, ...fields } : {},
+    });
+  }
+
+  /**
+   * Derives a child logger that also forwards sanitized structured entries to `onEntry`
+   * while continuing to write to the parent sink.
+   */
+  withListener(
+    fields: LogFields,
+    onEntry: LogEntryListener,
+    options: { captureAllLevels?: boolean | undefined } = {},
+  ): Logger {
+    return new Logger({
+      service: this.service,
+      level: this.levelName(),
+      sink: this.sink,
+      fields: { ...this.fields, ...fields },
+      onEntry,
+      captureAllLevels: options.captureAllLevels ?? true,
+      listenerFields: {},
     });
   }
 
@@ -75,17 +116,40 @@ export class Logger {
   }
 
   private write(level: LogLevel, message: string, fields: LogFields): void {
-    if (levels[level] < this.minimum) return;
-    this.sink(
-      JSON.stringify({
-        timestamp: new Date().toISOString(),
+    const shouldWriteSink = levels[level] >= this.minimum;
+    const shouldNotifyListener =
+      this.onEntry !== undefined && (this.captureAllLevels || shouldWriteSink);
+
+    if (!shouldWriteSink && !shouldNotifyListener) return;
+
+    const timestamp = new Date().toISOString();
+    const sanitizedCallFields = sanitize(fields) as Record<string, unknown>;
+
+    if (shouldWriteSink) {
+      this.sink(
+        JSON.stringify({
+          timestamp,
+          level,
+          service: this.service,
+          message,
+          ...(sanitize(this.fields) as Record<string, unknown>),
+          ...sanitizedCallFields,
+        }),
+      );
+    }
+
+    if (shouldNotifyListener && this.onEntry) {
+      const mergedEntryFields: Record<string, unknown> = {
+        ...(sanitize(this.listenerFields) as Record<string, unknown>),
+        ...sanitizedCallFields,
+      };
+      this.onEntry({
+        timestamp,
         level,
-        service: this.service,
         message,
-        ...(sanitize(this.fields) as Record<string, unknown>),
-        ...(sanitize(fields) as Record<string, unknown>),
-      }),
-    );
+        ...(Object.keys(mergedEntryFields).length > 0 ? { fields: mergedEntryFields } : {}),
+      });
+    }
   }
 
   private levelName(): LogLevel {

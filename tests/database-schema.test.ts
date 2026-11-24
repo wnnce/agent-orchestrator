@@ -6,7 +6,7 @@ import { NOT_DELETED, type BaseEntity, type BaseLogRecord } from "../src/domain/
 import { schema } from "../src/persistence/schema.ts";
 
 describe("database schema definition", () => {
-  test("defines the 9 active tables in Drizzle schema without legacy unused tables", () => {
+  test("defines the 10 active tables in Drizzle schema without legacy unused tables", () => {
     const tableConfigs = Object.values(schema).map((table) => getTableConfig(table));
     const tableNames = tableConfigs.map((cfg) => cfg.name).sort();
 
@@ -19,6 +19,7 @@ describe("database schema definition", () => {
         "notification_deliveries",
         "scheduled_jobs",
         "sessions",
+        "task_execution_logs",
         "task_executions",
         "turns",
       ].sort(),

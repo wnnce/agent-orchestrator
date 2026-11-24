@@ -61,6 +61,8 @@ export const taskFrontmatterSchema = z.object({
 
 export type TaskFrontmatter = z.infer<typeof taskFrontmatterSchema>;
 
+export type TaskSourceFormat = "markdown" | "typescript";
+
 /**
  * Structured static task definition.
  */
@@ -75,6 +77,8 @@ export interface TaskDefinition {
   readonly description?: string | undefined;
   readonly promptTemplate: string;
   readonly filePath: string;
+  readonly sourceFormat?: TaskSourceFormat | undefined;
+  readonly fileMtimeMs?: number | undefined;
   readonly type?: string | undefined;
   readonly executor?: string | undefined;
   readonly command?: string | undefined;
@@ -99,6 +103,7 @@ export interface QueuedTask {
  * Task execution context.
  */
 export interface TaskExecutionContext {
+  readonly executionId?: string | undefined;
   readonly task: TaskDefinition;
   readonly stateBefore: Record<string, unknown>;
   readonly signal?: AbortSignal | undefined;

@@ -5,11 +5,13 @@ import type {
   ArtifactRecord,
   EventRecord,
   InboundMessageRecord,
+  ListTaskExecutionLogsFilter,
   NotificationDelivery,
   ScheduledJobRecord,
   ScheduledJobStatusCode,
   SessionRoute,
   SessionUsageSummary,
+  TaskExecutionLogRecord,
   TaskExecutionRecord,
   TurnRecord,
 } from "../../domain/types.ts";
@@ -165,6 +167,17 @@ export class PostgresStore implements Store {
     projectId?: string | undefined,
   ): Promise<TaskExecutionRecord[]> {
     return this.taskAuditRepo.listTaskExecutions(taskKey, limit, projectId);
+  }
+
+  appendTaskExecutionLogs(logs: readonly TaskExecutionLogRecord[]): Promise<void> {
+    return this.taskAuditRepo.appendTaskExecutionLogs(logs);
+  }
+
+  listTaskExecutionLogs(
+    executionId: string,
+    filter?: ListTaskExecutionLogsFilter | undefined,
+  ): Promise<TaskExecutionLogRecord[]> {
+    return this.taskAuditRepo.listTaskExecutionLogs(executionId, filter);
   }
 
   createScheduledJob(job: ScheduledJobRecord): Promise<void> {

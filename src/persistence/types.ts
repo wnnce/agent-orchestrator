@@ -5,11 +5,13 @@ import type {
   ArtifactRecord,
   EventRecord,
   InboundMessageRecord,
+  ListTaskExecutionLogsFilter,
   NotificationDelivery,
   ScheduledJobRecord,
   ScheduledJobStatusCode,
   SessionRoute,
   SessionUsageSummary,
+  TaskExecutionLogRecord,
   TaskExecutionRecord,
   TurnRecord,
 } from "../domain/types.ts";
@@ -77,6 +79,11 @@ export interface Store {
     limit?: number | undefined,
     projectId?: string | undefined,
   ): Promise<TaskExecutionRecord[]>;
+  appendTaskExecutionLogs(logs: readonly TaskExecutionLogRecord[]): Promise<void>;
+  listTaskExecutionLogs(
+    executionId: string,
+    filter?: ListTaskExecutionLogsFilter | undefined,
+  ): Promise<TaskExecutionLogRecord[]>;
   createScheduledJob(job: ScheduledJobRecord): Promise<void>;
   cancelScheduledJob(sessionId: string, identifier: string): Promise<boolean>;
   cancelScheduledJobById(jobId: string): Promise<boolean>;

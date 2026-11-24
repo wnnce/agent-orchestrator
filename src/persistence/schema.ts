@@ -21,6 +21,7 @@ import {
   type NotificationDeliveryDetail,
   type ScheduledJobStatusCode,
   type SessionStatus,
+  type TaskExecutionLogLevel,
   type TaskExecutionRecord,
   type TurnStatus,
   type TurnUsageDetails,
@@ -267,6 +268,25 @@ export const actionExecutions = pgTable(
   ],
 );
 
+export const taskExecutionLogs = pgTable(
+  "task_execution_logs",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    executionId: varchar("execution_id", { length: 100 }).notNull(),
+    projectId: varchar("project_id", { length: 100 }).notNull(),
+    taskKey: varchar("task_key", { length: 255 }).notNull(),
+    sequence: integer("sequence").notNull(),
+    level: varchar("level", { length: 16 }).$type<TaskExecutionLogLevel>().notNull(),
+    message: text("message").notNull(),
+    fields: jsonb("fields").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("idx_task_execution_logs_exec_seq").on(table.executionId, table.sequence),
+    index("idx_task_execution_logs_task_key").on(table.taskKey, table.id.desc()),
+  ],
+);
+
 export const schema = {
   sessions,
   turns,
@@ -275,6 +295,7 @@ export const schema = {
   artifacts,
   notificationDeliveries,
   taskExecutions,
+  taskExecutionLogs,
   scheduledJobs,
   actionExecutions,
 };
@@ -288,5 +309,7 @@ export type EventRow = typeof events.$inferSelect;
 export type ArtifactRow = typeof artifacts.$inferSelect;
 export type NotificationDeliveryRow = typeof notificationDeliveries.$inferSelect;
 export type TaskExecutionRow = typeof taskExecutions.$inferSelect;
+export type TaskExecutionLogRow = typeof taskExecutionLogs.$inferSelect;
+export type NewTaskExecutionLogRow = typeof taskExecutionLogs.$inferInsert;
 export type ScheduledJobRow = typeof scheduledJobs.$inferSelect;
 export type ActionExecutionRow = typeof actionExecutions.$inferSelect;

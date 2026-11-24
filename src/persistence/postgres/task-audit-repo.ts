@@ -1,12 +1,14 @@
-import { and, asc, desc, eq, isNotNull, lte, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNotNull, lte, or } from "drizzle-orm";
 import {
   NOT_DELETED,
   ScheduledJobStatus,
   type ActionExecutionFilter,
   type ActionExecutionRecord,
+  type ListTaskExecutionLogsFilter,
   type NotificationDelivery,
   type ScheduledJobRecord,
   type ScheduledJobStatusCode,
+  type TaskExecutionLogRecord,
   type TaskExecutionRecord,
 } from "../../domain/types.ts";
 import type { DrizzleDatabase } from "../db.ts";
@@ -14,6 +16,7 @@ import {
   actionExecutions,
   notificationDeliveries,
   scheduledJobs,
+  taskExecutionLogs,
   taskExecutions,
 } from "../schema.ts";
 import {
@@ -25,6 +28,7 @@ import {
   toActionExecutionRecord,
   toNotificationDelivery,
   toScheduledJobRecord,
+  toTaskExecutionLogRecord,
   toTaskExecutionRecord,
 } from "./mappers.ts";
 
@@ -138,6 +142,55 @@ export class PostgresTaskAuditRepo {
       .limit(clampLimit(limit, 20, 200));
 
     return rows.map(toTaskExecutionRecord);
+  }
+
+  async appendTaskExecutionLogs(logs: readonly TaskExecutionLogRecord[]): Promise<void> {
+    if (logs.length === 0) return;
+
+    // Chunk at 1024 rows per multi-row INSERT to stay well below PostgreSQL's 65,535 bind param limit.
+    const chunkSize = 1024;
+    for (let offset = 0; offset < logs.length; offset += chunkSize) {
+      const chunk = logs.slice(offset, offset + chunkSize);
+      await this.db
+        .insert(taskExecutionLogs)
+        .values(
+          chunk.map((entry) => ({
+            executionId: entry.executionId,
+            projectId: entry.projectId,
+            taskKey: entry.taskKey,
+            sequence: entry.sequence,
+            level: entry.level,
+            message: entry.message,
+            fields: entry.fields ?? null,
+            createdAt: entry.createdAt ? new Date(entry.createdAt) : new Date(),
+          })),
+        )
+        .onConflictDoNothing({
+          target: [taskExecutionLogs.executionId, taskExecutionLogs.sequence],
+        });
+    }
+  }
+
+  async listTaskExecutionLogs(
+    executionId: string,
+    filter?: ListTaskExecutionLogsFilter | undefined,
+  ): Promise<TaskExecutionLogRecord[]> {
+    const conditions = [eq(taskExecutionLogs.executionId, executionId)];
+    if (filter?.afterSequence !== undefined && filter.afterSequence > 0) {
+      conditions.push(gt(taskExecutionLogs.sequence, filter.afterSequence));
+    }
+    if (filter?.level) {
+      conditions.push(eq(taskExecutionLogs.level, filter.level));
+    }
+
+    const rows = await this.db
+      .select()
+      .from(taskExecutionLogs)
+      .where(and(...conditions))
+      .orderBy(asc(taskExecutionLogs.sequence))
+      .limit(clampLimit(filter?.limit, 200, 1001));
+
+    return rows.map(toTaskExecutionLogRecord);
   }
 
   async createScheduledJob(job: ScheduledJobRecord): Promise<void> {

@@ -39,6 +39,7 @@ import {
   AgentTaskExecutor,
   ScriptTaskExecutor,
   ActionTaskExecutor,
+  TsTaskExecutor,
   type AgentSessionRunner,
   type ITaskExecutor,
   type TaskDefinition,
@@ -182,6 +183,31 @@ export class ProjectRuntime {
           signal: context.signal,
           workspacePath: this.project.projectDir,
         }),
+      ),
+    );
+    taskRegistry.register(
+      new TsTaskExecutor(
+        {
+          resolveHandler: (task) =>
+            this.taskLoader.resolveTsHandler(task, {
+              env: this.project.env,
+              workdir: this.project.projectDir,
+            }),
+          actionRegistry: this.actionRegistry,
+          appendLogs: (logs) => this.store.appendTaskExecutionLogs(logs),
+          getEnv: () => this.project.env,
+          ...(this.project.projectDir
+            ? { getWorkdir: () => this.project.projectDir }
+            : {}),
+          createActionContext: (context) =>
+            this.createActionContext({
+              sessionId: `task_ts_${context.task.taskId}`,
+              taskKey: context.task.taskKey,
+              signal: context.signal,
+              workspacePath: this.project.projectDir,
+            }),
+        },
+        logger,
       ),
     );
 
@@ -1381,6 +1407,10 @@ export class ProjectRuntime {
     const tasks = await this.taskLoader.loadProjectTasks(
       this.project.projectDir,
       this.project.id,
+      {
+        env: this.project.env,
+        workdir: this.project.projectDir,
+      },
     );
     this.taskScheduler.reloadTasks(tasks);
     this.logger.info("project tasks loaded and scheduled", {
@@ -1398,6 +1428,10 @@ export class ProjectRuntime {
     return this.taskLoader.loadProjectTasks(
       this.project.projectDir,
       this.project.id,
+      {
+        env: this.project.env,
+        workdir: this.project.projectDir,
+      },
     );
   }
 

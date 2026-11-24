@@ -3,9 +3,11 @@ import {
   ScheduledJobStatus,
   type ActionExecutionFilter,
   type ActionExecutionRecord,
+  type ListTaskExecutionLogsFilter,
   type NotificationDelivery,
   type ScheduledJobRecord,
   type ScheduledJobStatusCode,
+  type TaskExecutionLogRecord,
   type TaskExecutionRecord,
 } from "../../domain/types.ts";
 import {
@@ -18,6 +20,7 @@ import {
 export class MemoryTaskAuditStore {
   readonly notifications = new Map<string, NotificationDelivery>();
   readonly taskExecutions: TaskExecutionRecord[] = [];
+  readonly taskExecutionLogs = new Map<string, TaskExecutionLogRecord[]>();
   readonly scheduledJobs = new Map<string, ScheduledJobRecord>();
   readonly actionExecutions: ActionExecutionRecord[] = [];
 
@@ -61,6 +64,41 @@ export class MemoryTaskAuditStore {
       if (taskKey && item.taskKey !== taskKey) continue;
       if (projectId && item.projectId !== projectId) continue;
       result.push(structuredClone(item));
+      if (result.length >= max) break;
+    }
+    return result;
+  }
+
+  async appendTaskExecutionLogs(logs: readonly TaskExecutionLogRecord[]): Promise<void> {
+    if (logs.length === 0) return;
+    for (const entry of logs) {
+      const bucket = this.taskExecutionLogs.get(entry.executionId) ?? [];
+      if (bucket.some((existing) => existing.sequence === entry.sequence)) {
+        continue;
+      }
+      bucket.push(structuredClone(entry));
+      this.taskExecutionLogs.set(entry.executionId, bucket);
+    }
+    const touchedIds = new Set(logs.map((entry) => entry.executionId));
+    for (const executionId of touchedIds) {
+      const bucket = this.taskExecutionLogs.get(executionId);
+      bucket?.sort((a, b) => a.sequence - b.sequence);
+    }
+  }
+
+  async listTaskExecutionLogs(
+    executionId: string,
+    filter?: ListTaskExecutionLogsFilter | undefined,
+  ): Promise<TaskExecutionLogRecord[]> {
+    const bucket = this.taskExecutionLogs.get(executionId);
+    if (!bucket || bucket.length === 0) return [];
+    const afterSeq = filter?.afterSequence ?? 0;
+    const max = clampLimit(filter?.limit, 200, 1001);
+    const result: TaskExecutionLogRecord[] = [];
+    for (const entry of bucket) {
+      if (entry.sequence <= afterSeq) continue;
+      if (filter?.level && entry.level !== filter.level) continue;
+      result.push(structuredClone(entry));
       if (result.length >= max) break;
     }
     return result;

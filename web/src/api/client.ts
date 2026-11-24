@@ -8,6 +8,8 @@ import type {
   SessionRoute,
   SessionUsageSummary,
   TaskDefinition,
+  TaskExecutionLogLevel,
+  TaskExecutionLogRecord,
   TaskExecutionRecord,
 } from "../types";
 
@@ -69,6 +71,39 @@ export async function fetchTaskExecutions(params?: {
   if (!res.ok) return [];
   const data = await res.json();
   return data.executions || [];
+}
+
+export async function fetchTaskExecutionLogs(
+  executionId: string,
+  params?: {
+    afterSeq?: number;
+    level?: TaskExecutionLogLevel;
+    limit?: number;
+  },
+): Promise<{
+  logs: TaskExecutionLogRecord[];
+  hasMore: boolean;
+  nextAfterSeq: number;
+}> {
+  const searchParams = new URLSearchParams();
+  if (params?.afterSeq && params.afterSeq > 0) {
+    searchParams.set("afterSeq", String(params.afterSeq));
+  }
+  if (params?.level) searchParams.set("level", params.level);
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+
+  const qs = searchParams.toString();
+  const url = `/tasks/executions/${encodeURIComponent(executionId)}/logs${qs ? `?${qs}` : ""}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    return { logs: [], hasMore: false, nextAfterSeq: params?.afterSeq ?? 0 };
+  }
+  const data = await res.json();
+  return {
+    logs: data.logs || [],
+    hasMore: Boolean(data.hasMore),
+    nextAfterSeq: typeof data.nextAfterSeq === "number" ? data.nextAfterSeq : 0,
+  };
 }
 
 export async function fetchScheduledJobs(params?: {

@@ -5,6 +5,7 @@ import type {
   NotificationDelivery,
   ScheduledJobRecord,
   SessionRoute,
+  TaskExecutionLogRecord,
   TaskExecutionRecord,
   TurnRecord,
   TurnUsage,
@@ -16,6 +17,7 @@ import type {
   NotificationDeliveryRow,
   ScheduledJobRow,
   SessionRow,
+  TaskExecutionLogRow,
   TaskExecutionRow,
   TurnRow,
 } from "../schema.ts";
@@ -151,6 +153,20 @@ export function toTaskExecutionRecord(row: TaskExecutionRow): TaskExecutionRecor
     ...(row.stateAfter !== null ? { stateAfter: row.stateAfter } : {}),
     actionsSummary: row.actionsSummary,
     ...(row.errorMessage !== null ? { errorMessage: row.errorMessage } : {}),
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+export function toTaskExecutionLogRecord(row: TaskExecutionLogRow): TaskExecutionLogRecord {
+  return {
+    id: row.id,
+    executionId: row.executionId,
+    projectId: row.projectId,
+    taskKey: row.taskKey,
+    sequence: row.sequence,
+    level: row.level,
+    message: row.message,
+    ...(row.fields !== null ? { fields: row.fields } : {}),
     createdAt: row.createdAt.toISOString(),
   };
 }

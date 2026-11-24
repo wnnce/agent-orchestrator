@@ -89,6 +89,7 @@ export interface TaskDefinition {
   description?: string;
   promptTemplate: string;
   filePath: string;
+  sourceFormat?: "markdown" | "typescript";
   type?: string;
   runtime?: TaskRuntimeConfig;
   isScheduled?: boolean;
@@ -113,6 +114,20 @@ export interface TaskExecutionRecord {
   actionsSummary?: Record<string, unknown>;
   errorMessage?: string;
   createdAt?: string;
+}
+
+export type TaskExecutionLogLevel = "debug" | "info" | "warn" | "error";
+
+export interface TaskExecutionLogRecord {
+  id?: number;
+  executionId: string;
+  projectId: string;
+  taskKey: string;
+  sequence: number;
+  level: TaskExecutionLogLevel;
+  message: string;
+  fields?: Record<string, unknown>;
+  createdAt: string;
 }
 
 export type ScheduledJobStatusCode = 0 | 1 | 2 | 3 | 4;

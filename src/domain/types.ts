@@ -327,6 +327,25 @@ export interface TaskExecutionRecord extends BaseLogRecord {
   readonly errorMessage?: string | undefined;
 }
 
+export type TaskExecutionLogLevel = "debug" | "info" | "warn" | "error";
+
+export interface TaskExecutionLogRecord extends BaseLogRecord {
+  readonly executionId: string;
+  readonly projectId: string;
+  readonly taskKey: string;
+  readonly sequence: number;
+  readonly level: TaskExecutionLogLevel;
+  readonly message: string;
+  readonly fields?: Record<string, unknown> | undefined;
+  readonly createdAt: string;
+}
+
+export interface ListTaskExecutionLogsFilter {
+  readonly afterSequence?: number | undefined;
+  readonly level?: TaskExecutionLogLevel | undefined;
+  readonly limit?: number | undefined;
+}
+
 export const ScheduledJobStatus = {
   COMPLETED: 0,
   PENDING: 1,
