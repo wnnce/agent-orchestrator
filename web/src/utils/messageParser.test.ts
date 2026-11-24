@@ -443,3 +443,20 @@ test("extracts TurnUsage from turn.completed events and formats usage metrics cl
     contextWindowTokens: 200000,
   });
 });
+
+test("reconstructMessagesFromEvents preserves error message on turn.failed", () => {
+  const events: RuntimeEvent[] = [
+    { sequence: 1, type: "turn.queued", payload: { turnId: "t_err", input: "hi" } },
+    { sequence: 2, type: "turn.started", payload: { turnId: "t_err" } },
+    {
+      sequence: 3,
+      type: "turn.failed",
+      payload: { turnId: "t_err", status: "failed", error: "Model not supported" },
+    },
+  ];
+
+  const { messages, isRunning } = reconstructMessagesFromEvents(events);
+  expect(isRunning).toBe(false);
+  expect(messages[1].status).toBe("failed");
+  expect(messages[1].error).toBe("Model not supported");
+});

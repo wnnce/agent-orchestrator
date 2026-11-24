@@ -10,6 +10,7 @@ import {
   User,
   Archive,
   Loader2,
+  AlertCircle,
 } from "lucide-react";
 import type { ChatMessage } from "../types";
 import { calculateCacheHitRate, formatTokenCount } from "../utils/formatters";
@@ -615,6 +616,16 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                         <div className="flex items-center gap-1.5 text-xs text-[var(--text-muted)] pt-2 select-none font-mono">
                           <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
                           <span className="text-[11px] text-[var(--text-muted)]">Generation interrupted</span>
+                        </div>
+                      )}
+
+                      {/* Failed indicator */}
+                      {m.status === "failed" && (
+                        <div className="flex items-start gap-2 px-3 py-2 rounded-[var(--radius-sm)] border border-red-500/30 bg-red-500/10 text-xs text-red-400 font-mono">
+                          <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-red-500" />
+                          <span className="break-words leading-relaxed">
+                            {m.error || "Turn failed"}
+                          </span>
                         </div>
                       )}
 

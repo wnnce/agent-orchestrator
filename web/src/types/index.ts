@@ -195,6 +195,7 @@ export interface ChatMessage {
   thinking?: string;
   commands?: CommandExecution[];
   usage?: TurnUsage;
+  error?: string;
   status?: "pending" | "streaming" | "completed" | "failed" | "interrupted";
   timestamp: number;
 }

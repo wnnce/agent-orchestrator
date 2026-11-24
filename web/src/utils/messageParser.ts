@@ -324,6 +324,11 @@ export function applyEventToAssistantMessage(msg: ChatMessage, evt: RuntimeEvent
         }
       }
 
+      const errorText = typeof payload.error === "string" ? payload.error.trim() : "";
+      if (errorText) {
+        msg.error = errorText;
+      }
+
       const usage = parseTurnUsage(payload.usage);
       if (usage) {
         msg.usage = usage;
