@@ -62,8 +62,24 @@ export interface ProjectRoutingDescription {
   routingHints?: string[];
 }
 
-export const REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export const REASONING_EFFORTS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "ultra",
+] as const;
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+
+/** Per-session runtime overrides supplied at session creation time. */
+export interface SessionRuntimeOverride {
+  readonly runtime?: string | undefined;
+  readonly model?: string | undefined;
+  readonly reasoningEffort?: string | undefined;
+}
 
 /**
  * What a project chooses about its agent. Everything else (login, providers, default model,
@@ -179,6 +195,8 @@ export interface SessionRoute extends BaseEntity {
   projectRuntimeId: string;
   runtimeSessionId: string | null;
   runtime?: string;
+  model?: string;
+  reasoningEffort?: string;
   /** Absolute path of the session's working directory, fixed when the session is created. */
   workspacePath?: string;
   configRevision: number;

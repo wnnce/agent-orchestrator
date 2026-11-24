@@ -27,6 +27,8 @@ export class PostgresSessionRepo {
       status: route.status,
       source,
       runtime,
+      model: route.model ?? null,
+      reasoningEffort: route.reasoningEffort ?? null,
       workspacePath: route.workspacePath ?? null,
       externalChannel: route.externalChannel ?? null,
       externalConversationId: route.externalConversationId ?? null,
@@ -98,6 +100,10 @@ export class PostgresSessionRepo {
           : {}),
         ...(route.source !== undefined ? { source: route.source } : {}),
         ...(route.runtime !== undefined ? { runtime: route.runtime } : {}),
+        ...(route.model !== undefined ? { model: route.model } : {}),
+        ...(route.reasoningEffort !== undefined
+          ? { reasoningEffort: route.reasoningEffort }
+          : {}),
         updatedAt: new Date(),
       })
       .where(and(eq(sessions.sessionId, route.sessionId), eq(sessions.deletedAt, NOT_DELETED)));

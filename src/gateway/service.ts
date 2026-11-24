@@ -24,6 +24,9 @@ export interface CreateSessionInput {
   query?: string;
   submitQuery?: boolean;
   source?: string;
+  runtime?: string;
+  model?: string;
+  reasoningEffort?: string;
   external?: {
     channel: string;
     conversationId: string;
@@ -114,9 +117,18 @@ export class GatewayService {
           ).project.id,
         );
     const source = input.source ?? input.external?.channel ?? "web";
+    const runtimeOverride =
+      input.runtime || input.model || input.reasoningEffort
+        ? {
+            ...(input.runtime ? { runtime: input.runtime } : {}),
+            ...(input.model ? { model: input.model } : {}),
+            ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+          }
+        : undefined;
     let route = await project.createSession(
       explicitTitle ? { title: explicitTitle } : undefined,
       source,
+      runtimeOverride,
     );
     if (input.external) route = await project.bindExternal(route.sessionId, input.external);
     const turn =

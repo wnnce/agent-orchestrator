@@ -9,10 +9,18 @@ export function createProjectsRouter(deps: ProjectsRouteDeps): Hono {
   const router = new Hono();
 
   router.get("/projects", (c) => {
+    const defaultRuntime = deps.projects.getDefaultRuntime();
     return c.json({
       projects: deps.projects.list().map((project) => ({
         ...project.routing,
         ...(project.repository?.url ? { repository: project.repository.url } : {}),
+        runtime: {
+          type: project.runtime?.type ?? defaultRuntime,
+          ...(project.runtime?.model ? { model: project.runtime.model } : {}),
+          ...(project.runtime?.reasoningEffort
+            ? { reasoningEffort: project.runtime.reasoningEffort }
+            : {}),
+        },
       })),
     });
   });

@@ -7,8 +7,10 @@ import {
   type ArtifactRecord,
   type EventRecord,
   type ProjectConfig,
+  type ReasoningEffort,
   type ScheduledJobRecord,
   type SessionRoute,
+  type SessionRuntimeOverride,
   type TurnRecord,
 } from "../domain/types.ts";
 import { isTransientEvent } from "../domain/events.ts";
@@ -65,9 +67,12 @@ export interface SessionExecutionOptions {
   queueLimit?: number;
   controlTimeoutMs?: number;
   scheduledJobPollIntervalMs?: number;
+  /** Optional lazy factory for creating additional runtimes requested at session creation time. */
+  runtimeFactory?: ((runtimeType: string) => AgentRuntime) | undefined;
 }
 
 export class ProjectRuntime {
+  private readonly runtimes = new Map<string, AgentRuntime>();
   private readonly activeTurns = new Map<string, ActiveTurn>();
   private readonly pendingTurns = new Map<string, TurnRecord[]>();
   private readonly pumps = new Map<string, Promise<void>>();
@@ -112,6 +117,7 @@ export class ProjectRuntime {
       taskScheduler ?? new TaskScheduler(this.taskEngine, logger);
     this.taskLoader = taskLoader ?? new TaskLoader(logger);
     this.actionRegistry = actionRegistry ?? defaultActionRegistry;
+    this.runtimes.set(this.runtimeName(this.runtime), this.runtime);
 
     const taskRegistry = new TaskExecutorRegistry(logger);
     const agentRunner: AgentSessionRunner = {
@@ -279,7 +285,7 @@ export class ProjectRuntime {
     await this.notifications.drain().catch(() => {});
     await Promise.allSettled([...this.admissions.values()]);
     for (const id of [...this.pendingTurns.keys()]) await this.cancelQueued(id);
-    await this.runtime.stop();
+    await Promise.allSettled([...this.runtimes.values()].map((rt) => rt.stop()));
     this.boundSessions.clear();
     for (const [id, active] of [...this.activeTurns]) {
       await this.finishTurn(id, active, "failed", "runtime stopped");
@@ -319,9 +325,21 @@ export class ProjectRuntime {
   async createSession(
     metadata?: Record<string, unknown>,
     source = "api",
+    runtimeOverride?: SessionRuntimeOverride,
   ): Promise<SessionRoute> {
     if (!this.project.repository && this.project.id !== GLOBAL_PROJECT_ID)
       throw new Error(`project ${this.project.id} has no repository`);
+
+    const requestedRuntime = runtimeOverride?.runtime?.trim().toLowerCase() || undefined;
+    const targetRuntime = this.resolveRuntime(requestedRuntime);
+    const runtimeName = this.runtimeName(targetRuntime);
+    const isDefaultRuntime = runtimeName === this.runtimeName(this.runtime);
+    const explicitModel = runtimeOverride?.model?.trim() || undefined;
+    const explicitEffort = runtimeOverride?.reasoningEffort?.trim() || undefined;
+    const model = explicitModel ?? (isDefaultRuntime ? this.project.runtime?.model : undefined);
+    const reasoningEffort =
+      explicitEffort ?? (isDefaultRuntime ? this.project.runtime?.reasoningEffort : undefined);
+
     const sessionId = `ses_${randomUUID()}`;
     const workspacePath = await this.workspaces.ensureSessionWorkspace(
       this.project,
@@ -330,10 +348,13 @@ export class ProjectRuntime {
 
     const taskKey =
       typeof metadata?.taskKey === "string" ? metadata.taskKey : undefined;
-    const context = this.context(workspacePath, sessionId, taskKey);
-    const runtimeSession = await this.runtime.startSession(context);
+    const context = this.context(workspacePath, sessionId, taskKey, {
+      runtime: runtimeName,
+      model,
+      reasoningEffort,
+    });
+    const runtimeSession = await targetRuntime.startSession(context);
     this.boundSessions.add(sessionId);
-    const runtimeName = this.runtimeName();
     const route: SessionRoute = {
       sessionId,
       ...(typeof metadata?.title === "string" && metadata.title
@@ -343,23 +364,36 @@ export class ProjectRuntime {
       projectRuntimeId: `project-runtime:${this.project.id}`,
       runtimeSessionId: runtimeSession.id,
       runtime: runtimeName,
+      ...(model ? { model } : {}),
+      ...(reasoningEffort ? { reasoningEffort } : {}),
       workspacePath,
       configRevision: this.project.revision ?? 1,
       status: "active",
       source,
       lastActiveAt: new Date().toISOString(),
-      metadata: { ...(metadata ?? {}), runtime: runtimeName },
+      metadata: {
+        ...(metadata ?? {}),
+        runtime: runtimeName,
+        ...(model ? { model } : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+      },
     };
     await this.store.createSession(route);
     this.sessionManager.loadOrCreate(route);
     await this.emit(route, "session.started", "gateway", {
       runtimeSessionId: runtimeSession.id,
       workspacePath,
+      runtime: runtimeName,
+      ...(model ? { model } : {}),
+      ...(reasoningEffort ? { reasoningEffort } : {}),
     });
     this.logger.info("session created", {
       projectId: this.project.id,
       sessionId,
       runtimeSessionId: runtimeSession.id,
+      runtime: runtimeName,
+      ...(model ? { model } : {}),
+      ...(reasoningEffort ? { reasoningEffort } : {}),
     });
     return route;
   }
@@ -661,8 +695,9 @@ export class ProjectRuntime {
     const route = await this.loadSession(sessionId);
     const active = this.activeTurns.get(sessionId);
     if (!active?.runtimeId || active.settled) throw new Error("no active turn");
-    await this.runtime.steerTurn(
-      this.context(this.workspacePath(route), sessionId),
+    const runtime = this.runtimeForRoute(route);
+    await runtime.steerTurn(
+      this.context(this.workspacePath(route), sessionId, undefined, route),
       route.runtimeSessionId ?? "",
       active.runtimeId,
       input,
@@ -683,12 +718,14 @@ export class ProjectRuntime {
       return;
     if (!active.canceled) {
       active.canceled = true;
-      if (active.runtimeId)
-        await this.runtime.interruptTurn(
-          this.context(this.workspacePath(route), sessionId),
+      if (active.runtimeId) {
+        const runtime = this.runtimeForRoute(route);
+        await runtime.interruptTurn(
+          this.context(this.workspacePath(route), sessionId, undefined, route),
           route.runtimeSessionId ?? "",
           active.runtimeId,
         );
+      }
     }
     await this.bounded(
       active.completed,
@@ -700,8 +737,9 @@ export class ProjectRuntime {
     const active = this.activeTurns.get(sessionId);
     if (active && !active.settled)
       throw new Error("cannot compact while a turn is running");
-    await this.runtime.compactSession(
-      this.context(this.workspacePath(route), sessionId),
+    const runtime = this.runtimeForRoute(route);
+    await runtime.compactSession(
+      this.context(this.workspacePath(route), sessionId, undefined, route),
       route.runtimeSessionId ?? "",
     );
   }
@@ -711,8 +749,9 @@ export class ProjectRuntime {
     decision: ApprovalDecision,
   ): Promise<void> {
     const route = await this.loadSession(sessionId);
-    await this.runtime.respondToApproval(
-      this.context(this.workspacePath(route), sessionId),
+    const runtime = this.runtimeForRoute(route);
+    await runtime.respondToApproval(
+      this.context(this.workspacePath(route), sessionId, undefined, route),
       requestId,
       decision,
     );
@@ -753,8 +792,13 @@ export class ProjectRuntime {
       typeof route.metadata?.taskKey === "string"
         ? route.metadata.taskKey
         : undefined;
-    const context = this.context(workspacePath, id, taskKey);
-    const runtimeSessionId = await this.bindRuntimeSession(entity, context);
+    const { runtimeSessionId, runtime: sessionRuntime } = await this.bindRuntimeSession(
+      entity,
+      workspacePath,
+      taskKey,
+    );
+    const boundRoute = entity.toRoute();
+    const context = this.context(workspacePath, id, taskKey, boundRoute);
     if (entity.status !== "closing") await entity.transitionTo("active");
     entity.touch();
     await entity.flush(this.store);
@@ -767,10 +811,10 @@ export class ProjectRuntime {
       startedAt: new Date().toISOString(),
     });
     await entity.notifyTurnStarted(turn.id, turn.input);
-    await this.emit(entity.toRoute(), "turn.started", this.runtime.type, {
+    await this.emit(boundRoute, "turn.started", sessionRuntime.type, {
       turnId: turn.id,
     });
-    const runtimeTurn = await this.runtime.startTurn(
+    const runtimeTurn = await sessionRuntime.startTurn(
       context,
       runtimeSessionId,
       turn.id,
@@ -782,7 +826,7 @@ export class ProjectRuntime {
       await this.processRuntimeEvent(id, active.early.shift()!);
     active.starting = false;
     if (active.canceled && !active.settled)
-      await this.runtime.interruptTurn(
+      await sessionRuntime.interruptTurn(
         context,
         runtimeSessionId,
         runtimeTurn.id,
@@ -791,31 +835,45 @@ export class ProjectRuntime {
   }
   /**
    * Makes sure the agent runtime holds this session, resuming it at most once per process.
-   * When the runtime no longer has the session, or the project switched runtimes, a new runtime
-   * session is started and `session.runtime_reset` tells clients the earlier context is gone.
+   * When the session's recorded runtime is still available in this process, that runtime resumes
+   * it directly. When the runtime no longer has the session or is no longer available, a new
+   * session is started on the project's default runtime and `session.runtime_reset` is emitted.
    */
   private async bindRuntimeSession(
     entity: SessionEntity,
-    context: RuntimeContext,
-  ): Promise<string> {
+    workspacePath: string,
+    taskKey?: string,
+  ): Promise<{ runtimeSessionId: string; runtime: AgentRuntime }> {
     const route = entity.toRoute();
     const previousId = route.runtimeSessionId;
-    if (previousId && this.boundSessions.has(route.sessionId)) return previousId;
+    const requestedRuntime =
+      route.runtime && route.runtime !== "unknown" ? route.runtime : undefined;
+    const resolved = this.tryResolveRuntime(requestedRuntime);
+    if (previousId && this.boundSessions.has(route.sessionId) && resolved) {
+      return { runtimeSessionId: previousId, runtime: resolved };
+    }
 
-    const runtimeName = this.runtimeName();
+    const targetRuntime = resolved ?? this.runtime;
+    const runtimeName = this.runtimeName(targetRuntime);
     let resetReason: "not_found" | "runtime_changed" | undefined;
     let runtimeSessionId: string | undefined;
-    if (previousId && route.runtime && route.runtime !== "unknown" && route.runtime !== runtimeName) {
+    const context = this.context(workspacePath, route.sessionId, taskKey, {
+      runtime: runtimeName,
+      model: resolved ? route.model : undefined,
+      reasoningEffort: resolved ? route.reasoningEffort : undefined,
+    });
+
+    if (previousId && requestedRuntime && !resolved) {
       resetReason = "runtime_changed";
     } else if (previousId) {
       try {
-        runtimeSessionId = (await this.runtime.resumeSession(context, previousId)).id;
+        runtimeSessionId = (await targetRuntime.resumeSession(context, previousId)).id;
       } catch (error) {
         if (!(error instanceof RuntimeSessionNotFoundError)) throw error;
         resetReason = "not_found";
       }
     }
-    runtimeSessionId ??= (await this.runtime.startSession(context)).id;
+    runtimeSessionId ??= (await targetRuntime.startSession(context)).id;
     entity.bindRuntime(runtimeSessionId, runtimeName);
     this.boundSessions.add(route.sessionId);
 
@@ -834,17 +892,66 @@ export class ProjectRuntime {
         runtimeSessionId,
       });
     }
-    return runtimeSessionId;
+    return { runtimeSessionId, runtime: targetRuntime };
   }
-  private runtimeName(): string {
-    return this.runtime.name ?? this.runtime.type;
+  private runtimeName(runtime: AgentRuntime = this.runtime): string {
+    return runtime.name ?? runtime.type;
+  }
+  private resolveRuntime(runtimeType?: string): AgentRuntime {
+    const resolved = this.tryResolveRuntime(runtimeType);
+    if (resolved) return resolved;
+    throw new Error(`runtime not available for project ${this.project.id}: ${runtimeType}`);
+  }
+  private tryResolveRuntime(runtimeType?: string): AgentRuntime | undefined {
+    const normalized = runtimeType?.trim().toLowerCase();
+    if (!normalized || normalized === "unknown") return this.runtime;
+    const defaultName = this.runtimeName(this.runtime).toLowerCase();
+    if (normalized === defaultName || normalized === this.runtime.type.toLowerCase()) {
+      return this.runtime;
+    }
+    const cached = this.runtimes.get(normalized);
+    if (cached) return cached;
+    if (!this.options.runtimeFactory) return undefined;
+    try {
+      const created = this.options.runtimeFactory(normalized);
+      this.runtimes.set(normalized, created);
+      return created;
+    } catch {
+      return undefined;
+    }
+  }
+  private runtimeForRoute(route: Pick<SessionRoute, "runtime">): AgentRuntime {
+    return this.tryResolveRuntime(route.runtime) ?? this.runtime;
+  }
+  private effectiveProjectFor(override?: SessionRuntimeOverride): ProjectConfig {
+    const defaultType = this.runtimeName(this.runtime);
+    const targetType =
+      override?.runtime && override.runtime !== "unknown" ? override.runtime : defaultType;
+    const isDefaultRuntime = targetType.toLowerCase() === defaultType.toLowerCase();
+    const model = override?.model ?? (isDefaultRuntime ? this.project.runtime?.model : undefined);
+    const reasoningEffort =
+      override?.reasoningEffort ??
+      (isDefaultRuntime ? this.project.runtime?.reasoningEffort : undefined);
+
+    return {
+      ...this.project,
+      runtime: {
+        ...(this.project.runtime?.mcpServers
+          ? { mcpServers: this.project.runtime.mcpServers }
+          : {}),
+        type: targetType,
+        ...(model ? { model } : {}),
+        ...(reasoningEffort ? { reasoningEffort: reasoningEffort as ReasoningEffort } : {}),
+      },
+    };
   }
   /** Releases the runtime's hold on a session; the next turn resumes it. */
   private async releaseRuntimeSession(route: SessionRoute): Promise<void> {
     this.boundSessions.delete(route.sessionId);
     if (!route.runtimeSessionId) return;
-    await this.runtime.releaseSession(
-      this.context(this.workspacePath(route), route.sessionId),
+    const runtime = this.runtimeForRoute(route);
+    await runtime.releaseSession(
+      this.context(this.workspacePath(route), route.sessionId, undefined, route),
       route.runtimeSessionId,
     );
   }
@@ -870,9 +977,10 @@ export class ProjectRuntime {
     workspacePath: string,
     sessionId: string,
     taskKey?: string,
+    runtimeOverride?: SessionRuntimeOverride,
   ): RuntimeContext {
     return {
-      project: this.project,
+      project: this.effectiveProjectFor(runtimeOverride),
       workspacePath,
       ...(taskKey ? { taskKey } : {}),
       ...(this.project.id === GLOBAL_PROJECT_ID ? { readOnly: true } : {}),
@@ -967,7 +1075,9 @@ export class ProjectRuntime {
         "text/plain; charset=utf-8",
       );
     }
-    await this.emit(entity.toRoute(), type, this.runtime.type, {
+    const route = entity.toRoute();
+    const sessionRuntime = this.runtimeForRoute(route);
+    await this.emit(route, type, sessionRuntime.type, {
       ...event.payload,
       ...(active ? { turnId: active.turn.id } : {}),
       runtimeSessionId: event.sessionId,
@@ -998,7 +1108,9 @@ export class ProjectRuntime {
       });
       entity.touch();
       await entity.flush(this.store);
-      await this.emit(entity.toRoute(), `turn.${status}`, this.runtime.type, {
+      const route = entity.toRoute();
+      const sessionRuntime = this.runtimeForRoute(route);
+      await this.emit(route, `turn.${status}`, sessionRuntime.type, {
         ...((event?.payload ?? {}) as Record<string, unknown>),
         turnId: active.turn.id,
         runtimeTurnId: active.runtimeId,

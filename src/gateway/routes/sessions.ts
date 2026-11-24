@@ -35,6 +35,11 @@ export function createSessionsRouter(deps: SessionsRouteDeps): Hono {
       ...(typeof body.projectId === "string" ? { projectId: body.projectId } : {}),
       ...(typeof body.title === "string" ? { title: body.title } : {}),
       ...(typeof body.query === "string" ? { query: body.query } : {}),
+      ...(typeof body.runtime === "string" ? { runtime: body.runtime } : {}),
+      ...(typeof body.model === "string" ? { model: body.model } : {}),
+      ...(typeof body.reasoningEffort === "string"
+        ? { reasoningEffort: body.reasoningEffort }
+        : {}),
       source,
       ...(external ? { external } : {}),
     });
@@ -50,6 +55,11 @@ export function createSessionsRouter(deps: SessionsRouteDeps): Hono {
       projectId,
       ...(typeof body.title === "string" ? { title: body.title } : {}),
       ...(typeof body.query === "string" ? { query: body.query } : {}),
+      ...(typeof body.runtime === "string" ? { runtime: body.runtime } : {}),
+      ...(typeof body.model === "string" ? { model: body.model } : {}),
+      ...(typeof body.reasoningEffort === "string"
+        ? { reasoningEffort: body.reasoningEffort }
+        : {}),
       source,
       ...(external ? { external } : {}),
     });

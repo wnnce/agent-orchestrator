@@ -34,6 +34,8 @@ export function toSessionRoute(row: SessionRow): SessionRoute {
     projectRuntimeId: row.projectRuntimeId,
     runtimeSessionId: row.runtimeSessionId,
     runtime: row.runtime ?? runtimeFromMeta ?? "unknown",
+    ...(row.model !== null ? { model: row.model } : {}),
+    ...(row.reasoningEffort !== null ? { reasoningEffort: row.reasoningEffort } : {}),
     ...(row.workspacePath !== null ? { workspacePath: row.workspacePath } : {}),
     configRevision: row.configRevision,
     status: row.status,

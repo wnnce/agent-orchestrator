@@ -41,6 +41,10 @@ export class ProjectManager {
     return this.config.defaultRuntime ?? "codex";
   }
 
+  getDefaultRuntime(): string {
+    return this.defaultRuntime;
+  }
+
   getRuntimeRegistry(): RuntimeRegistry {
     return this.runtimeRegistry;
   }
@@ -122,14 +126,17 @@ export class ProjectManager {
       actionRegistry.registerAll(defaultActionRegistry.list());
     }
 
-    const runtime = this.runtimeRegistry.create(runtimeType, {
-      project: effective,
-      logger: this.logger.child({ projectId: project.id }),
-      config: this.config,
-      actionRegistry,
-      globalProject:
-        project.id === GLOBAL_PROJECT_ID ? undefined : this.globalProject,
-    });
+    const createAgentRuntime = (type: string): AgentRuntime =>
+      this.runtimeRegistry.create(type, {
+        project: { ...effective, runtime: { ...effective.runtime, type } },
+        logger: this.logger.child({ projectId: project.id }),
+        config: this.config,
+        actionRegistry,
+        globalProject:
+          project.id === GLOBAL_PROJECT_ID ? undefined : this.globalProject,
+      });
+
+    const runtime = createAgentRuntime(runtimeType);
     return new ProjectRuntime(
       effective,
       this.store,
@@ -144,7 +151,7 @@ export class ProjectManager {
       this.logger,
       this.eventHub,
       this.sessionManager,
-      {},
+      { runtimeFactory: createAgentRuntime },
       project.id === GLOBAL_PROJECT_ID ? undefined : this.globalProject,
       undefined,
       undefined,

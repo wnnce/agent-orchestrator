@@ -216,6 +216,8 @@ describe("PostgresStore with Drizzle ORM", () => {
       status: "active",
       source: "feishu",
       runtime: "codex",
+      model: "gpt-5.6-terra",
+      reasoningEffort: "high",
       workspacePath: "/ws/ses_7",
       externalChannel: "feishu",
       externalConversationId: "oc_1",
@@ -233,6 +235,8 @@ describe("PostgresStore with Drizzle ORM", () => {
     expect("externalThreadId" in session).toBe(false);
     expect(session.cursors).toEqual({ feishu: 5 });
     expect(session.workspacePath).toBe("/ws/ses_7");
+    expect(session.model).toBe("gpt-5.6-terra");
+    expect(session.reasoningEffort).toBe("high");
 
     const turn = toTurnRecord({
       id: 9,

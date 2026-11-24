@@ -39,6 +39,8 @@ export const sessions = pgTable(
     status: varchar("status", { length: 50 }).$type<SessionStatus>().notNull(),
     source: varchar("source", { length: 50 }).notNull().default("unknown"),
     runtime: varchar("runtime", { length: 50 }).notNull().default("unknown"),
+    model: varchar("model", { length: 150 }),
+    reasoningEffort: varchar("reasoning_effort", { length: 30 }),
     workspacePath: text("workspace_path"),
     externalChannel: varchar("external_channel", { length: 50 }),
     externalConversationId: varchar("external_conversation_id", { length: 255 }),
