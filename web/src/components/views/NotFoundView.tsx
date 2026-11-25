@@ -1,17 +1,17 @@
 import React from "react";
 import { ArrowLeft, Home } from "lucide-react";
-import { useLocation } from "wouter";
-import { useStudio } from "../../context/StudioContext";
+import { useLocation, useNavigate } from "react-router";
+import { ROUTES } from "../../routes";
 
 export function NotFoundView() {
-  const [location] = useLocation();
-  const { goHome } = useStudio();
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
 
   const handleGoBack = () => {
     if (window.history.length > 1) {
-      window.history.back();
+      navigate(-1);
     } else {
-      goHome();
+      navigate(ROUTES.root);
     }
   };
 
@@ -28,7 +28,7 @@ export function NotFoundView() {
           <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
             未找到路径{" "}
             <code className="px-1.5 py-0.5 rounded-[var(--radius-xs)] bg-[var(--bg-surface-elevated)] border border-[var(--border-default)] font-mono text-[11px] text-[var(--text-primary)] break-all">
-              {location}
+              {pathname}
             </code>
             ，请检查地址是否正确或返回主页。
           </p>
@@ -45,7 +45,7 @@ export function NotFoundView() {
           </button>
           <button
             type="button"
-            onClick={goHome}
+            onClick={() => navigate(ROUTES.root)}
             className="px-3.5 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium bg-[var(--primary)] text-[var(--text-inverted)] hover:opacity-90 transition-opacity cursor-pointer inline-flex items-center gap-1.5"
           >
             <Home className="w-3.5 h-3.5" />

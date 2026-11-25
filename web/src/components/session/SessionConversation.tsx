@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { sessionsApi } from "../../api";
 import { useStudio } from "../../context/StudioContext";
+import { useCurrentProject } from "../../layouts/ProjectLayout";
 import type {
   ArtifactRecord,
   ChatMessage,
@@ -72,13 +73,13 @@ export function SessionConversation({
   mode = "standalone",
   taskExecution = null,
 }: SessionConversationProps) {
-  const {
-    activeProjectId,
-    activeProject,
-    activeSession,
-    setSessions,
-    showInspector,
-  } = useStudio();
+  const activeProject = useCurrentProject();
+  const activeProjectId = activeProject.projectId;
+  const { sessions, setSessions, showInspector } = useStudio();
+  const activeSession = useMemo(
+    () => sessions.find((s) => s.sessionId === sessionId) ?? null,
+    [sessions, sessionId],
+  );
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [events, setEvents] = useState<RuntimeEvent[]>([]);

@@ -13,8 +13,10 @@ import {
   Search,
   Terminal,
 } from "lucide-react";
+import { generatePath, useNavigate, useParams } from "react-router";
 import { tasksApi } from "../../api";
-import { useStudio } from "../../context/StudioContext";
+import { useCurrentProject } from "../../layouts/ProjectLayout";
+import { ROUTES } from "../../routes";
 import type { ProjectRuntimeDefault, TaskDefinition, TaskExecutionRecord } from "../../types";
 import { formatDateTime, formatDuration, formatTimeAgo } from "../../utils/formatters";
 import { EASE_OUT_EXPO } from "../../utils/motion";
@@ -216,7 +218,28 @@ const RUNS_PAGE_SIZE = 25;
 const RUNS_SCROLL_PREFETCH_MARGIN = "0px 0px 180px 0px";
 
 export function TasksView() {
-  const { activeProjectId, activeProject, activeTaskId, activeExecutionId, openTask } = useStudio();
+  const activeProject = useCurrentProject();
+  const activeProjectId = activeProject.projectId;
+  const { taskId: activeTaskId = null, executionId: activeExecutionId = null } = useParams<{
+    taskId?: string;
+    executionId?: string;
+  }>();
+  const navigate = useNavigate();
+
+  const openTask = useCallback(
+    (taskId: string, executionId?: string | null) => {
+      navigate(
+        executionId
+          ? generatePath(ROUTES.taskExecution, {
+              projectId: activeProjectId,
+              taskId,
+              executionId,
+            })
+          : generatePath(ROUTES.task, { projectId: activeProjectId, taskId }),
+      );
+    },
+    [activeProjectId, navigate],
+  );
 
   const [tasks, setTasks] = useState<TaskDefinition[]>([]);
   const [taskExecutions, setTaskExecutions] = useState<TaskExecutionRecord[]>([]);

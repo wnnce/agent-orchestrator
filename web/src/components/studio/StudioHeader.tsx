@@ -1,5 +1,6 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import { AnimatePresence, m } from "motion/react";
+import { generatePath, Link, useNavigate, useParams } from "react-router";
 import {
   ChevronDown,
   PanelRightClose,
@@ -13,37 +14,46 @@ import {
 } from "lucide-react";
 import { useStudio } from "../../context/StudioContext";
 import { useTheme } from "../../context/ThemeContext";
+import { useCurrentRouteHandle } from "../../layouts/ProjectLayout";
+import { ROUTES, viewPath } from "../../routes";
+import type { ProjectRouting } from "../../types";
 import { EASE_OUT_EXPO } from "../../utils/motion";
 
-export function StudioHeader() {
+interface StudioHeaderProps {
+  project: ProjectRouting;
+}
+
+export function StudioHeader({ project }: StudioHeaderProps) {
   const {
-    activeView,
     projects,
-    activeProjectId,
-    setActiveProjectId,
-    activeProject,
-    activeSession,
-    activeSessionId,
+    sessions,
     showInspector,
     toggleInspector,
-    closeToBoard,
     refreshProjects,
     refreshSessions,
     isReady,
   } = useStudio();
+  const { sessionId } = useParams<{ sessionId?: string }>();
+  const handle = useCurrentRouteHandle();
+  const navigate = useNavigate();
 
   const { theme, cycleTheme } = useTheme();
   const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
   const [refreshSpinKey, setRefreshSpinKey] = useState(0);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  const activeNav = handle?.nav ?? "sessions";
+  const sectionTitle = handle?.title ?? "Sessions";
+
+  const activeSession = useMemo(
+    () => (sessionId ? sessions.find((s) => s.sessionId === sessionId) ?? null : null),
+    [sessions, sessionId],
+  );
+
   // Close dropdown when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(event.target as Node)
-      ) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setProjectDropdownOpen(false);
       }
     }
@@ -54,14 +64,12 @@ export function StudioHeader() {
   const handleRefresh = () => {
     setRefreshSpinKey((k) => k + 1);
     refreshProjects();
-    refreshSessions();
+    refreshSessions(project.projectId);
   };
 
-  const viewTitles: Record<string, string> = {
-    project: "Overview",
-    sessions: "Sessions",
-    tasks: "Tasks",
-    jobs: "Scheduled Jobs",
+  const handleSelectProject = (nextProjectId: string) => {
+    setProjectDropdownOpen(false);
+    navigate(viewPath(nextProjectId, activeNav));
   };
 
   return (
@@ -97,7 +105,7 @@ export function StudioHeader() {
           >
             <FolderKanban className="w-3.5 h-3.5 text-[var(--text-secondary)] shrink-0" />
             <span className="font-medium leading-none">
-              {activeProject?.displayName || activeProjectId || "Select Project"}
+              {project.displayName || project.projectId}
             </span>
             <ChevronDown
               className={`w-3 h-3 text-[var(--text-muted)] shrink-0 transition-transform duration-150 ${
@@ -120,24 +128,19 @@ export function StudioHeader() {
                   Projects
                 </div>
                 {projects.map((p) => {
-                  const isSelected = p.projectId === activeProjectId;
+                  const isSelected = p.projectId === project.projectId;
                   return (
                     <button
                       key={p.projectId}
                       type="button"
-                      onClick={() => {
-                        setActiveProjectId(p.projectId);
-                        setProjectDropdownOpen(false);
-                      }}
+                      onClick={() => handleSelectProject(p.projectId)}
                       className={`w-full px-2.5 py-1.5 text-xs text-left flex items-center justify-between hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer ${
                         isSelected
                           ? "text-[var(--text-primary)] font-semibold bg-[var(--bg-surface)]"
                           : "text-[var(--text-secondary)]"
                       }`}
                     >
-                      <span className="truncate">
-                        {p.displayName || p.projectId}
-                      </span>
+                      <span className="truncate">{p.displayName || p.projectId}</span>
                       {isSelected && (
                         <Check className="w-3.5 h-3.5 text-[var(--text-primary)] shrink-0" />
                       )}
@@ -154,30 +157,25 @@ export function StudioHeader() {
           /
         </span>
 
-        {activeView === "sessions" && activeSessionId ? (
+        {activeNav === "sessions" && sessionId ? (
           <div className="flex items-center gap-1.5 h-7 text-xs font-mono leading-none">
-            <button
-              type="button"
-              onClick={closeToBoard}
+            <Link
+              to={generatePath(ROUTES.sessions, { projectId: project.projectId })}
               className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer leading-none"
             >
               Sessions
-            </button>
+            </Link>
             <span className="text-[var(--border-strong)] text-xs font-mono select-none leading-none">
               /
             </span>
             <span
               className="font-medium text-[var(--text-primary)] leading-none max-w-[240px] truncate"
               title={
-                activeSession?.title
-                  ? `${activeSession.title} (${activeSessionId})`
-                  : activeSessionId
+                activeSession?.title ? `${activeSession.title} (${sessionId})` : sessionId
               }
             >
               {activeSession?.title ||
-                (activeSessionId.length > 20
-                  ? `${activeSessionId.slice(0, 16)}...`
-                  : activeSessionId)}
+                (sessionId.length > 20 ? `${sessionId.slice(0, 16)}...` : sessionId)}
             </span>
             {(activeSession?.status === "archived" || activeSession?.status === "closing") && (
               <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-normal text-[var(--text-muted)] bg-[var(--bg-surface-elevated)] border border-[var(--border-default)] leading-none shrink-0">
@@ -187,7 +185,7 @@ export function StudioHeader() {
           </div>
         ) : (
           <span className="text-xs text-[var(--text-secondary)] font-medium leading-none flex items-center h-7">
-            {viewTitles[activeView] || activeView}
+            {sectionTitle}
           </span>
         )}
       </div>
@@ -239,7 +237,7 @@ export function StudioHeader() {
         </button>
 
         {/* Inspector toggle (Only in active conversation) */}
-        {activeView === "sessions" && activeSessionId && (
+        {activeNav === "sessions" && sessionId && (
           <button
             onClick={toggleInspector}
             title={showInspector ? "Hide Inspector" : "Show Inspector"}

@@ -5,16 +5,16 @@ import {
   Wrench,
   ArrowRight,
 } from "lucide-react";
+import { generatePath, useNavigate } from "react-router";
 import { projectsApi } from "../../api";
-import { useStudio } from "../../context/StudioContext";
+import { useCurrentProject } from "../../layouts/ProjectLayout";
+import { ROUTES } from "../../routes";
 import type { ProjectSkill } from "../../types";
 
 export function ProjectInfoView() {
-  const {
-    activeProjectId,
-    activeProject,
-    setActiveView,
-  } = useStudio();
+  const activeProject = useCurrentProject();
+  const activeProjectId = activeProject.projectId;
+  const navigate = useNavigate();
 
   const [skills, setSkills] = useState<ProjectSkill[]>([]);
   const [loadingSkills, setLoadingSkills] = useState(false);
@@ -29,7 +29,7 @@ export function ProjectInfoView() {
   }, [activeProjectId]);
 
   const handleEnterSessions = () => {
-    setActiveView("sessions");
+    navigate(generatePath(ROUTES.sessions, { projectId: activeProjectId }));
   };
 
   return (

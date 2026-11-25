@@ -7,14 +7,18 @@ import {
   ArrowRight,
   Ban,
 } from "lucide-react";
+import { generatePath, useNavigate } from "react-router";
 import { jobsApi } from "../../api";
-import { useStudio } from "../../context/StudioContext";
 import { useConfirm } from "../../context/ConfirmContext";
+import { useCurrentProject } from "../../layouts/ProjectLayout";
+import { ROUTES } from "../../routes";
 import type { ScheduledJobRecord } from "../../types";
 import { formatDateTime, formatJobStatus, formatTimeAgo } from "../../utils/formatters";
 
 export function ScheduledJobsView() {
-  const { activeProjectId, openSession } = useStudio();
+  const activeProject = useCurrentProject();
+  const activeProjectId = activeProject.projectId;
+  const navigate = useNavigate();
   const confirm = useConfirm();
   const [jobs, setJobs] = useState<ScheduledJobRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -65,7 +69,7 @@ export function ScheduledJobsView() {
   };
 
   const handleJumpToSession = (sessionId: string) => {
-    openSession(sessionId);
+    navigate(generatePath(ROUTES.session, { projectId: activeProjectId, sessionId }));
   };
 
   return (

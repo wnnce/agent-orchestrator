@@ -16,9 +16,9 @@
     "motion": "^14.14.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-router": "^8.5.3",
     "sonner": "^2.0.8",
-    "streamdown": "^2.7.1",
-    "wouter": "^3.13.0"
+    "streamdown": "^2.7.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.9",

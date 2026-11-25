@@ -20,9 +20,12 @@ import {
   Cpu,
   Loader2,
 } from "lucide-react";
+import { generatePath, useNavigate } from "react-router";
 import { runtimesApi, sessionsApi } from "../../api";
 import { useStudio } from "../../context/StudioContext";
 import { useConfirm } from "../../context/ConfirmContext";
+import { useCurrentProject } from "../../layouts/ProjectLayout";
+import { ROUTES } from "../../routes";
 import type { RuntimeInfo, SessionRoute } from "../../types";
 import { formatTimeAgo, formatDateTime, formatTokenCount } from "../../utils/formatters";
 import { copyToClipboard } from "../../utils/clipboard";
@@ -285,15 +288,15 @@ function SessionCard({
 }
 
 export function SessionBoard() {
-  const {
-    activeProjectId,
-    activeProject,
-    sessions,
-    setSessions,
-    openSession,
-    refreshSessions,
-  } = useStudio();
+  const activeProject = useCurrentProject();
+  const activeProjectId = activeProject.projectId;
+  const { sessions, setSessions, refreshSessions } = useStudio();
+  const navigate = useNavigate();
   const confirm = useConfirm();
+
+  const openSession = (sessionId: string) => {
+    navigate(generatePath(ROUTES.session, { projectId: activeProjectId, sessionId }));
+  };
 
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreating, setIsCreating] = useState(false);
@@ -453,7 +456,7 @@ export function SessionBoard() {
         ...(selectedEffort ? { reasoningEffort: selectedEffort } : {}),
       });
       setCreateModalOpen(false);
-      await refreshSessions();
+      await refreshSessions(activeProjectId);
       if (res?.session?.sessionId) {
         openSession(res.session.sessionId);
       }
