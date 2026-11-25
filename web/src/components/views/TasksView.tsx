@@ -13,7 +13,7 @@ import {
   Search,
   Terminal,
 } from "lucide-react";
-import { fetchProjectTasks, fetchTaskExecutions, runProjectTask } from "../../api/client";
+import { tasksApi } from "../../api";
 import { useStudio } from "../../context/StudioContext";
 import type { ProjectRuntimeDefault, TaskDefinition, TaskExecutionRecord } from "../../types";
 import { formatDateTime, formatDuration, formatTimeAgo } from "../../utils/formatters";
@@ -244,7 +244,7 @@ export function TasksView() {
     if (!activeProjectId) return;
     setLoadingTasks(true);
     try {
-      const list = await fetchProjectTasks(activeProjectId);
+      const list = await tasksApi.listByProject(activeProjectId);
       setTasks(list);
     } catch (err) {
       console.error("Failed to load project tasks:", err);
@@ -290,7 +290,7 @@ export function TasksView() {
       setLoadingMoreRuns(false);
       setLoadingExecutions(true);
       try {
-        const page = await fetchTaskExecutions({
+        const page = await tasksApi.listExecutions({
           taskKey,
           status: statusFilter === "all" ? undefined : statusFilter,
           limit: RUNS_PAGE_SIZE,
@@ -329,7 +329,7 @@ export function TasksView() {
     loadingMoreRef.current = true;
     setLoadingMoreRuns(true);
     try {
-      const page = await fetchTaskExecutions({
+      const page = await tasksApi.listExecutions({
         taskKey: selectedTask.taskKey,
         status: runStatusFilter === "all" ? undefined : runStatusFilter,
         beforeId: nextBeforeId,
@@ -424,7 +424,7 @@ export function TasksView() {
     if (!activeProjectId || runningTaskId === taskId) return;
     setRunningTaskId(taskId);
     try {
-      const res = await runProjectTask(activeProjectId, taskId);
+      const res = await tasksApi.run(activeProjectId, taskId);
       toast.success(`Task [${taskId}] triggered`, {
         description: res.message || "Execution started in background",
       });

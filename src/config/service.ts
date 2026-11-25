@@ -49,19 +49,14 @@ export const titlesConfigSchema = z.strictObject({
 export const feishuConfigSchema = z
   .strictObject({
     enabled: z.boolean().default(false),
-    verificationToken: optionalText,
     appId: optionalText,
     appSecret: optionalText,
     apiBaseUrl: optionalText,
   })
-  .refine(
-    (config) =>
-      !config.enabled || !!config.verificationToken || (!!config.appId && !!config.appSecret),
-    {
-      path: ["verificationToken"],
-      message: "verificationToken or (appId and appSecret) is required when Feishu is enabled",
-    },
-  );
+  .refine((config) => !config.enabled || (!!config.appId && !!config.appSecret), {
+    path: ["appId"],
+    message: "appId and appSecret are required when Feishu is enabled",
+  });
 
 export const wecomConfigSchema = z
   .strictObject({

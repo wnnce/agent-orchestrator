@@ -346,7 +346,7 @@ describe("Gateway /runtimes API", () => {
     const projectManager = new ProjectManager([project], store, config, logger);
     const gateway = new Gateway(config, store, projectManager, logger);
 
-    const res = await gateway.app.request("/runtimes");
+    const res = await gateway.app.request("/api/v1/runtimes");
     expect(res.status).toBe(200);
     const data = (await res.json()) as { runtimes: Array<{ name: string }> };
     expect(Array.isArray(data.runtimes)).toBe(true);

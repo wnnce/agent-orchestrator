@@ -48,9 +48,8 @@ titles:
 channels:
   feishu:
     enabled: false
-    verificationToken: "" # Inbound event webhook verification token
-    appId: "" # Outbound Bot App ID
-    appSecret: "" # Outbound Bot App Secret
+    appId: "" # Feishu Bot App ID (WebSocket persistent connection + outbound)
+    appSecret: "" # Feishu Bot App Secret
     apiBaseUrl: https://open.feishu.cn
   wecom:
     enabled: false

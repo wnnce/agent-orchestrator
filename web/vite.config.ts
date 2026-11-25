@@ -9,15 +9,15 @@ export default defineConfig({
     port: 5173,
     allowedHosts: true,
     proxy: {
-      "/healthz": "http://127.0.0.1:7070",
-      "/readyz": "http://127.0.0.1:7070",
-      "/projects": "http://127.0.0.1:7070",
-      "/sessions": {
+      "/api": {
         target: "http://127.0.0.1:7070",
         changeOrigin: true,
         timeout: 0,
       },
-      "/webhooks": "http://127.0.0.1:7070",
+      "/healthz": "http://127.0.0.1:7070",
+      "/readyz": "http://127.0.0.1:7070",
+      "/openapi.json": "http://127.0.0.1:7070",
+      "/docs": "http://127.0.0.1:7070",
     },
   },
 });

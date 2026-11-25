@@ -138,7 +138,7 @@ Be careful.`;
     const projectManager = new ProjectManager([project], store, appConfig, logger);
     const gateway = new Gateway(appConfig, store, projectManager, logger);
 
-    const res = await gateway.handle(new Request("http://localhost/projects/proj-api/skills"));
+    const res = await gateway.handle(new Request("http://localhost/api/v1/projects/proj-api/skills"));
     expect(res.status).toBe(200);
     const body = (await res.json()) as any;
     expect(body.projectId).toBe("proj-api");
@@ -148,7 +148,7 @@ Be careful.`;
     expect(body.skills[0].description).toBe("API Skill description");
 
     const notFoundRes = await gateway.handle(
-      new Request("http://localhost/projects/non-existent/skills"),
+      new Request("http://localhost/api/v1/projects/non-existent/skills"),
     );
     expect(notFoundRes.status).toBe(404);
   });

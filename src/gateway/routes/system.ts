@@ -31,10 +31,7 @@ const listRuntimesQuerySchema = z.object({
     .describe('Set to `"false"` or `"0"` to exclude internal/test runtimes (default: true).'),
 });
 
-export function createSystemRouter(
-  runtimeRegistry?: RuntimeRegistry,
-  modelCatalog: RuntimeModelCatalog = new RuntimeModelCatalog(),
-): Hono {
+export function createHealthRouter(): Hono {
   const router = new Hono();
 
   router.get(
@@ -70,6 +67,15 @@ export function createSystemRouter(
     }),
     (c) => c.json({ status: "ready" }),
   );
+
+  return router;
+}
+
+export function createRuntimesRouter(
+  runtimeRegistry?: RuntimeRegistry,
+  modelCatalog: RuntimeModelCatalog = new RuntimeModelCatalog(),
+): Hono {
+  const router = new Hono();
 
   router.get(
     "/runtimes",

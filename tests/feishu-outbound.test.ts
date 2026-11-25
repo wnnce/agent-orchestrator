@@ -765,7 +765,6 @@ describe("Feishu /close Command", () => {
       logLevel: "info",
       feishu: {
         enabled: true,
-        verificationToken: "tok",
         appId: "cli_app",
         appSecret: "sec_secret",
       },

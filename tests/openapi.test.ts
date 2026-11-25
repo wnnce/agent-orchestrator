@@ -74,8 +74,9 @@ describe("Gateway OpenAPI & Docs (hono-openapi + Scalar)", () => {
     expect(doc.security).toEqual([{ bearerAuth: [] }]);
 
     expect(doc.paths["/healthz"]?.get?.security).toEqual([]);
-    expect(doc.paths["/sessions/{sessionId}/events"]?.get).toBeDefined();
-    expect(doc.paths["/projects/{projectId}/tasks/{taskId}/run"]?.post).toBeDefined();
+    expect(doc.paths["/api/v1/runtimes"]?.get?.security).toEqual([]);
+    expect(doc.paths["/api/v1/sessions/{sessionId}/events"]?.get).toBeDefined();
+    expect(doc.paths["/api/v1/projects/{projectId}/tasks/{taskId}/run"]?.post).toBeDefined();
   });
 
   it("serves Scalar interactive API documentation HTML at GET /docs", async () => {
@@ -102,7 +103,7 @@ describe("Gateway OpenAPI & Docs (hono-openapi + Scalar)", () => {
     const docsRes = await gateway.handle(new Request("http://localhost/docs"));
     expect(docsRes.status).toBe(200);
 
-    const protectedRes = await gateway.handle(new Request("http://localhost/projects"));
+    const protectedRes = await gateway.handle(new Request("http://localhost/api/v1/projects"));
     expect(protectedRes.status).toBe(401);
   });
 

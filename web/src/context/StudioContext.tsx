@@ -7,7 +7,7 @@ import React, {
   useMemo,
 } from "react";
 import { useLocation } from "wouter";
-import { fetchProjects, fetchSessions } from "../api/client";
+import { projectsApi, sessionsApi, systemApi } from "../api";
 import type { ProjectRouting, SessionRoute, StudioView } from "../types";
 
 interface StudioContextType {
@@ -127,7 +127,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
   // Load project list
   const refreshProjects = useCallback(async () => {
     try {
-      const list = await fetchProjects();
+      const list = await projectsApi.list();
       setProjects(list);
     } catch (err) {
       console.error("Failed to load projects:", err);
@@ -138,7 +138,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
   const refreshSessions = useCallback(async () => {
     if (!activeProjectId) return;
     try {
-      const list = await fetchSessions(activeProjectId);
+      const list = await sessionsApi.list(activeProjectId);
       setSessions(list);
     } catch (err) {
       console.error("Failed to load sessions:", err);
@@ -147,9 +147,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
   // Initial ready check and projects fetch
   useEffect(() => {
-    fetch("/readyz")
-      .then((res) => setIsReady(res.ok))
-      .catch(() => setIsReady(false));
+    systemApi.checkReady().then(setIsReady);
 
     refreshProjects();
   }, [refreshProjects]);

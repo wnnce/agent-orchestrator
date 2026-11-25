@@ -691,8 +691,8 @@ Sync daily updates.
     const gateway = new Gateway(config, store, projectManager, logger);
 
     try {
-      // 1. GET /projects/:projectId/tasks
-      const listRes = await gateway.app.request("/projects/gw-proj/tasks");
+      // 1. GET /api/v1/projects/:projectId/tasks
+      const listRes = await gateway.app.request("/api/v1/projects/gw-proj/tasks");
       expect(listRes.status).toBe(200);
       const listData = await listRes.json();
       expect(listData.projectId).toBe("gw-proj");
@@ -702,9 +702,9 @@ Sync daily updates.
       expect(listData.tasks[0].isScheduled).toBe(true);
       expect(listData.tasks[0].nextRun).toBeDefined();
 
-      // 2. POST /projects/:projectId/tasks/:taskId/run
+      // 2. POST /api/v1/projects/:projectId/tasks/:taskId/run
       const runRes = await gateway.app.request(
-        "/projects/gw-proj/tasks/daily-sync/run",
+        "/api/v1/projects/gw-proj/tasks/daily-sync/run",
         { method: "POST" },
       );
       expect(runRes.status).toBe(200);
@@ -714,9 +714,9 @@ Sync daily updates.
       const runtime = projectManager.get("gw-proj");
       await runtime.taskEngine.drain();
 
-      // 3. GET /projects/:projectId/tasks/:taskId/executions
+      // 3. GET /api/v1/projects/:projectId/tasks/:taskId/executions
       const execRes = await gateway.app.request(
-        "/projects/gw-proj/tasks/daily-sync/executions",
+        "/api/v1/projects/gw-proj/tasks/daily-sync/executions",
       );
       expect(execRes.status).toBe(200);
       const execData = await execRes.json();

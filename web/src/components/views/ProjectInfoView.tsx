@@ -5,7 +5,7 @@ import {
   Wrench,
   ArrowRight,
 } from "lucide-react";
-import { fetchProjectSkills } from "../../api/client";
+import { projectsApi } from "../../api";
 import { useStudio } from "../../context/StudioContext";
 import type { ProjectSkill } from "../../types";
 
@@ -22,7 +22,7 @@ export function ProjectInfoView() {
   useEffect(() => {
     if (!activeProjectId) return;
     setLoadingSkills(true);
-    fetchProjectSkills(activeProjectId)
+    projectsApi.listSkills(activeProjectId)
       .then(setSkills)
       .catch((err) => console.error("Failed to fetch skills:", err))
       .finally(() => setLoadingSkills(false));

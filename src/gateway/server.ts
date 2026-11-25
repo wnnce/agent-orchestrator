@@ -7,15 +7,15 @@ import type { Store } from "../persistence/store.ts";
 import { ProjectManager } from "../project/manager.ts";
 import type { Logger } from "../observability/logger.ts";
 import { GatewayService } from "./service.ts";
-import { FeishuAdapter, FeishuWSAdapter } from "../channels/feishu.ts";
+import { FeishuWSAdapter } from "../channels/feishu.ts";
 import { WeComClient, WeComWSAdapter } from "../channels/wecom.ts";
 import type { EventHub } from "../events/hub.ts";
 import { RuntimeModelCatalog } from "../runtime/catalog.ts";
 import type { SessionManager } from "../session/index.ts";
 import {
-  createSystemRouter,
+  createHealthRouter,
+  createRuntimesRouter,
   createDocsRouter,
-  createChannelsRouter,
   createProjectsRouter,
   createTasksRouter,
   createActionsRouter,
@@ -24,10 +24,11 @@ import {
   createWebhooksRouter,
 } from "./routes/index.ts";
 
+export const API_V1_PREFIX = "/api/v1";
+
 export class Gateway {
   readonly app: Hono;
   private readonly service: GatewayService;
-  private readonly feishu: FeishuAdapter;
   private readonly feishuWs?: FeishuWSAdapter;
   private readonly wecomWs?: WeComWSAdapter;
   private readonly eventHub: EventHub;
@@ -66,16 +67,6 @@ export class Gateway {
       wecomClient,
     );
     const feishuConfig = config.feishu ?? { enabled: false };
-    this.feishu = new FeishuAdapter(
-      {
-        enabled: feishuConfig.enabled,
-        ...(feishuConfig.verificationToken
-          ? { verificationToken: feishuConfig.verificationToken }
-          : {}),
-      },
-      (envelope) => this.service.acceptInbound(envelope),
-      logger,
-    );
     if (feishuConfig.enabled && feishuConfig.appId && feishuConfig.appSecret) {
       this.feishuWs = new FeishuWSAdapter(
         {
@@ -127,19 +118,22 @@ export class Gateway {
       );
     });
 
-    // 3. Health & Readiness checks (no authentication)
+    // 3. Health, Readiness & OpenAPI Docs (root paths, no authentication)
     const modelCatalog = new RuntimeModelCatalog({
       modelsFile: this.config.runtimeModelsFile ?? "runtime-models.json",
       logger: this.logger,
     });
-    app.route("/", createSystemRouter(this.projects.getRuntimeRegistry(), modelCatalog));
+    app.route("/", createHealthRouter());
     app.route("/", createDocsRouter(app));
 
-    // 4. Channel adapters (authenticate with platform credentials)
-    app.route("/", createChannelsRouter({ feishu: this.feishu }));
+    // 4. Versioned API routes (/api/v1)
+    const apiV1 = new Hono();
 
-    // 5. Authentication middleware
-    app.use("*", async (c, next) => {
+    // Public runtime discovery under /api/v1
+    apiV1.route("/", createRuntimesRouter(this.projects.getRuntimeRegistry(), modelCatalog));
+
+    // Bearer authentication middleware scoped strictly to /api/v1 domain routes
+    apiV1.use("*", async (c, next) => {
       if (this.config.allowUnauthenticated || !this.config.apiToken) {
         return next();
       }
@@ -150,15 +144,15 @@ export class Gateway {
       return c.json({ error: "unauthorized" }, 401);
     });
 
-    // 6. Domain routes
-    app.route("/", createProjectsRouter({ projects: this.projects }));
-    app.route(
+    // Domain routes
+    apiV1.route("/", createProjectsRouter({ projects: this.projects }));
+    apiV1.route(
       "/",
       createTasksRouter({ projects: this.projects, store: this.store }),
     );
-    app.route("/", createActionsRouter({ store: this.store }));
-    app.route("/", createScheduledJobsRouter({ store: this.store }));
-    app.route(
+    apiV1.route("/", createActionsRouter({ store: this.store }));
+    apiV1.route("/", createScheduledJobsRouter({ store: this.store }));
+    apiV1.route(
       "/",
       createSessionsRouter({
         store: this.store,
@@ -167,7 +161,9 @@ export class Gateway {
         service: this.service,
       }),
     );
-    app.route("/", createWebhooksRouter({ service: this.service }));
+    apiV1.route("/", createWebhooksRouter({ service: this.service }));
+
+    app.route(API_V1_PREFIX, apiV1);
 
     // 7. Static UI (if web/dist exists)
     const staticRoots = [

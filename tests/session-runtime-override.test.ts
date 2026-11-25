@@ -143,8 +143,8 @@ describe("dynamic session runtime, model, and reasoningEffort selection", () => 
     await rm(root, { recursive: true, force: true });
   });
 
-  test("GET /projects includes each project's default runtime config", async () => {
-    const res = await gateway.app.request("/projects");
+  test("GET /api/v1/projects includes each project's default runtime config", async () => {
+    const res = await gateway.app.request("/api/v1/projects");
     expect(res.status).toBe(200);
     const data = (await res.json()) as {
       projects: Array<{
@@ -159,8 +159,8 @@ describe("dynamic session runtime, model, and reasoningEffort selection", () => 
     });
   });
 
-  test("POST /sessions overrides runtime, model, and reasoningEffort and routes turns to the chosen runtime", async () => {
-    const createRes = await gateway.app.request("/sessions", {
+  test("POST /api/v1/sessions overrides runtime, model, and reasoningEffort and routes turns to the chosen runtime", async () => {
+    const createRes = await gateway.app.request("/api/v1/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -205,7 +205,7 @@ describe("dynamic session runtime, model, and reasoningEffort selection", () => 
   });
 
   test("switching runtime without specifying model does not leak the project's default runtime model", async () => {
-    const createRes = await gateway.app.request("/projects/demo/sessions", {
+    const createRes = await gateway.app.request("/api/v1/projects/demo/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -225,7 +225,7 @@ describe("dynamic session runtime, model, and reasoningEffort selection", () => 
   });
 
   test("rejects unknown runtime with 400 error", async () => {
-    const res = await gateway.app.request("/sessions", {
+    const res = await gateway.app.request("/api/v1/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -285,8 +285,8 @@ Triage open issues for {{project.id}}.
 `,
     );
 
-    // Verify GET /projects/:projectId/tasks exposes task runtime configuration
-    const listRes = await gateway.app.request("/projects/demo/tasks");
+    // Verify GET /api/v1/projects/:projectId/tasks exposes task runtime configuration
+    const listRes = await gateway.app.request("/api/v1/projects/demo/tasks");
     expect(listRes.status).toBe(200);
     const listData = (await listRes.json()) as {
       tasks: Array<{

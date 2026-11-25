@@ -25,11 +25,3 @@ export interface InboundResult {
   turn?: TurnRecord;
   command?: string;
 }
-
-export interface ChannelAdapter {
-  readonly id: ChannelId;
-}
-
-export interface HttpChannelAdapter extends ChannelAdapter {
-  handle(request: Request): Promise<Response>;
-}

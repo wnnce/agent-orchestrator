@@ -55,9 +55,9 @@ describe("Gateway with Hono", () => {
     expect(await resReady.json()).toEqual({ status: "ready" });
   });
 
-  it("lists projects via GET /projects", async () => {
+  it("lists projects via GET /api/v1/projects", async () => {
     const { gateway } = createTestGateway();
-    const res = await gateway.handle(new Request("http://localhost/projects"));
+    const res = await gateway.handle(new Request("http://localhost/api/v1/projects"));
     expect(res.status).toBe(200);
     const body = (await res.json()) as any;
     expect(body.projects).toHaveLength(1);
@@ -71,13 +71,13 @@ describe("Gateway with Hono", () => {
     });
 
     // Unauthenticated request should be rejected
-    const unauthRes = await gateway.handle(new Request("http://localhost/projects"));
+    const unauthRes = await gateway.handle(new Request("http://localhost/api/v1/projects"));
     expect(unauthRes.status).toBe(401);
     expect(await unauthRes.json()).toEqual({ error: "unauthorized" });
 
     // Authenticated request should succeed
     const authRes = await gateway.handle(
-      new Request("http://localhost/projects", {
+      new Request("http://localhost/api/v1/projects", {
         headers: { authorization: "Bearer super-secret-token" },
       }),
     );
@@ -91,7 +91,7 @@ describe("Gateway with Hono", () => {
     try {
       // Create session
       const createRes = await gateway.handle(
-        new Request("http://localhost/sessions", {
+        new Request("http://localhost/api/v1/sessions", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -108,7 +108,7 @@ describe("Gateway with Hono", () => {
 
       // Retrieve session details
       const getSessionRes = await gateway.handle(
-        new Request(`http://localhost/sessions/${sessionId}`),
+        new Request(`http://localhost/api/v1/sessions/${sessionId}`),
       );
       expect(getSessionRes.status).toBe(200);
       const sessionBody = (await getSessionRes.json()) as any;
@@ -116,7 +116,7 @@ describe("Gateway with Hono", () => {
 
       // Post another turn
       const turnRes = await gateway.handle(
-        new Request(`http://localhost/sessions/${sessionId}/turns`, {
+        new Request(`http://localhost/api/v1/sessions/${sessionId}/turns`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ input: "Second turn input" }),
@@ -126,7 +126,7 @@ describe("Gateway with Hono", () => {
 
       // Check events as JSON
       const eventsRes = await gateway.handle(
-        new Request(`http://localhost/sessions/${sessionId}/events`),
+        new Request(`http://localhost/api/v1/sessions/${sessionId}/events`),
       );
       expect(eventsRes.status).toBe(200);
       const eventsBody = (await eventsRes.json()) as any;
@@ -135,7 +135,7 @@ describe("Gateway with Hono", () => {
 
       // Rename session via PATCH
       const patchRes = await gateway.handle(
-        new Request(`http://localhost/sessions/${sessionId}`, {
+        new Request(`http://localhost/api/v1/sessions/${sessionId}`, {
           method: "PATCH",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ title: "修改后的标题" }),
@@ -147,14 +147,14 @@ describe("Gateway with Hono", () => {
 
       // Verify title updated
       const getRenamedRes = await gateway.handle(
-        new Request(`http://localhost/sessions/${sessionId}`),
+        new Request(`http://localhost/api/v1/sessions/${sessionId}`),
       );
       const renamedBody = (await getRenamedRes.json()) as any;
       expect(renamedBody.session.title).toBe("修改后的标题");
 
       // Create session with explicit title directly
       const explicitTitleRes = await gateway.handle(
-        new Request("http://localhost/sessions", {
+        new Request("http://localhost/api/v1/sessions", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -168,7 +168,7 @@ describe("Gateway with Hono", () => {
       const explicitTitleBody = (await explicitTitleRes.json()) as any;
       expect(explicitTitleBody.session.title).toBe("Explicit Title On Creation");
 
-      // Check GET /sessions hides scheduled-task sessions but lists dispatched ones
+      // Check GET /api/v1/sessions hides scheduled-task sessions but lists dispatched ones
       const projectRuntime = projectManager.get("test-proj");
       const taskSession = await projectRuntime.createSession(
         { taskKey: "test-proj:cron-test" },
@@ -179,7 +179,7 @@ describe("Gateway with Hono", () => {
         "dispatch",
       );
       const listSessionsRes = await gateway.handle(
-        new Request("http://localhost/sessions?projectId=test-proj"),
+        new Request("http://localhost/api/v1/sessions?projectId=test-proj"),
       );
       expect(listSessionsRes.status).toBe(200);
       const listSessionsBody = (await listSessionsRes.json()) as any;
@@ -191,7 +191,7 @@ describe("Gateway with Hono", () => {
 
       // Delete session
       const deleteRes = await gateway.handle(
-        new Request(`http://localhost/sessions/${sessionId}`, { method: "DELETE" }),
+        new Request(`http://localhost/api/v1/sessions/${sessionId}`, { method: "DELETE" }),
       );
       expect(deleteRes.status).toBe(200);
       const deleteBody = (await deleteRes.json()) as any;
@@ -200,7 +200,7 @@ describe("Gateway with Hono", () => {
 
       // Session should now return 404
       const getDeletedRes = await gateway.handle(
-        new Request(`http://localhost/sessions/${sessionId}`),
+        new Request(`http://localhost/api/v1/sessions/${sessionId}`),
       );
       expect(getDeletedRes.status).toBe(404);
     } finally {
@@ -211,7 +211,7 @@ describe("Gateway with Hono", () => {
   it("returns 404 for non-existent session or route", async () => {
     const { gateway } = createTestGateway();
     const notFoundRes = await gateway.handle(
-      new Request("http://localhost/sessions/ses_non_existent"),
+      new Request("http://localhost/api/v1/sessions/ses_non_existent"),
     );
     expect(notFoundRes.status).toBe(404);
 
@@ -227,7 +227,7 @@ describe("Gateway with Hono", () => {
 
     try {
       const createRes = await gateway.handle(
-        new Request("http://localhost/sessions", {
+        new Request("http://localhost/api/v1/sessions", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ projectId: "test-proj", query: "Initial query" }),
@@ -236,7 +236,7 @@ describe("Gateway with Hono", () => {
       const { session } = (await createRes.json()) as any;
 
       const sseRes = await gateway.handle(
-        new Request(`http://localhost/sessions/${session.sessionId}/events`, {
+        new Request(`http://localhost/api/v1/sessions/${session.sessionId}/events`, {
           headers: { accept: "text/event-stream" },
         }),
       );
@@ -277,7 +277,7 @@ describe("Gateway with Hono", () => {
       entity.ack("console", 2);
       entity.ack("feishu", 1);
       const response = await gateway.handle(
-        new Request(`http://localhost/sessions/${session.sessionId}/events?source=console`, {
+        new Request(`http://localhost/api/v1/sessions/${session.sessionId}/events?source=console`, {
           headers: { accept: "text/event-stream" },
         }),
       );
@@ -292,7 +292,7 @@ describe("Gateway with Hono", () => {
       }
       const replay = await gateway.handle(
         new Request(
-          `http://localhost/sessions/${session.sessionId}/events?source=console&after=0`,
+          `http://localhost/api/v1/sessions/${session.sessionId}/events?source=console&after=0`,
           {
             headers: { accept: "text/event-stream" },
           },
@@ -323,7 +323,7 @@ describe("Gateway with Hono", () => {
         return turn(sessionId, input);
       };
       const request = () =>
-        new Request("http://localhost/webhooks/test-proj", {
+        new Request("http://localhost/api/v1/webhooks/test-proj", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -348,51 +348,7 @@ describe("Gateway with Hono", () => {
     }
   });
 
-  it("accepts a Feishu event through the transport-neutral ingress", async () => {
-    const { gateway, projectManager, store } = createTestGateway({
-      feishu: { enabled: true, verificationToken: "verify-token" },
-    });
-    await projectManager.start();
-    try {
-      const response = await gateway.handle(
-        new Request("http://localhost/channels/feishu/events", {
-          method: "POST",
-          body: JSON.stringify({
-            header: {
-              event_id: "evt-feishu-1",
-              event_type: "im.message.receive_v1",
-              token: "verify-token",
-            },
-            event: {
-              sender: { sender_type: "user", sender_id: { open_id: "ou-test" } },
-              message: {
-                message_id: "om-feishu-1",
-                chat_id: "oc-test",
-                chat_type: "p2p",
-                message_type: "text",
-                content: JSON.stringify({ text: "test sample" }),
-              },
-            },
-          }),
-        }),
-      );
-      expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({ code: 0 });
-
-      for (let attempt = 0; attempt < 50 && (await store.listSessions()).length === 0; attempt++) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-      const sessions = await store.listSessions();
-      expect(sessions).toHaveLength(1);
-      expect(sessions[0]?.externalChannel).toBe("feishu");
-      expect(sessions[0]?.externalConversationId).toBe("oc-test");
-      expect(sessions[0]?.runtimeSessionId).toBeTruthy();
-    } finally {
-      await projectManager.stop();
-    }
-  });
-
-  it("lists action executions via GET /action-executions", async () => {
+  it("lists action executions via GET /api/v1/action-executions", async () => {
     const { gateway, store } = createTestGateway();
 
     await store.recordActionExecution({
@@ -408,7 +364,7 @@ describe("Gateway with Hono", () => {
     });
 
     const res = await gateway.handle(
-      new Request("http://localhost/action-executions?projectId=test-proj"),
+      new Request("http://localhost/api/v1/action-executions?projectId=test-proj"),
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as any;

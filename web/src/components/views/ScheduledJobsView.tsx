@@ -7,7 +7,7 @@ import {
   ArrowRight,
   Ban,
 } from "lucide-react";
-import { cancelScheduledJob, fetchScheduledJobs } from "../../api/client";
+import { jobsApi } from "../../api";
 import { useStudio } from "../../context/StudioContext";
 import { useConfirm } from "../../context/ConfirmContext";
 import type { ScheduledJobRecord } from "../../types";
@@ -24,7 +24,7 @@ export function ScheduledJobsView() {
   const loadJobs = async () => {
     setLoading(true);
     try {
-      const list = await fetchScheduledJobs({
+      const list = await jobsApi.list({
         projectId: activeProjectId || undefined,
         status: statusFilter === "all" ? undefined : statusFilter,
         limit: 50,
@@ -54,7 +54,7 @@ export function ScheduledJobsView() {
 
     setCancellingJobId(jobId);
     try {
-      await cancelScheduledJob(jobId);
+      await jobsApi.cancel(jobId);
       toast.success("Scheduled job cancelled");
       await loadJobs();
     } catch (err: any) {

@@ -11,7 +11,7 @@ import {
   Timer,
   Clock,
 } from "lucide-react";
-import { cancelScheduledJob, fetchScheduledJobs } from "../api/client";
+import { jobsApi, sessionsApi } from "../api";
 import { useConfirm } from "../context/ConfirmContext";
 import type {
   ArtifactRecord,
@@ -64,7 +64,7 @@ export const Inspector: React.FC<InspectorProps> = ({
   const loadSessionJobs = async () => {
     if (!session) return;
     try {
-      const list = await fetchScheduledJobs({ sessionId: session.sessionId });
+      const list = await jobsApi.list({ sessionId: session.sessionId });
       setJobs(list);
     } catch (err) {
       console.error("Failed to load session jobs in inspector:", err);
@@ -90,7 +90,7 @@ export const Inspector: React.FC<InspectorProps> = ({
 
     setCancellingJobId(jobId);
     try {
-      await cancelScheduledJob(jobId);
+      await jobsApi.cancel(jobId);
       toast.success("Job cancelled successfully");
       await loadSessionJobs();
     } catch (err: any) {
@@ -254,7 +254,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                     </div>
                   </div>
                   <a
-                    href={`/sessions/${encodeURIComponent(art.sessionId)}/artifacts/${encodeURIComponent(art.id)}`}
+                    href={sessionsApi.getArtifactDownloadUrl(art.sessionId, art.id)}
                     target="_blank"
                     rel="noreferrer"
                     className="p-1.5 rounded bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-default)] text-[var(--text-secondary)]"

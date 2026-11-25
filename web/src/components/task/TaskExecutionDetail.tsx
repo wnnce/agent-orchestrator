@@ -12,7 +12,7 @@ import {
   Search,
   Terminal,
 } from "lucide-react";
-import { fetchTaskExecutionLogs } from "../../api/client";
+import { tasksApi } from "../../api";
 import type {
   TaskDefinition,
   TaskExecutionLogLevel,
@@ -85,7 +85,7 @@ export function TaskExecutionDetail({ execution, task }: TaskExecutionDetailProp
       }
 
       try {
-        const res = await fetchTaskExecutionLogs(execution.executionId, {
+        const res = await tasksApi.listExecutionLogs(execution.executionId, {
           ...(afterSeq > 0 ? { afterSeq } : {}),
           ...(targetLevel !== "all" ? { level: targetLevel } : {}),
           limit: 200,

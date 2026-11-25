@@ -33,7 +33,8 @@ routerApiKey: test-router-key
 routerBaseUrl: https://router.example.com/v1
 feishu:
   enabled: true
-  verificationToken: test-verification-token
+  appId: test-app-id
+  appSecret: test-app-secret
 `,
     );
     const config = await loadConfig(file);
@@ -50,7 +51,7 @@ feishu:
       routerModel: "test-router",
       routerApiKey: "test-router-key",
       routerBaseUrl: "https://router.example.com/v1",
-      feishu: { enabled: true, verificationToken: "test-verification-token" },
+      feishu: { enabled: true, appId: "test-app-id", appSecret: "test-app-secret" },
     });
   });
 
@@ -133,7 +134,7 @@ feishu:
     ["port: 70000", "port"],
     ['allowUnauthenticated: "false"', "allowUnauthenticated"],
     ["logLevel: verbose", "logLevel"],
-    ["feishu:\n  enabled: true", "feishu.verificationToken"],
+    ["feishu:\n  enabled: true", "feishu.appId"],
     ["unknownOption: true", "Unrecognized key"],
     ["codexBinary: /opt/external/codex", "Unrecognized key"],
     // Runtimes read their own configuration (~/.codex, ~/.claude, ~/.pi) since design 05.
@@ -188,7 +189,8 @@ router:
 channels:
   feishu:
     enabled: true
-    verificationToken: feishu-token
+    appId: feishu-app-id
+    appSecret: feishu-app-secret
 `,
     );
 
@@ -214,7 +216,8 @@ channels:
     });
     expect(config.channels!.feishu).toEqual({
       enabled: true,
-      verificationToken: "feishu-token",
+      appId: "feishu-app-id",
+      appSecret: "feishu-app-secret",
     });
 
     // Verify backward-compatible accessors
@@ -230,7 +233,8 @@ channels:
     expect(config.routerModel).toBe("gpt-4o-mini");
     expect(config.routerApiKey).toBe("router-api-key");
     expect(config.routerBaseUrl).toBe("https://custom-router.ai/v1");
-    expect(config.feishu.verificationToken).toBe("feishu-token");
+    expect(config.feishu.appId).toBe("feishu-app-id");
+    expect(config.feishu.appSecret).toBe("feishu-app-secret");
   });
 
   test("loads the checked-in example", async () => {

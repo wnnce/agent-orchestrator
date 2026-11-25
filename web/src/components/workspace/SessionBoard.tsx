@@ -20,7 +20,7 @@ import {
   Cpu,
   Loader2,
 } from "lucide-react";
-import { createSession, deleteSession, fetchRuntimes, renameSession } from "../../api/client";
+import { runtimesApi, sessionsApi } from "../../api";
 import { useStudio } from "../../context/StudioContext";
 import { useConfirm } from "../../context/ConfirmContext";
 import type { RuntimeInfo, SessionRoute } from "../../types";
@@ -410,7 +410,7 @@ export function SessionBoard() {
     setCreateModalOpen(true);
     setIsLoadingRuntimes(true);
     try {
-      const list = await fetchRuntimes();
+      const list = await runtimesApi.list();
       setRuntimes(list);
       const preferredRuntime =
         activeProject?.runtime?.type && list.some((r) => r.type === activeProject.runtime?.type)
@@ -446,7 +446,7 @@ export function SessionBoard() {
     if (isCreating || isLoadingRuntimes) return;
     try {
       setIsCreating(true);
-      const res = await createSession({
+      const res = await sessionsApi.create({
         projectId: activeProjectId || undefined,
         ...(selectedRuntime ? { runtime: selectedRuntime } : {}),
         ...(selectedModel ? { model: selectedModel } : {}),
@@ -480,7 +480,7 @@ export function SessionBoard() {
 
     try {
       setDeletingId(sessionId);
-      await deleteSession(sessionId);
+      await sessionsApi.delete(sessionId);
       setSessions((prev) => prev.filter((s) => s.sessionId !== sessionId));
       toast.success("Session deleted successfully");
     } catch (err: any) {
@@ -506,7 +506,7 @@ export function SessionBoard() {
     const clean = editTitle.trim();
     if (!clean) return;
     try {
-      await renameSession(sessionId, clean);
+      await sessionsApi.rename(sessionId, clean);
       setSessions((prev) =>
         prev.map((s) => (s.sessionId === sessionId ? { ...s, title: clean } : s))
       );

@@ -14,15 +14,7 @@ import {
   MessageSquare,
   Search,
 } from "lucide-react";
-import {
-  fetchArtifacts,
-  fetchSessionEvents,
-  fetchSessions,
-  getSession,
-  interruptTurn,
-  postTurn,
-  subscribeEvents,
-} from "../../api/client";
+import { sessionsApi } from "../../api";
 import { useStudio } from "../../context/StudioContext";
 import type {
   ArtifactRecord,
@@ -157,7 +149,8 @@ export function SessionConversation({
     setSessionNotFound(false);
     setSessionDetail(null);
     setSessionUsage(null);
-    getSession(sessionId)
+    sessionsApi
+      .get(sessionId)
       .then((data) => {
         if (!active) return;
         setSessionDetail(data.session);
@@ -243,9 +236,12 @@ export function SessionConversation({
         if (turnUsage) {
           setSessionUsage((prev) => mergeTurnUsageIntoSummary(prev, turnUsage));
         }
-        fetchArtifacts(sessionId).then(setArtifacts);
+        sessionsApi.listArtifacts(sessionId).then(setArtifacts).catch(() => {});
         if (!readOnly) {
-          fetchSessions(activeProjectId || undefined).then(setSessions);
+          sessionsApi
+            .list(activeProjectId || undefined)
+            .then(setSessions)
+            .catch(() => {});
         }
       } else if (evt.type === "session.closed" || evt.type === "session.archived") {
         flushEventBuffer();
@@ -261,7 +257,7 @@ export function SessionConversation({
       } else if (evt.type === "artifact.created") {
         if (artifactDebounceTimerRef.current) clearTimeout(artifactDebounceTimerRef.current);
         artifactDebounceTimerRef.current = setTimeout(() => {
-          fetchArtifacts(sessionId).then(setArtifacts);
+          sessionsApi.listArtifacts(sessionId).then(setArtifacts).catch(() => {});
         }, 150);
       } else if (evt.type === "session.runtime_reset" && !readOnly) {
         toast.warning("运行时会话已重置，Agent 不再保留之前的对话上下文");
@@ -302,11 +298,15 @@ export function SessionConversation({
     setArtifacts([]);
     setIsRunning(false);
 
-    fetchArtifacts(sessionId).then((arts) => {
-      if (isMounted) setArtifacts(arts);
-    });
+    sessionsApi
+      .listArtifacts(sessionId)
+      .then((arts) => {
+        if (isMounted) setArtifacts(arts);
+      })
+      .catch(() => {});
 
-    fetchSessionEvents(sessionId)
+    sessionsApi
+      .listEvents(sessionId)
       .then((history) => {
         if (!isMounted) return;
         setEvents(history);
@@ -323,7 +323,7 @@ export function SessionConversation({
           (e) => e.type === "session.closed" || e.type === "session.archived",
         );
         if (!alreadyEnded) {
-          unsubscribeRef.current = subscribeEvents(
+          unsubscribeRef.current = sessionsApi.subscribeEvents(
             sessionId,
             handleEvent,
             (err) => console.warn("SSE connection state change / reconnecting:", err),
@@ -359,7 +359,7 @@ export function SessionConversation({
     }
 
     try {
-      const res = await postTurn(sessionId, text);
+      const res = await sessionsApi.postTurn(sessionId, text);
       const turn = res?.turn;
 
       setMessages((prev) => [
@@ -397,7 +397,7 @@ export function SessionConversation({
   const handleInterrupt = async () => {
     if (readOnly || isTaskSession) return;
     try {
-      await interruptTurn(sessionId);
+      await sessionsApi.interruptTurn(sessionId);
       setIsRunning(false);
       setMessages((prev) => {
         const idx = prev.findLastIndex((msg) => msg.role === "assistant");
@@ -689,7 +689,7 @@ export function SessionConversation({
                         </div>
                       </div>
                       <a
-                        href={`/sessions/${encodeURIComponent(art.sessionId)}/artifacts/${encodeURIComponent(art.id)}`}
+                        href={sessionsApi.getArtifactDownloadUrl(art.sessionId, art.id)}
                         target="_blank"
                         rel="noreferrer"
                         className="p-1.5 rounded bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-default)] text-[var(--text-secondary)]"

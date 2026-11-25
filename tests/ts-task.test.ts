@@ -407,8 +407,8 @@ export default function (api) {
 `,
     );
 
-    // 1. Verify GET /projects/demo/tasks exposes clean JSON metadata for both TS tasks
-    const listRes = await gateway.app.request("/projects/demo/tasks");
+    // 1. Verify GET /api/v1/projects/demo/tasks exposes clean JSON metadata for both TS tasks
+    const listRes = await gateway.app.request("/api/v1/projects/demo/tasks");
     expect(listRes.status).toBe(200);
     const listData = (await listRes.json()) as {
       tasks: Array<{ taskId: string; type?: string; sourceFormat?: string }>;

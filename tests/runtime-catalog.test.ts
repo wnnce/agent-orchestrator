@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createSystemRouter } from "../src/gateway/routes/system.ts";
+import { createRuntimesRouter } from "../src/gateway/routes/system.ts";
 import { Logger } from "../src/observability/logger.ts";
 import { AGY_PROFILE, createACPAdapter } from "../src/runtime/acp/index.ts";
 import {
@@ -245,7 +245,7 @@ describe("RuntimeRegistry per-runtime discovery + RuntimeModelCatalog merge & /r
       modelsFile,
       logger: new Logger({ sink: () => {} }),
     });
-    const router = createSystemRouter(registry, catalog);
+    const router = createRuntimesRouter(registry, catalog);
 
     const allRes = await router.request("/runtimes");
     expect(allRes.status).toBe(200);
@@ -311,7 +311,7 @@ describe("RuntimeRegistry per-runtime discovery + RuntimeModelCatalog merge & /r
 
   test("GET /runtimes/:runtimeType/models hot-reloads JSON changes without restart", async () => {
     const catalog = new RuntimeModelCatalog({ modelsFile });
-    const router = createSystemRouter(registry, catalog);
+    const router = createRuntimesRouter(registry, catalog);
 
     const missing = await router.request("/runtimes/nonexistent/models");
     expect(missing.status).toBe(404);

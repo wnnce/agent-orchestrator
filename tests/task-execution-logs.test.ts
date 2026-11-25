@@ -290,7 +290,7 @@ export default function (api) {
     expect(batchSizes.reduce((a, b) => a + b, 0)).toBe(602);
 
     // Page 1 via API
-    const p1Res = await gateway.app.request(`/tasks/executions/${execId}/logs?limit=250`);
+    const p1Res = await gateway.app.request(`/api/v1/tasks/executions/${execId}/logs?limit=250`);
     expect(p1Res.status).toBe(200);
     const p1 = (await p1Res.json()) as {
       logs: TaskExecutionLogRecord[];
@@ -304,7 +304,7 @@ export default function (api) {
     expect(p1.logs[0]?.fields?.secretToken).toBe("[REDACTED]");
 
     // Level filter via API
-    const warnRes = await gateway.app.request(`/tasks/executions/${execId}/logs?level=warn`);
+    const warnRes = await gateway.app.request(`/api/v1/tasks/executions/${execId}/logs?level=warn`);
     expect(warnRes.status).toBe(200);
     const warnData = (await warnRes.json()) as {
       logs: TaskExecutionLogRecord[];
@@ -322,7 +322,7 @@ export default function (api) {
     expect(failedExecs[0]?.status).toBe("failed");
 
     const failLogsRes = await gateway.app.request(
-      `/tasks/executions/${failedExecs[0]!.executionId}/logs`,
+      `/api/v1/tasks/executions/${failedExecs[0]!.executionId}/logs`,
     );
     expect(failLogsRes.status).toBe(200);
     const failLogs = (await failLogsRes.json()) as { logs: TaskExecutionLogRecord[] };
@@ -352,7 +352,7 @@ export default function (api) {
     };
 
     // Page 1 (latest 3: 7, 6, 5)
-    const p1Res = await gateway.app.request("/tasks/executions?taskKey=demo:paged-task&limit=3");
+    const p1Res = await gateway.app.request("/api/v1/tasks/executions?taskKey=demo:paged-task&limit=3");
     expect(p1Res.status).toBe(200);
     const p1 = (await p1Res.json()) as ExecPage;
     expect(p1.executions.map((e) => e.executionId)).toEqual([
@@ -376,7 +376,7 @@ export default function (api) {
 
     // Page 2 (4, 3, 2)
     const p2Res = await gateway.app.request(
-      `/tasks/executions?taskKey=demo:paged-task&limit=3&beforeId=${p1.nextBeforeId}`,
+      `/api/v1/tasks/executions?taskKey=demo:paged-task&limit=3&beforeId=${p1.nextBeforeId}`,
     );
     expect(p2Res.status).toBe(200);
     const p2 = (await p2Res.json()) as ExecPage;
@@ -390,7 +390,7 @@ export default function (api) {
 
     // Page 3 (1) via cursor alias
     const p3Res = await gateway.app.request(
-      `/tasks/executions?taskKey=demo:paged-task&limit=3&cursor=${p2.nextBeforeId}`,
+      `/api/v1/tasks/executions?taskKey=demo:paged-task&limit=3&cursor=${p2.nextBeforeId}`,
     );
     expect(p3Res.status).toBe(200);
     const p3 = (await p3Res.json()) as ExecPage;
@@ -400,7 +400,7 @@ export default function (api) {
 
     // Server-side status filtering + cursor pagination on project route (failed runs: 6, 4, 2)
     const f1Res = await gateway.app.request(
-      "/projects/demo/tasks/paged-task/executions?status=failed&limit=2",
+      "/api/v1/projects/demo/tasks/paged-task/executions?status=failed&limit=2",
     );
     expect(f1Res.status).toBe(200);
     const f1 = (await f1Res.json()) as ExecPage;
@@ -409,7 +409,7 @@ export default function (api) {
     expect(f1.nextBeforeId).toBe(f1.executions[1]!.id);
 
     const f2Res = await gateway.app.request(
-      `/projects/demo/tasks/paged-task/executions?status=failed&limit=2&beforeId=${f1.nextBeforeId}`,
+      `/api/v1/projects/demo/tasks/paged-task/executions?status=failed&limit=2&beforeId=${f1.nextBeforeId}`,
     );
     expect(f2Res.status).toBe(200);
     const f2 = (await f2Res.json()) as ExecPage;
