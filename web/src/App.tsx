@@ -3,6 +3,7 @@ import { AnimatePresence, LazyMotion, MotionConfig, domAnimation, m } from "moti
 import { Toaster } from "sonner";
 import { ActivityBar } from "./components/studio/ActivityBar";
 import { StudioHeader } from "./components/studio/StudioHeader";
+import { NotFoundView } from "./components/views/NotFoundView";
 import { ProjectInfoView } from "./components/views/ProjectInfoView";
 import { ScheduledJobsView } from "./components/views/ScheduledJobsView";
 import { SessionsView } from "./components/views/SessionsView";
@@ -28,11 +29,15 @@ function ViewOutlet({ view }: { view: StudioView }) {
 }
 
 function StudioLayout() {
-  const { activeProjectId, activeView, activeSessionId } = useStudio();
+  const { activeProjectId, activeView, activeSessionId, isNotFound } = useStudio();
   const { theme } = useTheme();
   // Keep Task Studio's left explorer mounted across task/run switches;
   // animate top-level view switches and SessionBoard <-> SessionConversation transitions.
   const viewKey = `${activeProjectId ?? ""}:${activeView}:${activeSessionId ?? ""}`;
+
+  if (isNotFound) {
+    return <NotFoundView />;
+  }
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-[var(--bg-canvas)] text-[var(--text-primary)] font-sans select-none">

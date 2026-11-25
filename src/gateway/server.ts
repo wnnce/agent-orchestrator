@@ -177,6 +177,9 @@ export class Gateway {
     if (staticRoot) {
       app.get("/*", serveStatic({ root: staticRoot }));
       app.get("*", async (c) => {
+        if (c.req.path === "/api" || c.req.path.startsWith("/api/")) {
+          return c.json({ error: "not_found" }, 404);
+        }
         const file = Bun.file(`${staticRoot}/index.html`);
         if (await file.exists()) {
           return new Response(file, {

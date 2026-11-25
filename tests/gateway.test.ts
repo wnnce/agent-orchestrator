@@ -373,4 +373,12 @@ describe("Gateway with Hono", () => {
     expect(body.executions[0].actionName).toBe("send_notification");
     expect(body.executions[0].durationMs).toBe(42);
   });
+
+  it("returns 404 JSON for unknown /api/* routes instead of falling back to SPA HTML", async () => {
+    const { gateway } = createTestGateway();
+    const res = await gateway.handle(new Request("http://localhost/api/v1/nonexistent-endpoint"));
+    expect(res.status).toBe(404);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    expect(await res.json()).toEqual({ error: "not_found" });
+  });
 });

@@ -9,10 +9,13 @@ import React, {
 import { useLocation } from "wouter";
 import { projectsApi, sessionsApi, systemApi } from "../api";
 import type { ProjectRouting, SessionRoute, StudioView } from "../types";
+import { parseStudioLocation } from "../utils/routing";
 
 interface StudioContextType {
   activeView: StudioView;
   setActiveView: (view: StudioView) => void;
+  isNotFound: boolean;
+  goHome: () => void;
   projects: ProjectRouting[];
   activeProjectId: string | null;
   setActiveProjectId: (id: string | null) => void;
@@ -41,88 +44,38 @@ const StudioContext = createContext<StudioContextType | null>(null);
 export function StudioProvider({ children }: { children: React.ReactNode }) {
   const [location, navigate] = useLocation();
   const [projects, setProjects] = useState<ProjectRouting[]>([]);
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
   const [sessions, setSessions] = useState<SessionRoute[]>([]);
   const [isReady, setIsReady] = useState(false);
   const [showInspector, setShowInspector] = useState(false);
 
-  // Synchronously parse routing parameters from location
-  const { activeProjectId, activeView, activeSessionId, activeTaskId, activeExecutionId } = useMemo(() => {
-    // 1. Match /:projectId/sessions/:sessionId
-    const sessionMatch = location.match(/^\/([^/]+)\/sessions\/([^/]+)\/?$/);
-    if (sessionMatch) {
-      return {
-        activeProjectId: decodeURIComponent(sessionMatch[1]!),
-        activeView: "sessions" as StudioView,
-        activeSessionId: decodeURIComponent(sessionMatch[2]!),
-        activeTaskId: null,
-        activeExecutionId: null,
-      };
-    }
+  const parsedRoute = useMemo(() => parseStudioLocation(location), [location]);
+  const {
+    projectId: activeProjectId,
+    view: activeView,
+    sessionId: activeSessionId,
+    taskId: activeTaskId,
+    executionId: activeExecutionId,
+  } = parsedRoute;
 
-    // 2. Match /:projectId/tasks/:taskId/:executionId
-    const taskExecMatch = location.match(/^\/([^/]+)\/tasks\/([^/]+)\/([^/]+)\/?$/);
-    if (taskExecMatch) {
-      return {
-        activeProjectId: decodeURIComponent(taskExecMatch[1]!),
-        activeView: "tasks" as StudioView,
-        activeSessionId: null,
-        activeTaskId: decodeURIComponent(taskExecMatch[2]!),
-        activeExecutionId: decodeURIComponent(taskExecMatch[3]!),
-      };
-    }
+  const activeProject = useMemo(() => {
+    return projects.find((p) => p.projectId === activeProjectId) || null;
+  }, [projects, activeProjectId]);
 
-    // 3. Match /:projectId/tasks/:taskId
-    const taskMatch = location.match(/^\/([^/]+)\/tasks\/([^/]+)\/?$/);
-    if (taskMatch) {
-      return {
-        activeProjectId: decodeURIComponent(taskMatch[1]!),
-        activeView: "tasks" as StudioView,
-        activeSessionId: null,
-        activeTaskId: decodeURIComponent(taskMatch[2]!),
-        activeExecutionId: null,
-      };
-    }
+  const isNotFound =
+    !parsedRoute.matched || (projectsLoaded && Boolean(activeProjectId) && !activeProject);
 
-    // 4. Match /:projectId/:view
-    const viewMatch = location.match(/^\/([^/]+)\/([^/]+)\/?$/);
-    if (viewMatch) {
-      const rawView = viewMatch[2]!;
-      let v: StudioView = "sessions";
-      if (rawView === "sessions" || rawView === "tasks" || rawView === "jobs" || rawView === "project") {
-        v = rawView;
-      } else if (rawView === "overview") {
-        v = "project";
+  const resolveDefaultProjectId = useCallback((): string | undefined => {
+    try {
+      const stored = localStorage.getItem("last_active_project");
+      if (stored && projects.some((p) => p.projectId === stored)) {
+        return stored;
       }
-      return {
-        activeProjectId: decodeURIComponent(viewMatch[1]!),
-        activeView: v,
-        activeSessionId: null,
-        activeTaskId: null,
-        activeExecutionId: null,
-      };
+    } catch {
+      /* ignore */
     }
-
-    // 5. Match /:projectId
-    const projMatch = location.match(/^\/([^/]+)\/?$/);
-    if (projMatch) {
-      return {
-        activeProjectId: decodeURIComponent(projMatch[1]!),
-        activeView: "sessions" as StudioView,
-        activeSessionId: null,
-        activeTaskId: null,
-        activeExecutionId: null,
-      };
-    }
-
-    // 6. Root "/" or other paths
-    return {
-      activeProjectId: null,
-      activeView: "sessions" as StudioView,
-      activeSessionId: null,
-      activeTaskId: null,
-      activeExecutionId: null,
-    };
-  }, [location]);
+    return projects[0]?.projectId;
+  }, [projects]);
 
   // Load project list
   const refreshProjects = useCallback(async () => {
@@ -131,19 +84,21 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
       setProjects(list);
     } catch (err) {
       console.error("Failed to load projects:", err);
+    } finally {
+      setProjectsLoaded(true);
     }
   }, []);
 
   // Load session list for active project
   const refreshSessions = useCallback(async () => {
-    if (!activeProjectId) return;
+    if (!activeProjectId || (projectsLoaded && !activeProject)) return;
     try {
       const list = await sessionsApi.list(activeProjectId);
       setSessions(list);
     } catch (err) {
       console.error("Failed to load sessions:", err);
     }
-  }, [activeProjectId]);
+  }, [activeProjectId, projectsLoaded, activeProject]);
 
   // Initial ready check and projects fetch
   useEffect(() => {
@@ -152,63 +107,58 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     refreshProjects();
   }, [refreshProjects]);
 
-  // Refresh sessions when activeProjectId changes
+  // Refresh sessions when a valid activeProjectId is selected
   useEffect(() => {
-    if (activeProjectId) {
+    if (activeProjectId && (!projectsLoaded || activeProject)) {
       refreshSessions();
     }
-  }, [activeProjectId, refreshSessions]);
+  }, [activeProjectId, projectsLoaded, activeProject, refreshSessions]);
 
-  // Auto-redirect for root "/" or unassigned project URLs using last visited memory
+  // Persist last visited valid project; redirect ONLY root "/" to default project
   useEffect(() => {
     if (projects.length === 0) return;
 
-    if (activeProjectId) {
-      // Remember last visited valid project
+    if (activeProject) {
       try {
-        localStorage.setItem("last_active_project", activeProjectId);
-      } catch (e) {
+        localStorage.setItem("last_active_project", activeProject.projectId);
+      } catch {
         /* ignore */
       }
       return;
     }
 
-    // Root "/" or unassigned project: fallback to stored or first available project
-    let targetProject: string | undefined;
-    try {
-      const stored = localStorage.getItem("last_active_project");
-      if (stored && projects.some((p) => p.projectId === stored)) {
-        targetProject = stored;
-      }
-    } catch (e) {
-      /* ignore */
-    }
+    if (!parsedRoute.isRoot) return;
 
-    if (!targetProject) {
-      targetProject = projects[0]?.projectId;
-    }
-
+    const targetProject = resolveDefaultProjectId();
     if (targetProject) {
-      navigate(`/${targetProject}/sessions`, { replace: true });
+      navigate(`/${encodeURIComponent(targetProject)}/sessions`, { replace: true });
     }
-  }, [projects, activeProjectId, navigate]);
-
-  // Resolved active entities
-  const activeProject = useMemo(() => {
-    return projects.find((p) => p.projectId === activeProjectId) || null;
-  }, [projects, activeProjectId]);
+  }, [projects, activeProject, parsedRoute.isRoot, resolveDefaultProjectId, navigate]);
 
   const activeSession = useMemo(() => {
     return sessions.find((s) => s.sessionId === activeSessionId) || null;
   }, [sessions, activeSessionId]);
 
+  const getValidProjectId = useCallback(() => {
+    return activeProject?.projectId || resolveDefaultProjectId() || "default";
+  }, [activeProject, resolveDefaultProjectId]);
+
+  const goHome = useCallback(() => {
+    const targetProject = resolveDefaultProjectId();
+    if (targetProject) {
+      navigate(`/${encodeURIComponent(targetProject)}/sessions`);
+    } else {
+      navigate("/");
+    }
+  }, [resolveDefaultProjectId, navigate]);
+
   // Navigation handlers (drive the browser URL)
   const setActiveView = useCallback(
     (view: StudioView) => {
-      const targetProj = activeProjectId || projects[0]?.projectId || "default";
-      navigate(`/${targetProj}/${view}`);
+      const targetProj = getValidProjectId();
+      navigate(`/${encodeURIComponent(targetProj)}/${view}`);
     },
-    [activeProjectId, projects, navigate],
+    [getValidProjectId, navigate],
   );
 
   const setActiveProjectId = useCallback(
@@ -216,52 +166,52 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
       if (!id) return;
       try {
         localStorage.setItem("last_active_project", id);
-      } catch (e) {
+      } catch {
         /* ignore */
       }
-      navigate(`/${id}/${activeView}`);
+      navigate(`/${encodeURIComponent(id)}/${isNotFound ? "sessions" : activeView}`);
     },
-    [activeView, navigate],
+    [activeView, isNotFound, navigate],
   );
 
   const setActiveSessionId = useCallback(
     (id: string | null) => {
-      const targetProj = activeProjectId || projects[0]?.projectId || "default";
+      const targetProj = getValidProjectId();
       if (id) {
-        navigate(`/${targetProj}/sessions/${id}`);
+        navigate(`/${encodeURIComponent(targetProj)}/sessions/${encodeURIComponent(id)}`);
       } else {
-        navigate(`/${targetProj}/sessions`);
+        navigate(`/${encodeURIComponent(targetProj)}/sessions`);
       }
     },
-    [activeProjectId, projects, navigate],
+    [getValidProjectId, navigate],
   );
 
   const openSession = useCallback(
     (sessionId: string) => {
-      const targetProj = activeProjectId || projects[0]?.projectId || "default";
-      navigate(`/${targetProj}/sessions/${sessionId}`);
+      const targetProj = getValidProjectId();
+      navigate(`/${encodeURIComponent(targetProj)}/sessions/${encodeURIComponent(sessionId)}`);
     },
-    [activeProjectId, projects, navigate],
+    [getValidProjectId, navigate],
   );
 
   const closeToBoard = useCallback(() => {
-    const targetProj = activeProjectId || projects[0]?.projectId || "default";
-    navigate(`/${targetProj}/sessions`);
-  }, [activeProjectId, projects, navigate]);
+    const targetProj = getValidProjectId();
+    navigate(`/${encodeURIComponent(targetProj)}/sessions`);
+  }, [getValidProjectId, navigate]);
 
   const openTask = useCallback(
     (taskId: string, executionId?: string | null) => {
-      const targetProj = activeProjectId || projects[0]?.projectId || "default";
+      const targetProj = getValidProjectId();
       const base = `/${encodeURIComponent(targetProj)}/tasks/${encodeURIComponent(taskId)}`;
       navigate(executionId ? `${base}/${encodeURIComponent(executionId)}` : base);
     },
-    [activeProjectId, projects, navigate],
+    [getValidProjectId, navigate],
   );
 
   const closeToTasks = useCallback(() => {
-    const targetProj = activeProjectId || projects[0]?.projectId || "default";
+    const targetProj = getValidProjectId();
     navigate(`/${encodeURIComponent(targetProj)}/tasks`);
-  }, [activeProjectId, projects, navigate]);
+  }, [getValidProjectId, navigate]);
 
   const toggleInspector = useCallback(() => setShowInspector((prev) => !prev), []);
 
@@ -270,6 +220,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
       value={{
         activeView,
         setActiveView,
+        isNotFound,
+        goHome,
         projects,
         activeProjectId,
         setActiveProjectId,
