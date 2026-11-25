@@ -14,6 +14,7 @@ import { RuntimeModelCatalog } from "../runtime/catalog.ts";
 import type { SessionManager } from "../session/index.ts";
 import {
   createSystemRouter,
+  createDocsRouter,
   createChannelsRouter,
   createProjectsRouter,
   createTasksRouter,
@@ -132,6 +133,7 @@ export class Gateway {
       logger: this.logger,
     });
     app.route("/", createSystemRouter(this.projects.getRuntimeRegistry(), modelCatalog));
+    app.route("/", createDocsRouter(app));
 
     // 4. Channel adapters (authenticate with platform credentials)
     app.route("/", createChannelsRouter({ feishu: this.feishu }));

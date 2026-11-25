@@ -19,19 +19,21 @@ import { MemoryInbox } from "./inbox.ts";
 import { SessionTitleGenerator } from "./titles.ts";
 
 export interface CreateSessionInput {
-  projectId?: string;
-  title?: string;
-  query?: string;
-  submitQuery?: boolean;
-  source?: string;
-  runtime?: string;
-  model?: string;
-  reasoningEffort?: string;
-  external?: {
-    channel: string;
-    conversationId: string;
-    threadId?: string;
-  };
+  projectId?: string | undefined;
+  title?: string | undefined;
+  query?: string | undefined;
+  submitQuery?: boolean | undefined;
+  source?: string | undefined;
+  runtime?: string | undefined;
+  model?: string | undefined;
+  reasoningEffort?: string | undefined;
+  external?:
+    | {
+        channel: string;
+        conversationId: string;
+        threadId?: string | undefined;
+      }
+    | undefined;
 }
 
 export interface CreatedSession {
@@ -130,7 +132,13 @@ export class GatewayService {
       source,
       runtimeOverride,
     );
-    if (input.external) route = await project.bindExternal(route.sessionId, input.external);
+    if (input.external) {
+      route = await project.bindExternal(route.sessionId, {
+        channel: input.external.channel,
+        conversationId: input.external.conversationId,
+        ...(input.external.threadId ? { threadId: input.external.threadId } : {}),
+      });
+    }
     const turn =
       query && input.submitQuery !== false ? await project.turn(route.sessionId, query) : undefined;
     if (query && !explicitTitle) {

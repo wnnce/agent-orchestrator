@@ -1,4 +1,5 @@
 export { createSystemRouter } from "./system.ts";
+export { createDocsRouter, type DocsRouterOptions } from "./docs.ts";
 export { createChannelsRouter, type ChannelsRouteDeps } from "./channels.ts";
 export { createProjectsRouter, type ProjectsRouteDeps } from "./projects.ts";
 export { createTasksRouter, type TasksRouteDeps } from "./tasks.ts";
