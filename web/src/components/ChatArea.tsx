@@ -27,6 +27,7 @@ interface ChatAreaProps {
   onInterrupt: () => void;
   isClosed?: boolean;
   closedReason?: string;
+  embedded?: boolean;
 }
 
 export const ChatArea: React.FC<ChatAreaProps> = ({
@@ -37,6 +38,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   onInterrupt,
   isClosed = false,
   closedReason,
+  embedded = false,
 }) => {
   const [input, setInput] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -223,11 +225,15 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-[var(--bg-canvas)] select-text relative">
-      {/* Messages Scroll Area - pb-48 leaves ample room for the floating input composer */}
+      {/* Messages Scroll Area */}
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-4 md:px-8 pt-8 pb-48 space-y-8"
+        className={
+          embedded
+            ? `flex-1 overflow-y-auto p-5 ${isClosed ? "pb-20" : "pb-44"} space-y-6`
+            : "flex-1 overflow-y-auto px-4 md:px-8 pt-8 pb-48 space-y-8"
+        }
       >
         {isLoading ? (
           <div className="h-full flex items-center justify-center gap-2 text-xs font-mono text-[var(--text-muted)] select-none pb-12 animate-delayed-fade">
@@ -285,7 +291,14 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             const isUser = msg.role === "user";
 
             return (
-              <div key={msg.id} className="max-w-3xl mx-auto w-full animate-msg-enter">
+              <div
+                key={msg.id}
+                className={
+                  embedded
+                    ? "w-full animate-msg-enter"
+                    : "max-w-3xl mx-auto w-full animate-msg-enter"
+                }
+              >
                 {isUser ? (
                   /* User Message: Aligned strictly on the shared left axis without boxy card */
                   <div className="w-full space-y-2">
@@ -802,10 +815,16 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       </div>
 
       {/* Floating Input Composer or Closed Session Banner */}
-      <div className="absolute bottom-0 inset-x-0 z-20 pointer-events-none pb-4 pt-12 bg-gradient-to-t from-[var(--bg-canvas)] via-[var(--bg-canvas)]/90 via-50% to-transparent">
+      <div className="absolute bottom-0 inset-x-0 z-20 pointer-events-none pb-4 pt-10 bg-gradient-to-t from-[var(--bg-canvas)] via-[var(--bg-canvas)]/90 via-50% to-transparent">
         {isClosed ? (
-          <div className="max-w-3xl mx-auto px-4 w-full pointer-events-auto select-none">
-            <div className="flex items-center justify-center gap-2 px-4 py-3 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-card)]/95 backdrop-blur-md text-xs text-[var(--text-muted)] font-mono">
+          <div
+            className={
+              embedded
+                ? "px-5 w-full pointer-events-auto select-none"
+                : "max-w-3xl mx-auto px-4 w-full pointer-events-auto select-none"
+            }
+          >
+            <div className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)]/95 backdrop-blur-md text-xs text-[var(--text-muted)] font-mono">
               <Archive className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0" />
               <span>{closedReason || "This session is closed and read-only."}</span>
             </div>

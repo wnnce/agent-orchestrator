@@ -48,7 +48,7 @@
   /* Light Theme (Vercel Pristine White) */
   --bg-canvas: #ffffff;
   --bg-surface: #fafafa;
-  --bg-surface-elevated: #f5f5f5;
+  --bg-surface-elevated: #f3f3f3;
   --bg-surface-hover: #eaeaea;
   --bg-subtle: #fcfcfc;
   --bg-card: #ffffff;
@@ -57,8 +57,8 @@
   --bg-activity-bar: #ffffff;
   --bg-inspector: #ffffff;
   --bg-input: #ffffff;
-  --bg-code: #f5f5f5;
-  --bg-table-header: #fafafa;
+  --bg-code: #f7f7f7;
+  --bg-table-header: #f4f4f5;
   --bg-table-row-hover: #f5f5f5;
 
   --border-default: #eaeaea;
@@ -118,8 +118,8 @@
 [data-theme="dark"] {
   --bg-canvas: #000000;
   --bg-surface: #0a0a0a;
-  --bg-surface-elevated: #111111;
-  --bg-surface-hover: #1a1a1a;
+  --bg-surface-elevated: #141414;
+  --bg-surface-hover: #1c1c1c;
   --bg-subtle: #050505;
   --bg-card: #000000;
   --bg-header: #000000;
@@ -127,9 +127,9 @@
   --bg-activity-bar: #000000;
   --bg-inspector: #000000;
   --bg-input: #0a0a0a;
-  --bg-code: #0a0a0a;
-  --bg-table-header: #0a0a0a;
-  --bg-table-row-hover: #111111;
+  --bg-code: #060606;
+  --bg-table-header: #121212;
+  --bg-table-row-hover: #141414;
 
   --border-default: #222222;
   --border-subtle: #171717;

@@ -26,11 +26,11 @@ import { TaskExecutionDetail } from "../task/TaskExecutionDetail";
 function taskTypeBadgeClass(taskType: string): string {
   switch (taskType) {
     case "ts":
-      return "text-sky-500 dark:text-sky-400 bg-sky-500/10 border-sky-500/25";
+      return "text-sky-600 dark:text-sky-400 bg-sky-500/10 border-sky-500/25";
     case "script":
-      return "text-amber-500 dark:text-amber-400 bg-amber-500/10 border-amber-500/25";
+      return "text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/25";
     case "action":
-      return "text-purple-500 dark:text-purple-400 bg-purple-500/10 border-purple-500/25";
+      return "text-purple-600 dark:text-purple-400 bg-purple-500/10 border-purple-500/25";
     default:
       return "text-[var(--text-secondary)] bg-[var(--bg-surface-elevated)] border-[var(--border-default)]";
   }
@@ -70,8 +70,8 @@ function TaskInfoPanel({
   const runtimeInfo = getEffectiveRuntimeInfo(task, projectRuntime);
 
   return (
-    <div className="flex-1 overflow-y-auto p-6 bg-[var(--bg-canvas)] select-text">
-      <div className="max-w-3xl mx-auto space-y-5">
+    <div className="flex-1 overflow-y-auto p-5 bg-[var(--bg-canvas)] select-text">
+      <div className="w-full space-y-4">
         {/* Description */}
         <div className="p-4 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] space-y-1.5">
           <div className="text-[10px] font-mono font-semibold uppercase tracking-wider text-[var(--text-muted)]">
@@ -607,7 +607,7 @@ export function TasksView() {
         ) : (
           <>
             {/* Single Clean 48px Task Action Bar */}
-            <div className="h-12 px-4 border-b border-[var(--border-default)] bg-[var(--bg-header)] flex items-center justify-between gap-3 shrink-0">
+            <div className="h-12 px-5 border-b border-[var(--border-default)] bg-[var(--bg-header)] flex items-center justify-between gap-3 shrink-0">
               <div className="flex items-center gap-2 min-w-0">
                 <h2 className="text-xs font-mono font-semibold text-[var(--text-primary)] truncate">
                   {selectedTask.name}
@@ -616,7 +616,7 @@ export function TasksView() {
                 <span
                   className={`text-[10px] font-mono px-1.5 py-0.5 rounded-[var(--radius-xs)] border shrink-0 ${
                     selectedTask.enabled
-                      ? "text-emerald-500 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
+                      ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
                       : "text-[var(--text-muted)] bg-[var(--bg-surface-elevated)] border-[var(--border-default)]"
                   }`}
                 >
@@ -822,7 +822,7 @@ export function TasksView() {
                           />
                           <span
                             className={`text-[10.5px] font-semibold uppercase ${
-                              isOk ? "text-emerald-500 dark:text-emerald-400" : "text-red-400"
+                              isOk ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
                             }`}
                           >
                             {exec.status}

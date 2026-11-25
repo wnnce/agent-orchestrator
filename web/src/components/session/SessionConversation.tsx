@@ -461,15 +461,15 @@ export function SessionConversation({
     return (
       <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden bg-[var(--bg-canvas)] select-text">
         {/* Compact Run Meta + Sub-tabs Bar (matches TaskExecutionDetail 1:1) */}
-        <div className="px-4 py-2 border-b border-[var(--border-default)] bg-[var(--bg-surface)] shrink-0 space-y-2">
+        <div className="px-5 py-2.5 border-b border-[var(--border-default)] bg-[var(--bg-surface)] shrink-0 space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-xs">
             <div className="flex flex-wrap items-center gap-2 min-w-0">
               {taskExecution && (
                 <span
                   className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[var(--radius-xs)] text-[10px] font-semibold border uppercase ${
                     taskExecution.status === "success"
-                      ? "text-emerald-500 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
-                      : "text-red-500 dark:text-red-400 bg-red-500/10 border-red-500/20"
+                      ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
+                      : "text-red-600 dark:text-red-400 bg-red-500/10 border-red-500/20"
                   }`}
                 >
                   <span
@@ -570,7 +570,7 @@ export function SessionConversation({
           </div>
 
           {taskExecution?.errorMessage && (
-            <div className="flex items-start gap-2 px-3 py-1.5 rounded-[var(--radius-sm)] border border-red-500/30 bg-red-500/10 text-[11px] text-red-400 font-mono">
+            <div className="flex items-start gap-2 px-3 py-1.5 rounded-[var(--radius-sm)] border border-red-500/30 bg-red-500/10 text-[11px] text-red-600 dark:text-red-400 font-mono">
               <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-red-500" />
               <span className="break-words leading-relaxed">{taskExecution.errorMessage}</span>
             </div>
@@ -578,7 +578,7 @@ export function SessionConversation({
         </div>
 
         {/* Embedded Tab Content */}
-        <div className="flex-1 flex min-h-0 overflow-hidden">
+        <div className="flex-1 flex min-h-0 overflow-hidden bg-[var(--bg-canvas)]">
           {embeddedTab === "chat" && (
             <ChatArea
               messages={messages}
@@ -586,6 +586,7 @@ export function SessionConversation({
               isLoading={isLoadingHistory}
               isClosed={isClosed}
               closedReason={resolvedClosedReason}
+              embedded
               onSendMessage={handleSendMessage}
               onInterrupt={handleInterrupt}
             />
@@ -597,67 +598,69 @@ export function SessionConversation({
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.14, ease: EASE_OUT_EXPO }}
-              className="flex-1 flex flex-col min-h-0"
+              className="flex-1 flex flex-col min-h-0 p-5"
             >
-              <div className="px-4 py-2 border-b border-[var(--border-default)] bg-[var(--bg-canvas)] shrink-0">
-                <div className="relative max-w-sm">
-                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
-                  <input
-                    type="text"
-                    value={eventFilter}
-                    onChange={(e) => setEventFilter(e.target.value)}
-                    placeholder="按事件类型过滤..."
-                    className="w-full pl-8 pr-3 py-1 rounded-[var(--radius-sm)] text-xs font-mono bg-[var(--bg-input)] border border-[var(--border-default)] text-[var(--text-primary)] outline-hidden focus:border-[var(--border-focus)]"
-                  />
+              <div className="flex-1 flex flex-col min-h-0 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] overflow-hidden">
+                <div className="px-4 py-2 border-b border-[var(--border-default)] bg-[var(--bg-table-header)] shrink-0">
+                  <div className="relative max-w-sm">
+                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+                    <input
+                      type="text"
+                      value={eventFilter}
+                      onChange={(e) => setEventFilter(e.target.value)}
+                      placeholder="按事件类型过滤..."
+                      className="w-full pl-8 pr-3 py-1 rounded-[var(--radius-sm)] text-xs font-mono bg-[var(--bg-input)] border border-[var(--border-default)] text-[var(--text-primary)] outline-hidden focus:border-[var(--border-focus)]"
+                    />
+                  </div>
                 </div>
-              </div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-1.5 font-mono text-[11px]">
-                {filteredEvents.length === 0 ? (
-                  <div className="text-center py-10 text-[var(--text-muted)]">暂无匹配事件</div>
-                ) : (
-                  filteredEvents.map((evt, idx) => {
-                    const isExpanded = !!expandedEvents[idx];
-                    const hasOpened = idx in expandedEvents;
-                    return (
-                      <div
-                        key={evt.id || idx}
-                        className="border border-[var(--border-subtle)] rounded-[var(--radius-sm)] bg-[var(--bg-surface)] p-2"
-                      >
+                <div className="flex-1 overflow-y-auto p-3 space-y-1.5 font-mono text-[11px] bg-[var(--bg-code)]">
+                  {filteredEvents.length === 0 ? (
+                    <div className="text-center py-10 text-[var(--text-muted)]">暂无匹配事件</div>
+                  ) : (
+                    filteredEvents.map((evt, idx) => {
+                      const isExpanded = !!expandedEvents[idx];
+                      const hasOpened = idx in expandedEvents;
+                      return (
                         <div
-                          className="flex items-center justify-between cursor-pointer select-none"
-                          onClick={() =>
-                            setExpandedEvents((prev) => ({ ...prev, [idx]: !prev[idx] }))
-                          }
+                          key={evt.id || idx}
+                          className="border border-[var(--border-default)] rounded-[var(--radius-sm)] bg-[var(--bg-surface)] p-2.5"
                         >
-                          <div className="flex items-center gap-1.5 truncate">
-                            <ChevronRight
-                              className={`w-3 h-3 text-[var(--text-muted)] shrink-0 transition-transform duration-150 ${
-                                isExpanded ? "rotate-90" : ""
-                              }`}
-                            />
-                            <span className="font-semibold text-[var(--text-primary)] truncate">
-                              {evt.type}
+                          <div
+                            className="flex items-center justify-between cursor-pointer select-none"
+                            onClick={() =>
+                              setExpandedEvents((prev) => ({ ...prev, [idx]: !prev[idx] }))
+                            }
+                          >
+                            <div className="flex items-center gap-1.5 truncate">
+                              <ChevronRight
+                                className={`w-3 h-3 text-[var(--text-muted)] shrink-0 transition-transform duration-150 ${
+                                  isExpanded ? "rotate-90" : ""
+                                }`}
+                              />
+                              <span className="font-semibold text-[var(--text-primary)] truncate">
+                                {evt.type}
+                              </span>
+                            </div>
+                            <span className="text-[10px] text-[var(--text-muted)]">
+                              #{evt.sequence ?? idx + 1}
                             </span>
                           </div>
-                          <span className="text-[10px] text-[var(--text-muted)]">
-                            #{evt.sequence ?? idx + 1}
-                          </span>
-                        </div>
-                        <div className="collapsible-grid" data-open={isExpanded}>
-                          <div className="collapsible-inner">
-                            {hasOpened && (
-                              <div className="mt-2 pt-2 border-t border-[var(--border-subtle)]">
-                                <pre className="text-[10.5px] bg-[var(--bg-code)] p-2 rounded overflow-x-auto text-[var(--text-code)] max-h-56">
-                                  {JSON.stringify(evt.payload || {}, null, 2)}
-                                </pre>
-                              </div>
-                            )}
+                          <div className="collapsible-grid" data-open={isExpanded}>
+                            <div className="collapsible-inner">
+                              {hasOpened && (
+                                <div className="mt-2 pt-2 border-t border-[var(--border-subtle)]">
+                                  <pre className="text-[10.5px] bg-[var(--bg-code)] p-2.5 rounded overflow-x-auto text-[var(--text-code)] max-h-56">
+                                    {JSON.stringify(evt.payload || {}, null, 2)}
+                                  </pre>
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  })
-                )}
+                      );
+                    })
+                  )}
+                </div>
               </div>
             </m.div>
           )}
@@ -670,7 +673,7 @@ export function SessionConversation({
               transition={{ duration: 0.14, ease: EASE_OUT_EXPO }}
               className="flex-1 overflow-y-auto p-5"
             >
-              <div className="max-w-3xl mx-auto space-y-2">
+              <div className="w-full space-y-2.5">
                 {visibleArtifacts.length === 0 ? (
                   <div className="text-center py-10 text-xs font-mono text-[var(--text-muted)]">
                     本次执行暂无生成产物
@@ -679,7 +682,7 @@ export function SessionConversation({
                   visibleArtifacts.map((art) => (
                     <div
                       key={art.id}
-                      className="border border-[var(--border-default)] rounded-[var(--radius-md)] bg-[var(--bg-surface)] p-3 flex items-center justify-between gap-2"
+                      className="border border-[var(--border-default)] rounded-[var(--radius-md)] bg-[var(--bg-surface)] p-3.5 flex items-center justify-between gap-2"
                     >
                       <div className="truncate">
                         <div className="font-semibold text-xs text-[var(--text-primary)] truncate">
@@ -713,89 +716,93 @@ export function SessionConversation({
               transition={{ duration: 0.14, ease: EASE_OUT_EXPO }}
               className="flex-1 overflow-y-auto p-5 font-mono text-xs"
             >
-              <div className="max-w-3xl mx-auto space-y-5">
+              <div className="w-full space-y-4">
                 {/* Session & Model Usage */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="p-3.5 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] space-y-1.5 text-[11px]">
-                    <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2">
+                  <div className="rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] overflow-hidden text-[11px]">
+                    <div className="px-4 py-2 border-b border-[var(--border-default)] bg-[var(--bg-table-header)] text-[10.5px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
                       会话运行信息
                     </div>
-                    <div>
-                      <span className="text-[var(--text-muted)]">Session: </span>
-                      <span className="text-[var(--text-primary)] break-all">{sessionId}</span>
+                    <div className="p-4 space-y-1.5">
+                      <div>
+                        <span className="text-[var(--text-muted)]">Session: </span>
+                        <span className="text-[var(--text-primary)] break-all">{sessionId}</span>
+                      </div>
+                      {currentSession?.runtime && (
+                        <div>
+                          <span className="text-[var(--text-muted)]">Runtime: </span>
+                          <span className="text-[var(--text-primary)]">{currentSession.runtime}</span>
+                        </div>
+                      )}
+                      {currentSession?.model && (
+                        <div>
+                          <span className="text-[var(--text-muted)]">Model: </span>
+                          <span className="text-[var(--text-primary)]">{currentSession.model}</span>
+                        </div>
+                      )}
+                      {currentSession?.reasoningEffort && (
+                        <div>
+                          <span className="text-[var(--text-muted)]">Effort: </span>
+                          <span className="text-[var(--text-primary)]">
+                            {currentSession.reasoningEffort}
+                          </span>
+                        </div>
+                      )}
                     </div>
-                    {currentSession?.runtime && (
-                      <div>
-                        <span className="text-[var(--text-muted)]">Runtime: </span>
-                        <span className="text-[var(--text-primary)]">{currentSession.runtime}</span>
-                      </div>
-                    )}
-                    {currentSession?.model && (
-                      <div>
-                        <span className="text-[var(--text-muted)]">Model: </span>
-                        <span className="text-[var(--text-primary)]">{currentSession.model}</span>
-                      </div>
-                    )}
-                    {currentSession?.reasoningEffort && (
-                      <div>
-                        <span className="text-[var(--text-muted)]">Effort: </span>
-                        <span className="text-[var(--text-primary)]">
-                          {currentSession.reasoningEffort}
-                        </span>
-                      </div>
-                    )}
                   </div>
 
-                  <div className="p-3.5 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] space-y-1.5 text-[11px]">
-                    <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2">
+                  <div className="rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] overflow-hidden text-[11px]">
+                    <div className="px-4 py-2 border-b border-[var(--border-default)] bg-[var(--bg-table-header)] text-[10.5px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
                       模型用量 (Usage)
                     </div>
-                    {sessionUsage ? (
-                      <>
-                        <div className="flex justify-between">
-                          <span className="text-[var(--text-muted)]">总计</span>
-                          <span className="text-[var(--text-primary)] font-semibold">
-                            {formatTokenCount(sessionUsage.totalTokens)} ({sessionUsage.turnCount}{" "}
-                            轮)
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-[var(--text-muted)]">新输入 / 输出</span>
-                          <span className="text-[var(--text-primary)]">
-                            {formatTokenCount(sessionUsage.inputTokens)} /{" "}
-                            {formatTokenCount(sessionUsage.outputTokens)}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-[var(--text-muted)]">缓存读</span>
-                          <span className="text-emerald-500">
-                            {formatTokenCount(sessionUsage.cacheReadTokens)}
-                            {hitRate !== null ? ` (${hitRate}%)` : ""}
-                          </span>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="text-[var(--text-muted)]">暂无用量记录</div>
-                    )}
+                    <div className="p-4 space-y-1.5">
+                      {sessionUsage ? (
+                        <>
+                          <div className="flex justify-between">
+                            <span className="text-[var(--text-muted)]">总计</span>
+                            <span className="text-[var(--text-primary)] font-semibold">
+                              {formatTokenCount(sessionUsage.totalTokens)} ({sessionUsage.turnCount}{" "}
+                              轮)
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-[var(--text-muted)]">新输入 / 输出</span>
+                            <span className="text-[var(--text-primary)]">
+                              {formatTokenCount(sessionUsage.inputTokens)} /{" "}
+                              {formatTokenCount(sessionUsage.outputTokens)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-[var(--text-muted)]">缓存读</span>
+                            <span className="text-emerald-600 dark:text-emerald-400">
+                              {formatTokenCount(sessionUsage.cacheReadTokens)}
+                              {hitRate !== null ? ` (${hitRate}%)` : ""}
+                            </span>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="text-[var(--text-muted)]">暂无用量记录</div>
+                      )}
+                    </div>
                   </div>
                 </div>
 
                 {/* Task State Snapshot */}
                 {taskExecution && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1.5">
+                    <div className="rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] overflow-hidden">
+                      <div className="px-4 py-2 border-b border-[var(--border-default)] bg-[var(--bg-table-header)] text-[10.5px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
                         stateBefore
                       </div>
-                      <pre className="p-3 rounded-[var(--radius-sm)] bg-[var(--bg-code)] border border-[var(--border-default)] text-[11px] text-[var(--text-code)] overflow-x-auto max-h-60">
+                      <pre className="p-4 bg-[var(--bg-code)] text-[11px] text-[var(--text-code)] overflow-x-auto max-h-60 leading-relaxed">
                         {JSON.stringify(taskExecution.stateBefore || {}, null, 2)}
                       </pre>
                     </div>
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1.5">
+                    <div className="rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] overflow-hidden">
+                      <div className="px-4 py-2 border-b border-[var(--border-default)] bg-[var(--bg-table-header)] text-[10.5px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
                         stateAfter
                       </div>
-                      <pre className="p-3 rounded-[var(--radius-sm)] bg-[var(--bg-code)] border border-[var(--border-default)] text-[11px] text-[var(--text-code)] overflow-x-auto max-h-60">
+                      <pre className="p-4 bg-[var(--bg-code)] text-[11px] text-[var(--text-code)] overflow-x-auto max-h-60 leading-relaxed">
                         {JSON.stringify(taskExecution.stateAfter || {}, null, 2)}
                       </pre>
                     </div>
