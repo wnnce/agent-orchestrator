@@ -203,6 +203,7 @@ export class ProjectRuntime {
           getEnv: () => this.project.env,
           getVars: () => this.project.vars,
           getProjectScope: () => buildProjectPromptScope(this.project),
+          getMcpServers: () => this.project.runtime?.mcpServers,
           ...(this.project.projectDir
             ? { getWorkdir: () => this.project.projectDir }
             : {}),

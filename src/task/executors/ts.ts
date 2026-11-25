@@ -1,7 +1,8 @@
 import { createActionContext } from "../../actions/context.ts";
 import type { ActionRegistry } from "../../actions/registry.ts";
 import type { ActionContext, ActionResult } from "../../actions/types.ts";
-import type { ProjectVars, TaskExecutionLogRecord } from "../../domain/types.ts";
+import type { McpServerConfig, ProjectVars, TaskExecutionLogRecord } from "../../domain/types.ts";
+import { ProjectMcpClientPool, type McpClientFactory } from "../../mcp/index.ts";
 import { Logger } from "../../observability/logger.ts";
 import {
   buildNowPromptScope,
@@ -26,6 +27,10 @@ export interface TsTaskExecutorOptions {
     | ((projectId: string) => ProjectPromptScope | Record<string, unknown> | undefined)
     | undefined;
   readonly getWorkdir?: ((projectId: string) => string | undefined) | undefined;
+  readonly getMcpServers?:
+    | ((projectId: string) => readonly McpServerConfig[] | undefined)
+    | undefined;
+  readonly mcpClientFactory?: McpClientFactory | undefined;
   readonly createActionContext?:
     | ((context: TaskExecutionContext) => ActionContext)
     | undefined;
@@ -166,6 +171,18 @@ export class TsTaskExecutor implements ITaskExecutor {
         )
       : this.logger.child({ projectId: task.projectId, taskKey: task.taskKey });
 
+    const mcpServers = this.options.getMcpServers
+      ? (this.options.getMcpServers(task.projectId) ?? [])
+      : [];
+    const mcpPool = new ProjectMcpClientPool({
+      servers: mcpServers,
+      workdir,
+      env,
+      signal,
+      logger: taskLogger,
+      ...(this.options.mcpClientFactory ? { clientFactory: this.options.mcpClientFactory } : {}),
+    });
+
     const runContext: TaskRunContext = {
       projectId: task.projectId,
       taskId: task.taskId,
@@ -207,6 +224,13 @@ export class TsTaskExecutor implements ITaskExecutor {
         }
         return this.options.actionRegistry.execute<T>(name, params, actionContext);
       },
+      callMcpTool: <T = unknown>(
+        serverName: string,
+        toolName: string,
+        args?: Record<string, unknown>,
+        callOptions?: { readonly timeoutMs?: number | undefined; readonly signal?: AbortSignal | undefined },
+      ) => mcpPool.callTool<T>(serverName, toolName, args, callOptions),
+      listMcpTools: (serverName, callOptions) => mcpPool.listTools(serverName, callOptions),
     };
 
     try {
@@ -267,6 +291,7 @@ export class TsTaskExecutor implements ITaskExecutor {
       if (context.signal && onParentAbort) {
         context.signal.removeEventListener("abort", onParentAbort);
       }
+      await mcpPool.close();
       if (logBuffer) {
         await logBuffer.flush();
       }

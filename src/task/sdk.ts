@@ -7,6 +7,7 @@ import type {
   UpdateTaskStateOptions,
 } from "../actions/types.ts";
 import type { ArtifactRecord, ProjectVarValue } from "../domain/types.ts";
+import type { McpToolCallOptions, McpToolInfo, McpToolResult } from "../mcp/index.ts";
 import type { NotificationMessage, NotificationOptions } from "../notifications/index.ts";
 import type { Logger } from "../observability/logger.ts";
 
@@ -71,6 +72,20 @@ export interface TaskRunContext {
     name: string,
     params: Record<string, unknown>,
   ): Promise<ActionResult<T>>;
+
+  /**
+   * Call a tool on a project-configured MCP server (from `project.yaml` `runtime.mcpServers`).
+   * Connections are lazily created and reused for the duration of this task execution.
+   */
+  callMcpTool<T = unknown>(
+    serverName: string,
+    toolName: string,
+    args?: Record<string, unknown>,
+    options?: McpToolCallOptions,
+  ): Promise<McpToolResult<T>>;
+
+  /** List allowed tools exposed by a project-configured MCP server. */
+  listMcpTools(serverName: string, options?: McpToolCallOptions): Promise<readonly McpToolInfo[]>;
 }
 
 export type TsTaskHandler = (
