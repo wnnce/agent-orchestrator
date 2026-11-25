@@ -61,13 +61,16 @@ export class FeishuSessionStreamer {
     this.throttleMs = config.throttleMs ?? 600;
   }
 
-  /** Starts one EventHub subscription for the whole Session. */
+  /**
+   * Starts one EventHub subscription for the whole Session. It only sees events published from
+   * now on: cards belong to messages received by this process, so replaying history (for example
+   * a previous Turn's trailing events after a restart) could only attach cards to the wrong Turn.
+   */
   ensureSession(params: {
     sessionId: string;
     chatId: string;
     projectId?: string;
     source?: string;
-    after?: number;
   }): void {
     if (!this.client.isConfigured() || this.sessions.has(params.sessionId)) return;
     const subscription: FeishuSessionSubscription = {
@@ -81,7 +84,7 @@ export class FeishuSessionStreamer {
       task: Promise.resolve(),
     };
     this.sessions.set(params.sessionId, subscription);
-    subscription.task = this.runSession(subscription, params.after).catch((error) => {
+    subscription.task = this.runSession(subscription).catch((error) => {
       this.logger?.error("Feishu Session subscription failed", {
         sessionId: params.sessionId,
         error: (error as Error).message,
@@ -116,11 +119,11 @@ export class FeishuSessionStreamer {
     await Promise.all([...this.sessions.keys()].map((sessionId) => this.closeSession(sessionId)));
   }
 
-  private async runSession(subscription: FeishuSessionSubscription, after?: number): Promise<void> {
+  private async runSession(subscription: FeishuSessionSubscription): Promise<void> {
     try {
       for await (const event of this.eventHub.stream(subscription.sessionId, {
         source: subscription.source,
-        ...(after !== undefined ? { after } : {}),
+        liveOnly: true,
         signal: subscription.controller.signal,
       })) {
         if (event.type === "session.closed" || event.type === "session.archived") break;
@@ -128,6 +131,9 @@ export class FeishuSessionStreamer {
         if (!turnId) continue;
         let card = subscription.cards.get(turnId);
         if (!card) {
+          // Only a newly queued Turn takes the next pending message; events of Turns this
+          // subscription never saw queued are not ours to render.
+          if (event.type !== "turn.queued") continue;
           const context = subscription.pendingTurns.shift();
           if (!context) continue;
           card = this.newTurnCard(subscription, turnId, context);

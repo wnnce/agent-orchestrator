@@ -206,6 +206,10 @@ describe("WeComSessionStreamer", () => {
       streamId: "stream_turn_1",
     });
 
+    eventHub.publish(
+      createMockEvent({ type: "turn.queued", sessionId, turnId: "turn_1", payload: {} }),
+    );
+
     // 1. Initial tool call
     eventHub.publish(
       createMockEvent({
@@ -267,5 +271,52 @@ describe("WeComSessionStreamer", () => {
     expect(lastCall!.finish).toBe(true);
     expect(lastCall!.content).toContain("已检查仓库状态，一切就绪。");
     expect(lastCall!.content).not.toContain("<font");
+  });
+
+  it("binds a new message to its own Turn when the Session already has earlier Turn events", async () => {
+    const store = new MemoryStore();
+    const eventHub = new MemoryEventHub(store);
+    const client = new WeComClient({ botId: "bot123", secret: "sec123" }, logger);
+    const calls: Array<{ streamId: string; content: string; finish: boolean }> = [];
+    (client as any).replyStream = async (
+      _reqId: string,
+      streamId: string,
+      content: string,
+      finish: boolean,
+    ) => {
+      calls.push({ streamId, content, finish });
+    };
+    const sessionId = "sess_wecom_restart";
+    // A Turn that finished before the process restarted, including its trailing notification.
+    for (const [sequence, type] of [
+      [1, "turn.queued"],
+      [2, "turn.failed"],
+      [3, "notification.queued"],
+    ] as const) {
+      await store.appendEvent(
+        createMockEvent({ type, sessionId, turnId: "turn_old", sequence, payload: {} }),
+      );
+    }
+
+    const streamer = new WeComSessionStreamer(eventHub, client, logger, { throttleMs: 10 });
+    streamer.ensureSession({ sessionId, chatId: "chat_123", source: "wecom" });
+    streamer.enqueueTurn(sessionId, {
+      chatId: "chat_123",
+      reqId: "req_new",
+      streamId: "stream_new",
+    });
+    for (const [sequence, type, payload] of [
+      [4, "turn.queued", {}],
+      [5, "turn.completed", { finalText: "新问题的回答" }],
+    ] as const) {
+      eventHub.publish(createMockEvent({ type, sessionId, turnId: "turn_new", sequence, payload }));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await streamer.stop();
+
+    expect(calls.every((call) => call.streamId === "stream_new")).toBe(true);
+    const final = calls.at(-1)!;
+    expect(final.finish).toBe(true);
+    expect(final.content).toContain("新问题的回答");
   });
 });

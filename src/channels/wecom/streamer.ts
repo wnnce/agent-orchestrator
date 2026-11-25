@@ -61,13 +61,17 @@ export class WeComSessionStreamer {
     this.throttleMs = config.throttleMs ?? 250;
   }
 
-  /** Starts one EventHub subscription for the whole Session. */
+  /**
+   * Starts one EventHub subscription for the whole Session. It only sees events published from
+   * now on: replies belong to messages received by this process, so replaying history (for
+   * example a previous Turn's trailing events after a restart) could only attach a reply to the
+   * wrong Turn.
+   */
   ensureSession(params: {
     sessionId: string;
     chatId: string;
     projectId?: string;
     source?: string;
-    after?: number;
   }): void {
     if (!this.client.isConfigured() || this.sessions.has(params.sessionId)) return;
 
@@ -82,7 +86,7 @@ export class WeComSessionStreamer {
       task: Promise.resolve(),
     };
     this.sessions.set(params.sessionId, subscription);
-    subscription.task = this.runSession(subscription, params.after).catch((error) => {
+    subscription.task = this.runSession(subscription).catch((error) => {
       this.logger?.error("WeCom Session subscription failed", {
         sessionId: params.sessionId,
         error: (error as Error).message,
@@ -117,11 +121,11 @@ export class WeComSessionStreamer {
     await Promise.all([...this.sessions.keys()].map((sessionId) => this.closeSession(sessionId)));
   }
 
-  private async runSession(subscription: WeComSessionSubscription, after?: number): Promise<void> {
+  private async runSession(subscription: WeComSessionSubscription): Promise<void> {
     try {
       for await (const event of this.eventHub.stream(subscription.sessionId, {
         source: subscription.source,
-        ...(after !== undefined ? { after } : {}),
+        liveOnly: true,
         signal: subscription.controller.signal,
       })) {
         if (event.type === "session.closed" || event.type === "session.archived") break;
@@ -130,6 +134,9 @@ export class WeComSessionStreamer {
 
         let turnStream = subscription.turns.get(turnId);
         if (!turnStream) {
+          // Only a newly queued Turn takes the next pending message; events of Turns this
+          // subscription never saw queued are not ours to render.
+          if (event.type !== "turn.queued") continue;
           const context = subscription.pendingTurns.shift();
           if (!context) continue;
           turnStream = this.newTurnStream(subscription, turnId, context);

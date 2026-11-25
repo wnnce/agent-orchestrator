@@ -8,6 +8,11 @@ export type Unsubscribe = () => void;
 
 export interface StreamOptions {
   after?: number;
+  /**
+   * Deliver only events published after the stream starts, skipping stored history and the
+   * source cursor. The subscription is in place by the first `next()` call.
+   */
+  liveOnly?: boolean;
   source?: string;
   signal?: AbortSignal;
   onAck?: (sequence: number) => void;
@@ -74,7 +79,7 @@ export class MemoryEventHub implements EventHub {
   }
 
   async *stream(sessionId: string, options: StreamOptions = {}): AsyncIterable<EventRecord> {
-    const { after, source = "default", signal, onAck } = options;
+    const { after, liveOnly = false, source = "default", signal, onAck } = options;
     if (signal?.aborted || this.closedSessions.has(sessionId)) return;
 
     const controller = new AbortController();
@@ -85,7 +90,9 @@ export class MemoryEventHub implements EventHub {
     signal?.addEventListener("abort", forwardAbort, { once: true });
 
     let highestSequence: number;
-    if (after !== undefined) {
+    if (liveOnly) {
+      highestSequence = 0;
+    } else if (after !== undefined) {
       // Explicit parameter takes precedence: fetch from sequence offset
       highestSequence = Math.max(0, after);
     } else {
@@ -134,7 +141,7 @@ export class MemoryEventHub implements EventHub {
 
     try {
       // 2. Query historical events from store
-      const historical = await this.store.listEvents(sessionId, highestSequence);
+      const historical = liveOnly ? [] : await this.store.listEvents(sessionId, highestSequence);
       for (const event of historical) {
         if (controller.signal.aborted) return;
         if (event.sequence > highestSequence) {

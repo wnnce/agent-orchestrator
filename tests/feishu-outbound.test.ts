@@ -249,6 +249,73 @@ describe("FeishuSessionStreamer", () => {
     expect(updatedCards.some((card) => JSON.stringify(card).includes("answer B"))).toBe(true);
   });
 
+  it("binds a new message to its own Turn when the Session already has earlier Turn events", async () => {
+    const store = new MemoryStore();
+    const hub = new MemoryEventHub(store);
+    const sentCards: any[] = [];
+    const updates: Array<{ messageId: string; card: any }> = [];
+    const client = new FeishuClient({
+      appId: "cli_restart",
+      appSecret: "sec_restart",
+      fetchFn: (async (url, init) => {
+        const target = String(url);
+        const body = JSON.parse(String(init?.body ?? "{}"));
+        if (target.includes("tenant_access_token"))
+          return Response.json({ code: 0, tenant_access_token: "token", expire: 7200 });
+        if (init?.method === "PATCH") {
+          updates.push({
+            messageId: decodeURIComponent(target.split("/").at(-1)!),
+            card: JSON.parse(body.content),
+          });
+          return Response.json({ code: 0 });
+        }
+        sentCards.push(JSON.parse(body.content));
+        return Response.json({ code: 0, data: { message_id: `card-${sentCards.length}` } });
+      }) as typeof fetch,
+    });
+    const sessionId = "ses_after_restart";
+    const event = (sequence: number, turnId: string, type: EventRecord["type"], payload = {}) => ({
+      id: `restart-${sequence}`,
+      projectId: "p",
+      sessionId,
+      turnId,
+      sequence,
+      type,
+      runtime: "fake" as const,
+      payload,
+      createdAt: new Date().toISOString(),
+      schemaVersion: 1,
+    });
+    // A Turn that finished before the process restarted, including its trailing notification.
+    for (const item of [
+      event(1, "turn-old", "turn.queued"),
+      event(2, "turn-old", "turn.failed"),
+      event(3, "turn-old", "notification.queued", { kind: "failed" }),
+    ]) {
+      await store.appendEvent(item);
+    }
+
+    const streamer = new FeishuSessionStreamer(hub, client, undefined, { throttleMs: 0 });
+    streamer.ensureSession({ sessionId, chatId: "oc_chat", projectId: "p" });
+    streamer.enqueueTurn(sessionId, { chatId: "oc_chat", rootId: "om_new", projectId: "p" });
+    for (const item of [
+      event(4, "turn-new", "turn.queued"),
+      event(5, "turn-new", "agent.message.completed", { phase: "final_answer", text: "new" }),
+      event(6, "turn-new", "turn.completed", { finalText: "new answer" }),
+    ]) {
+      await store.appendEvent(item);
+      hub.publish(item);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await streamer.closeSession(sessionId);
+
+    expect(sentCards).toHaveLength(1);
+    const final = updates.at(-1)!;
+    expect(final.messageId).toBe("card-1");
+    expect(JSON.stringify(final.card)).toContain("new answer");
+    expect(JSON.stringify(final.card)).toContain("任务已完成");
+  });
+
   it("streams events, filters thoughts, and updates card to green completed state", async () => {
     const store = new MemoryStore();
     const hub = new MemoryEventHub(store);

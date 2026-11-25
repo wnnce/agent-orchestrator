@@ -143,6 +143,21 @@ describe("MemoryEventHub", () => {
     expect(streamed.map((e) => e.sequence)).toEqual([2, 3]);
   });
 
+  it("streams only events published after a liveOnly stream starts", async () => {
+    const store = new MemoryStore();
+    const hub = new MemoryEventHub(store);
+    await store.appendEvent(createEvent("ses_live", 1));
+    await store.appendEvent(createEvent("ses_live", 2));
+
+    const iterator = hub.stream("ses_live", { liveOnly: true })[Symbol.asyncIterator]();
+    const first = iterator.next();
+    // Published synchronously after the first next(): the subscription must already be in place.
+    hub.publish(createEvent("ses_live", 3));
+
+    expect((await first).value?.sequence).toBe(3);
+    await iterator.return?.();
+  });
+
   it("aborts Session streams when SessionManager destroys the Session", async () => {
     const store = new MemoryStore();
     const manager = new SessionManager(store);
