@@ -67,6 +67,7 @@ export function PipelineRunSidebar({
   const [expandedEvents, setExpandedEvents] = useState<Record<number, boolean>>({});
   const [eventFilter, setEventFilter] = useState("");
   const [showInputJson, setShowInputJson] = useState(false);
+  const [showMetadataJson, setShowMetadataJson] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   useEffect(() => {
@@ -113,7 +114,8 @@ export function PipelineRunSidebar({
   }, [sessionData?.events, eventFilter]);
 
   const loopEntries = Object.entries(run.loopCounts ?? {}).filter(([, count]) => count > 0);
-  const hasInputPayload = Object.keys(run.input ?? {}).length > 0;
+  const hasDataPayload = Object.keys(run.data ?? {}).length > 0;
+  const hasMetadataPayload = Object.keys(run.metadata ?? {}).length > 0;
   const statusStyle = getPipelineStatusStyle(run.status);
   const cacheHitRate = sessionData?.usage ? calculateCacheHitRate(sessionData.usage) : null;
 
@@ -396,15 +398,15 @@ export function PipelineRunSidebar({
             </div>
           )}
 
-          {/* Collapsible Raw Input JSON */}
-          {hasInputPayload && (
+          {/* Collapsible Raw Data JSON */}
+          {hasDataPayload && (
             <div className="pt-4 border-t border-[var(--border-subtle)] space-y-2">
               <button
                 type="button"
                 onClick={() => setShowInputJson((prev) => !prev)}
                 className="w-full flex items-center justify-between font-mono text-[10px] uppercase tracking-wider text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
               >
-                <span>Input Payload</span>
+                <span>Entry Data</span>
                 {showInputJson ? (
                   <ChevronDown className="w-3.5 h-3.5" />
                 ) : (
@@ -413,7 +415,30 @@ export function PipelineRunSidebar({
               </button>
               {showInputJson && (
                 <pre className="p-2.5 rounded-[var(--radius-sm)] bg-[var(--bg-code)] border border-[var(--border-subtle)] text-[10.5px] font-mono text-[var(--text-code)] overflow-x-auto max-h-60">
-                  {JSON.stringify(run.input, null, 2)}
+                  {JSON.stringify(run.data, null, 2)}
+                </pre>
+              )}
+            </div>
+          )}
+
+          {/* Collapsible Raw Metadata JSON */}
+          {hasMetadataPayload && (
+            <div className="pt-4 border-t border-[var(--border-subtle)] space-y-2">
+              <button
+                type="button"
+                onClick={() => setShowMetadataJson((prev) => !prev)}
+                className="w-full flex items-center justify-between font-mono text-[10px] uppercase tracking-wider text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
+              >
+                <span>Metadata</span>
+                {showMetadataJson ? (
+                  <ChevronDown className="w-3.5 h-3.5" />
+                ) : (
+                  <ChevronRight className="w-3.5 h-3.5" />
+                )}
+              </button>
+              {showMetadataJson && (
+                <pre className="p-2.5 rounded-[var(--radius-sm)] bg-[var(--bg-code)] border border-[var(--border-subtle)] text-[10.5px] font-mono text-[var(--text-code)] overflow-x-auto max-h-60">
+                  {JSON.stringify(run.metadata, null, 2)}
                 </pre>
               )}
             </div>

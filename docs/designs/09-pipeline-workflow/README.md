@@ -7,7 +7,7 @@
 | **创建日期** | 2026-11-24 |
 | **更新日期** | 2026-11-26 |
 | **目标模块** | `src/pipeline/`、`src/actions/`、`src/runtime/`、`src/workspace/`、`src/project/`、`src/persistence/`、`src/task/`、`src/gateway/`、`web/src/` |
-| **关联设计** | [01-task-and-action](../01-task-and-action/README.md)、[05-native-runtime-config-and-single-repo-workspace](../05-native-runtime-config-and-single-repo-workspace/README.md)、[10-prompt-template-variables](../10-prompt-template-variables/README.md) |
+| **关联设计** | [01-task-and-action](../01-task-and-action/README.md)、[05-native-runtime-config-and-single-repo-workspace](../05-native-runtime-config-and-single-repo-workspace/README.md)、[10-prompt-template-variables](../10-prompt-template-variables/README.md)、[13-typed-ts-pipeline-sdk](../13-typed-ts-pipeline-sdk/README.md) |
 
 ---
 

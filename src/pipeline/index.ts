@@ -1,11 +1,31 @@
+export { z } from "zod";
 export * from "./types.ts";
 export * from "./errors.ts";
 export {
+  defineHandler,
+  definePipeline,
+  isPipelineBlueprint,
+  isTsHandlerSpec,
+  isZodObjectSchema,
+  node,
+  toNodeInputJsonSchema,
+  validateNodeInputData,
+  type AgentNodeSpec,
+  type CodeNodeSpec,
+  type DefinePipelineConfig,
+  type HumanNodeSpec,
+  type PipelineBlueprint,
+  type PipelineNodeSpec,
+  type TerminalNodeSpec,
+  type TsHandlerSpec,
+} from "./sdk.ts";
+export {
+  compilePipelineBlueprint,
   computeTopologyHash,
-  loadPipelineTsHandler,
   loadProjectPipelines,
   loadSinglePipelineFile,
   toNodesSnapshot,
+  type CompilePipelineOptions,
   type LoadPipelinesOptions,
 } from "./loader.ts";
 export {

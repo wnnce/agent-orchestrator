@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, m } from "motion/react";
-import { generatePath, useNavigate, useParams } from "react-router";
+import { generatePath, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   ArrowRight,
   Check,
@@ -59,13 +59,13 @@ function getExecutorDotColor(executor: PipelineNodeExecutorType): string {
 export function PipelinesView() {
   const project = useCurrentProject();
   const { pipelineId: routePipelineId } = useParams<{ pipelineId?: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
   const [pipelines, setPipelines] = useState<PipelineSummaryWithVersions[]>([]);
   const [loadingPipelines, setLoadingPipelines] = useState(true);
   const [pipelinesError, setPipelinesError] = useState<string | null>(null);
 
-  const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
   const [runs, setRuns] = useState<PipelineRunRecord[]>([]);
   const [loadingRuns, setLoadingRuns] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -76,22 +76,28 @@ export function PipelinesView() {
   const [sseConnected, setSseConnected] = useState(false);
   const [newRunOpen, setNewRunOpen] = useState(false);
   const [pipelineDropdownOpen, setPipelineDropdownOpen] = useState(false);
+  const [versionDropdownOpen, setVersionDropdownOpen] = useState(false);
 
   const pipelineDropdownRef = useRef<HTMLDivElement>(null);
+  const versionDropdownRef = useRef<HTMLDivElement>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!pipelineDropdownOpen) return;
+    if (!pipelineDropdownOpen && !versionDropdownOpen) return;
     function handleOutsideClick(event: MouseEvent) {
-      if (
-        pipelineDropdownRef.current &&
-        !pipelineDropdownRef.current.contains(event.target as Node)
-      ) {
+      const target = event.target as Node;
+      if (pipelineDropdownRef.current && !pipelineDropdownRef.current.contains(target)) {
         setPipelineDropdownOpen(false);
+      }
+      if (versionDropdownRef.current && !versionDropdownRef.current.contains(target)) {
+        setVersionDropdownOpen(false);
       }
     }
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setPipelineDropdownOpen(false);
+      if (event.key === "Escape") {
+        setPipelineDropdownOpen(false);
+        setVersionDropdownOpen(false);
+      }
     }
     document.addEventListener("mousedown", handleOutsideClick);
     window.addEventListener("keydown", handleKeyDown);
@@ -99,7 +105,7 @@ export function PipelinesView() {
       document.removeEventListener("mousedown", handleOutsideClick);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [pipelineDropdownOpen]);
+  }, [pipelineDropdownOpen, versionDropdownOpen]);
 
   const activePipeline = useMemo(() => {
     if (pipelines.length === 0) return null;
@@ -110,6 +116,37 @@ export function PipelinesView() {
   }, [pipelines, routePipelineId]);
 
   const effectivePipelineId = activePipeline?.id;
+
+  const urlVersion = useMemo(() => {
+    const raw = searchParams.get("version");
+    return raw && /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : null;
+  }, [searchParams]);
+
+  const selectedVersion = useMemo(() => {
+    if (!activePipeline) return null;
+    if (
+      urlVersion !== null &&
+      (urlVersion === activePipeline.currentVersion ||
+        activePipeline.activeVersions.some((v) => v.version === urlVersion))
+    ) {
+      return urlVersion;
+    }
+    return activePipeline.currentVersion;
+  }, [activePipeline, urlVersion]);
+
+  const handleSelectVersion = useCallback(
+    (version: number) => {
+      setVersionDropdownOpen(false);
+      const next = new URLSearchParams(searchParams);
+      if (activePipeline && version === activePipeline.currentVersion) {
+        next.delete("version");
+      } else {
+        next.set("version", String(version));
+      }
+      setSearchParams(next, { replace: true });
+    },
+    [activePipeline, searchParams, setSearchParams],
+  );
 
   const loadPipelines = useCallback(async () => {
     setPipelinesError(null);
@@ -133,7 +170,6 @@ export function PipelinesView() {
     setLoadingPipelines(true);
     setPipelines([]);
     setRuns([]);
-    setSelectedVersion(null);
     void loadPipelines();
   }, [loadPipelines]);
 
@@ -150,24 +186,6 @@ export function PipelinesView() {
       );
     }
   }, [loadingPipelines, pipelines, routePipelineId, navigate, project.projectId]);
-
-  // Keep selectedVersion aligned with active pipeline
-  useEffect(() => {
-    if (!activePipeline) {
-      setSelectedVersion(null);
-      return;
-    }
-    setSelectedVersion((prev) => {
-      if (
-        prev !== null &&
-        (prev === activePipeline.currentVersion ||
-          activePipeline.activeVersions.some((v) => v.version === prev))
-      ) {
-        return prev;
-      }
-      return activePipeline.currentVersion;
-    });
-  }, [activePipeline]);
 
   const loadRuns = useCallback(
     async (opts?: { silent?: boolean }) => {
@@ -372,7 +390,7 @@ export function PipelinesView() {
         <EmptyState
           icon={<GitBranch className="w-7 h-7 text-[var(--text-muted)]" />}
           title="No pipelines configured"
-          description={`Add YAML workflow files under projects/${project.projectId}/pipelines/ to orchestrate multi-stage Agent, TS, and Human workflows.`}
+          description={`Add TypeScript pipeline files (*.ts) under projects/${project.projectId}/pipelines/ to orchestrate multi-stage Agent, Code, and Human workflows.`}
         />
       </div>
     );
@@ -489,36 +507,83 @@ export function PipelinesView() {
             {filteredRuns.length} total
           </span>
 
-          {/* Topology Version Switcher (only when > 1 version exists) */}
+          {/* Topology Revision Selector (Dropdown when > 1 version exists) */}
           {versionOptions.length > 1 ? (
-            <div className="inline-flex items-center p-0.5 rounded-[var(--radius-sm)] bg-[var(--bg-surface)] border border-[var(--border-default)]">
-              {versionOptions.map((v) => {
-                const isSelected = v.version === selectedVersion;
-                const isLatest = v.version === activePipeline.currentVersion;
-                return (
-                  <button
-                    key={v.version}
-                    type="button"
-                    onClick={() => setSelectedVersion(v.version)}
-                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-[var(--radius-xs)] text-[11px] font-mono transition-colors cursor-pointer ${
-                      isSelected
-                        ? "bg-[var(--bg-card)] text-[var(--text-primary)] font-semibold border border-[var(--border-default)]"
-                        : "text-[var(--text-muted)] hover:text-[var(--text-primary)] border border-transparent"
-                    }`}
+            <div className="relative flex items-center h-7 select-none" ref={versionDropdownRef}>
+              <button
+                type="button"
+                onClick={() => {
+                  setPipelineDropdownOpen(false);
+                  setVersionDropdownOpen((prev) => !prev);
+                }}
+                className="h-7 inline-flex items-center gap-1.5 px-2 rounded-[var(--radius-sm)] text-[11px] font-mono bg-[var(--bg-surface)] border border-[var(--border-default)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface-hover)] text-[var(--text-primary)] transition-colors cursor-pointer leading-none"
+                title="Switch pipeline topology revision"
+              >
+                <span className="font-semibold">v{selectedVersion}</span>
+                {selectedVersion === activePipeline.currentVersion && (
+                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400">
+                    latest
+                  </span>
+                )}
+                <ChevronDown
+                  className={`w-3 h-3 text-[var(--text-muted)] shrink-0 transition-transform duration-150 ${
+                    versionDropdownOpen ? "rotate-180" : ""
+                  }`}
+                />
+              </button>
+
+              <AnimatePresence>
+                {versionDropdownOpen && (
+                  <m.div
+                    initial={{ opacity: 0, y: -4, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -4, scale: 0.98 }}
+                    transition={{ duration: 0.14, ease: EASE_OUT_EXPO }}
+                    className="absolute left-0 top-full mt-1 w-56 rounded-[var(--radius-md)] bg-[var(--bg-surface-elevated)] border border-[var(--border-default)] shadow-lg py-1 z-50 origin-top-left"
                   >
-                    <span>v{v.version}</span>
-                    {isLatest ? (
-                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400">
-                        latest
-                      </span>
-                    ) : (
-                      <span className="text-[10px] text-[var(--text-muted)]">
-                        ({v.activeRunCount})
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
+                    <div className="px-2.5 py-1 text-[10px] uppercase tracking-wider text-[var(--text-muted)] font-mono border-b border-[var(--border-subtle)] mb-1 flex items-center justify-between">
+                      <span>Revisions</span>
+                      <span>{versionOptions.length}</span>
+                    </div>
+                    <div className="max-h-64 overflow-y-auto">
+                      {versionOptions.map((v) => {
+                        const isSelected = v.version === selectedVersion;
+                        const isLatest = v.version === activePipeline.currentVersion;
+                        return (
+                          <button
+                            key={v.version}
+                            type="button"
+                            onClick={() => handleSelectVersion(v.version)}
+                            className={`w-full px-2.5 py-1.5 text-xs text-left flex items-center justify-between gap-2 hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer ${
+                              isSelected
+                                ? "text-[var(--text-primary)] font-semibold bg-[var(--bg-surface)]"
+                                : "text-[var(--text-secondary)]"
+                            }`}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 font-mono">
+                                <span>v{v.version}</span>
+                                {isLatest && (
+                                  <span className="px-1 py-0 rounded text-[9.5px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                                    latest
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[10px] font-mono text-[var(--text-muted)] truncate mt-0.5">
+                                {v.nodes.length} stages · {v.totalRunCount} runs
+                                {v.activeRunCount > 0 ? ` (${v.activeRunCount} active)` : ""}
+                              </div>
+                            </div>
+                            {isSelected && (
+                              <Check className="w-3.5 h-3.5 text-[var(--text-primary)] shrink-0" />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </m.div>
+                )}
+              </AnimatePresence>
             </div>
           ) : (
             <span className="text-[11px] font-mono text-[var(--text-muted)] px-1.5 py-0.5 rounded-[var(--radius-xs)] bg-[var(--bg-surface)] border border-[var(--border-default)]">
@@ -830,6 +895,7 @@ export function PipelinesView() {
         projectId={project.projectId}
         pipelineId={activePipeline.id}
         pipelineName={activePipeline.name}
+        entryInputSchema={activePipeline.entryInputSchema}
         onClose={() => setNewRunOpen(false)}
         onCreated={(run) => {
           setNewRunOpen(false);

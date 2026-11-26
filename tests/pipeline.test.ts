@@ -36,6 +36,7 @@ import {
 import { WorkspaceManager } from "../src/workspace/workspace.ts";
 
 const tempDirs: string[] = [];
+const PIPELINE_SDK_PATH = path.resolve(import.meta.dir, "../src/pipeline/index.ts");
 
 async function makeTempDir(prefix: string): Promise<string> {
   const dir = await mkdtemp(path.join(os.tmpdir(), prefix));
@@ -154,7 +155,9 @@ class ScriptedAgentRuntime implements AgentRuntime {
             callAction: async (name, params) => {
               const actionCtx = context.createActionContext?.({ turnId });
               if (!actionCtx) throw new Error("missing createActionContext");
-              return this.actionRegistry.execute(name, params, actionCtx);
+              return this.actionRegistry.execute(name, params, actionCtx, {
+                parameterOverride: context.actionParameterOverrides?.[name],
+              });
             },
           });
           if (typeof maybeText === "string") outputText = maybeText;
@@ -208,7 +211,7 @@ afterEach(async () => {
 });
 
 describe("Pipeline Loader & Topology Versioning", () => {
-  it("loads valid YAML pipelines, checks prompt vars, and hashes only structural skeleton", async () => {
+  it("loads valid TypeScript pipelines, checks prompt vars, and hashes only structural skeleton", async () => {
     const projectDir = await makeTempDir("ao-pipe-loader-");
     await mkdir(path.join(projectDir, "pipelines", "prompts"), { recursive: true });
     await mkdir(path.join(projectDir, "pipelines", "handlers"), { recursive: true });
@@ -220,31 +223,44 @@ describe("Pipeline Loader & Topology Versioning", () => {
     );
     await writeFile(
       path.join(projectDir, "pipelines", "handlers", "ci.ts"),
-      `export default async function () { return { action: "next", summary: "ok", content: "ok" }; }\n`,
+      `import { defineHandler } from ${JSON.stringify(PIPELINE_SDK_PATH)};
+export const ciHandler = defineHandler({
+  async run() {
+    return { action: "next", summary: "ok", content: "ok" };
+  },
+});
+`,
       "utf8",
     );
     await writeFile(
-      path.join(projectDir, "pipelines", "feature-delivery.yaml"),
-      `
-name: Feature Delivery
-description: Full delivery workflow
-nodes:
-  - id: design
-    name: Design
-    executor: agent
-    prompt: ./prompts/design.md
-    gate: manual
-    concurrency: 2
-  - id: ci
-    name: CI Check
-    executor: ts
-    handler: ./handlers/ci.ts
-    allowPrev: true
-    prevTargets: [design]
-  - id: done
-    name: Done
-    executor: terminal
-    terminal: true
+      path.join(projectDir, "pipelines", "feature-delivery.ts"),
+      `import { definePipeline, node } from ${JSON.stringify(PIPELINE_SDK_PATH)};
+import { ciHandler } from "./handlers/ci.ts";
+
+export default definePipeline({
+  name: "Feature Delivery",
+  description: "Full delivery workflow",
+  nodes: [
+    node.agent({
+      id: "design",
+      name: "Design",
+      prompt: "./prompts/design.md",
+      gate: "manual",
+      concurrency: 2,
+    }),
+    node.code({
+      id: "ci",
+      name: "CI Check",
+      handler: ciHandler,
+      allowPrev: true,
+      prevTargets: ["design"],
+    }),
+    node.end({
+      id: "done",
+      name: "Done",
+    }),
+  ],
+});
 `,
       "utf8",
     );
@@ -260,6 +276,7 @@ nodes:
     expect(def.nodes).toHaveLength(3);
     expect(def.nodes[0]?.promptTemplate).toContain("{{vars.team}}");
     expect(def.nodes[1]?.prevTargets).toEqual(["design"]);
+    expect(typeof def.nodes[1]?.handler).toBe("function");
     expect(def.nodes[2]?.terminal).toBe(true);
 
     // Prompts, handlers and concurrency are read live, so changing them keeps the revision
@@ -291,31 +308,63 @@ nodes:
     await writeFile(path.join(projectDir, "pipelines", "prompts", "a.md"), "hello", "utf8");
 
     // Any valid identifier (including "runs") is permitted since run resources live in /pipeline-runs/*
-    const runsNamedPath = path.join(projectDir, "pipelines", "runs.yaml");
+    const runsNamedPath = path.join(projectDir, "pipelines", "runs.ts");
     await writeFile(
       runsNamedPath,
-      `name: Runs Named Pipeline\nnodes:\n  - id: a\n    name: A\n    executor: agent\n    prompt: ./prompts/a.md\n  - id: b\n    name: B\n    executor: terminal\n    terminal: true\n`,
+      `import { definePipeline, node } from ${JSON.stringify(PIPELINE_SDK_PATH)};
+export default definePipeline({
+  name: "Runs Named Pipeline",
+  nodes: [
+    node.agent({ id: "a", name: "A", prompt: "./prompts/a.md" }),
+    node.end({ id: "b", name: "B" }),
+  ],
+});
+`,
       "utf8",
     );
 
-    const badPrevPath = path.join(projectDir, "pipelines", "bad-prev.yaml");
+    const badPrevPath = path.join(projectDir, "pipelines", "bad-prev.ts");
     await writeFile(
       badPrevPath,
-      `name: Bad Prev\nnodes:\n  - id: a\n    name: A\n    executor: agent\n    prompt: ./prompts/a.md\n    allowPrev: true\n    prevTargets: [b]\n  - id: b\n    name: B\n    executor: terminal\n    terminal: true\n`,
+      `import { definePipeline, node } from ${JSON.stringify(PIPELINE_SDK_PATH)};
+export default definePipeline({
+  name: "Bad Prev",
+  nodes: [
+    node.agent({ id: "a", name: "A", prompt: "./prompts/a.md", allowPrev: true, prevTargets: ["b"] }),
+    node.end({ id: "b", name: "B" }),
+  ],
+});
+`,
       "utf8",
     );
 
-    const badTerminalPath = path.join(projectDir, "pipelines", "bad-terminal.yaml");
+    const badTerminalPath = path.join(projectDir, "pipelines", "bad-terminal.ts");
     await writeFile(
       badTerminalPath,
-      `name: Bad Terminal\nnodes:\n  - id: a\n    name: A\n    executor: terminal\n    terminal: true\n  - id: b\n    name: B\n    executor: terminal\n    terminal: true\n`,
+      `import { definePipeline, node } from ${JSON.stringify(PIPELINE_SDK_PATH)};
+export default definePipeline({
+  name: "Bad Terminal",
+  nodes: [
+    node.end({ id: "a", name: "A" }),
+    node.end({ id: "b", name: "B" }),
+  ],
+});
+`,
       "utf8",
     );
 
-    const traversalPath = path.join(projectDir, "pipelines", "traversal.yaml");
+    const traversalPath = path.join(projectDir, "pipelines", "traversal.ts");
     await writeFile(
       traversalPath,
-      `name: Traversal\nnodes:\n  - id: a\n    name: A\n    executor: agent\n    prompt: ../../../etc/passwd\n  - id: b\n    name: B\n    executor: terminal\n    terminal: true\n`,
+      `import { definePipeline, node } from ${JSON.stringify(PIPELINE_SDK_PATH)};
+export default definePipeline({
+  name: "Traversal",
+  nodes: [
+    node.agent({ id: "a", name: "A", prompt: "../../../etc/passwd" }),
+    node.end({ id: "b", name: "B" }),
+  ],
+});
+`,
       "utf8",
     );
 
@@ -338,7 +387,7 @@ nodes:
     );
   });
 
-  it("loads the repository's projects/example/pipelines/feature-delivery.yaml template cleanly", async () => {
+  it("loads the repository's projects/example/pipelines/feature-delivery.ts template cleanly", async () => {
     const exampleDir = path.resolve(import.meta.dir, "../projects/example");
     const defs = await loadProjectPipelines({
       projectId: "example",
@@ -355,9 +404,9 @@ nodes:
       "done",
     ]);
     const tsNode = featureDelivery!.nodes.find((n) => n.id === "verify");
-    expect(tsNode?.handlerPath).toBeDefined();
-    const mod = (await import(tsNode!.handlerPath!)) as { default?: unknown };
-    expect(typeof mod.default).toBe("function");
+    expect(typeof tsNode?.handler).toBe("function");
+    expect(tsNode?.inputSchema).toBeDefined();
+    expect(tsNode?.inputJsonSchema).toBeDefined();
   });
 });
 
@@ -414,7 +463,7 @@ describe("Pipeline ActionScope Isolation across ActionRegistry & Runtime Bridges
 
 describe("PipelineEngine End-to-End Lifecycle, Concurrency, Durable TS Steps & Fallback", () => {
   async function createTestProjectRuntime(options?: {
-    pipelineYaml?: string;
+    pipelineCode?: string;
     pipelineId?: string;
     tsHandlerCode?: string;
     tsTaskCode?: string;
@@ -450,10 +499,10 @@ describe("PipelineEngine End-to-End Lifecycle, Concurrency, Durable TS Steps & F
         "utf8",
       );
     }
-    if (options?.pipelineYaml) {
+    if (options?.pipelineCode) {
       await writeFile(
-        path.join(projectDir, "pipelines", `${options.pipelineId ?? "delivery"}.yaml`),
-        options.pipelineYaml,
+        path.join(projectDir, "pipelines", `${options.pipelineId ?? "delivery"}.ts`),
+        options.pipelineCode,
         "utf8",
       );
     }
@@ -529,68 +578,60 @@ describe("PipelineEngine End-to-End Lifecycle, Concurrency, Durable TS Steps & F
     const tsHandlerCode = `
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { defineHandler } from ${JSON.stringify(PIPELINE_SDK_PATH)};
 
-export default async function (ctx) {
-  ctx.logger.info("ci handler invoked", { attempt: ctx.attempt });
-  const artifactFromImpl = await readFile(path.join(ctx.workdir, "feature.txt"), "utf8");
+export const ciHandler = defineHandler({
+  async run(ctx) {
+    ctx.logger.info("ci handler invoked", { attempt: ctx.attempt });
+    const artifactFromImpl = await readFile(path.join(ctx.workdir, "feature.txt"), "utf8");
 
-  const triggered = await ctx.step("trigger-ci", async () => {
-    const raw = JSON.parse(await readFile(${JSON.stringify(ciStateFile)}, "utf8"));
-    raw.stepExecutions += 1;
-    await writeFile(${JSON.stringify(ciStateFile)}, JSON.stringify(raw), "utf8");
-    return { runNumber: 42, sawFile: artifactFromImpl.trim() };
-  });
+    const triggered = await ctx.step("trigger-ci", async () => {
+      const raw = JSON.parse(await readFile(${JSON.stringify(ciStateFile)}, "utf8"));
+      raw.stepExecutions += 1;
+      await writeFile(${JSON.stringify(ciStateFile)}, JSON.stringify(raw), "utf8");
+      return { runNumber: 42, sawFile: artifactFromImpl.trim() };
+    });
 
-  await ctx.waitUntil("ci-green", { intervalMs: 60000, summary: "Waiting for CI" }, async () => {
-    const raw = JSON.parse(await readFile(${JSON.stringify(ciStateFile)}, "utf8"));
-    return raw.ready ? { conclusion: "success" } : false;
-  });
+    await ctx.waitUntil("ci-green", { intervalMs: 60000, summary: "Waiting for CI" }, async () => {
+      const raw = JSON.parse(await readFile(${JSON.stringify(ciStateFile)}, "utf8"));
+      return raw.ready ? { conclusion: "success" } : false;
+    });
 
-  return {
-    action: "next",
-    summary: "CI passed for run #" + triggered.runNumber,
-    content: "Saw shared worktree file: " + triggered.sawFile,
-  };
-}
+    return {
+      action: "next",
+      summary: "CI passed for run #" + triggered.runNumber,
+      content: "Saw shared worktree file: " + triggered.sawFile,
+    };
+  },
+});
 `;
 
-    const pipelineYaml = `
-name: Full Delivery
-nodes:
-  - id: design
-    name: Design
-    executor: agent
-    prompt: ./prompts/design.md
-    gate: manual
-  - id: implement
-    name: Implement
-    executor: agent
-    prompt: ./prompts/impl.md
-    gate: auto
-  - id: review
-    name: Review
-    executor: agent
-    prompt: ./prompts/review.md
-    gate: auto
-    allowPrev: true
-    prevTargets: [implement]
-    maxLoops: 1
-  - id: release_gate
-    name: Release Gate
-    executor: human
-    allowPrev: true
-    prevTargets: [implement]
-  - id: ci
-    name: CI Check
-    executor: ts
-    handler: ./handlers/ci.ts
-  - id: done
-    name: Done
-    executor: terminal
-    terminal: true
+    const pipelineCode = `
+import { definePipeline, node } from ${JSON.stringify(PIPELINE_SDK_PATH)};
+import { ciHandler } from "./handlers/ci.ts";
+
+export default definePipeline({
+  name: "Full Delivery",
+  nodes: [
+    node.agent({ id: "design", name: "Design", prompt: "./prompts/design.md", gate: "manual" }),
+    node.agent({ id: "implement", name: "Implement", prompt: "./prompts/impl.md", gate: "auto" }),
+    node.agent({
+      id: "review",
+      name: "Review",
+      prompt: "./prompts/review.md",
+      gate: "auto",
+      allowPrev: true,
+      prevTargets: ["implement"],
+      maxLoops: 1,
+    }),
+    node.human({ id: "release_gate", name: "Release Gate", allowPrev: true, prevTargets: ["implement"] }),
+    node.code({ id: "ci", name: "CI Check", handler: ciHandler }),
+    node.end({ id: "done", name: "Done" }),
+  ],
+});
 `;
 
-    const env = await createTestProjectRuntime({ pipelineYaml, tsHandlerCode });
+    const env = await createTestProjectRuntime({ pipelineCode, tsHandlerCode });
     const events: PipelineStreamEvent[] = [];
     const unsubscribe = env.pipelineHub.subscribe("demo", (e) => events.push(e));
 
@@ -793,19 +834,17 @@ nodes:
   });
 
   it("reminds once when an automated agent turn misses a flow action, then falls back safely to waiting_confirmation", async () => {
-    const pipelineYaml = `
-name: Fallback Test
-nodes:
-  - id: design
-    name: Design
-    executor: agent
-    prompt: ./prompts/design.md
-  - id: done
-    name: Done
-    executor: terminal
-    terminal: true
+    const pipelineCode = `
+import { definePipeline, node } from ${JSON.stringify(PIPELINE_SDK_PATH)};
+export default definePipeline({
+  name: "Fallback Test",
+  nodes: [
+    node.agent({ id: "design", name: "Design", prompt: "./prompts/design.md" }),
+    node.end({ id: "done", name: "Done" }),
+  ],
+});
 `;
-    const env = await createTestProjectRuntime({ pipelineYaml });
+    const env = await createTestProjectRuntime({ pipelineCode });
     // Both initial turn and reminder turn omit calling any pipeline_* action
     env.runtime.enqueueTurnHandler(async () => "Forgot to call tool #1");
     env.runtime.enqueueTurnHandler(async ({ input }) => {
@@ -843,39 +882,40 @@ nodes:
 
     const tsHandlerCode = `
 import { readFile, writeFile } from "node:fs/promises";
-export default async function (ctx) {
-  await ctx.step("side-effect", async () => {
+import { defineHandler } from ${JSON.stringify(PIPELINE_SDK_PATH)};
+export const ciHandler = defineHandler({
+  async run(ctx) {
+    await ctx.step("side-effect", async () => {
+      const state = JSON.parse(await readFile(${JSON.stringify(stepLogFile)}, "utf8"));
+      state.stepCount += 1;
+      await writeFile(${JSON.stringify(stepLogFile)}, JSON.stringify(state), "utf8");
+      return { done: true };
+    });
     const state = JSON.parse(await readFile(${JSON.stringify(stepLogFile)}, "utf8"));
-    state.stepCount += 1;
-    await writeFile(${JSON.stringify(stepLogFile)}, JSON.stringify(state), "utf8");
-    return { done: true };
-  });
-  const state = JSON.parse(await readFile(${JSON.stringify(stepLogFile)}, "utf8"));
-  if (state.shouldFail) {
-    throw new Error("transient boom");
-  }
-  await ctx.waitUntil("wait-ready", { intervalMs: 50, summary: "Waiting after restart" }, async () => {
-    const latest = JSON.parse(await readFile(${JSON.stringify(stepLogFile)}, "utf8"));
-    return latest.ready ? true : false;
-  });
-  return { action: "next", summary: "TS done", content: "ok" };
-}
+    if (state.shouldFail) {
+      throw new Error("transient boom");
+    }
+    await ctx.waitUntil("wait-ready", { intervalMs: 50, summary: "Waiting after restart" }, async () => {
+      const latest = JSON.parse(await readFile(${JSON.stringify(stepLogFile)}, "utf8"));
+      return latest.ready ? true : false;
+    });
+    return { action: "next", summary: "TS done", content: "ok" };
+  },
+});
 `;
 
-    const pipelineYaml = `
-name: Durable TS
-nodes:
-  - id: worker
-    name: Worker
-    executor: ts
-    handler: ./handlers/ci.ts
-    concurrency: 1
-  - id: done
-    name: Done
-    executor: terminal
-    terminal: true
+    const pipelineCode = `
+import { definePipeline, node } from ${JSON.stringify(PIPELINE_SDK_PATH)};
+import { ciHandler } from "./handlers/ci.ts";
+export default definePipeline({
+  name: "Durable TS",
+  nodes: [
+    node.code({ id: "worker", name: "Worker", handler: ciHandler, concurrency: 1 }),
+    node.end({ id: "done", name: "Done" }),
+  ],
+});
 `;
-    const env = await createTestProjectRuntime({ pipelineYaml, tsHandlerCode });
+    const env = await createTestProjectRuntime({ pipelineCode, tsHandlerCode });
     try {
       // 1. Run fails on first attempt AFTER caching step("side-effect")
       const { run } = await env.projectRuntime.pipelineEngine.startRun({
@@ -914,7 +954,8 @@ nodes:
           pipelineId: "delivery",
           pipelineVersion: 1,
           title: "Stale Running",
-          input: {},
+          data: {},
+          metadata: {},
           currentNodeId: "worker",
           status: "running",
           workspaceStatus: "none",
@@ -1018,16 +1059,15 @@ nodes:
   });
 
   it("supports TS Task SDK ctx.startPipelineRun with externalKey idempotency", async () => {
-    const pipelineYaml = `
-name: Task Triggered
-nodes:
-  - id: approve
-    name: Approve
-    executor: human
-  - id: done
-    name: Done
-    executor: terminal
-    terminal: true
+    const pipelineCode = `
+import { definePipeline, node } from ${JSON.stringify(PIPELINE_SDK_PATH)};
+export default definePipeline({
+  name: "Task Triggered",
+  nodes: [
+    node.human({ id: "approve", name: "Approve" }),
+    node.end({ id: "done", name: "Done" }),
+  ],
+});
 `;
     const tsTaskCode = `
 export default function (api) {
@@ -1059,7 +1099,7 @@ export default function (api) {
   });
 }
 `;
-    const env = await createTestProjectRuntime({ pipelineYaml, tsTaskCode });
+    const env = await createTestProjectRuntime({ pipelineCode, tsTaskCode });
     try {
       const dispatched = await env.projectRuntime.runTask("scan");
       expect(dispatched).toBe(true);
@@ -1079,20 +1119,17 @@ export default function (api) {
   });
 
   it("queues excess runs when a node reaches its concurrency cap and drains once a slot frees", async () => {
-    const pipelineYaml = `
-name: Concurrency Capped
-nodes:
-  - id: design
-    name: Design
-    executor: agent
-    prompt: ./prompts/design.md
-    concurrency: 1
-  - id: done
-    name: Done
-    executor: terminal
-    terminal: true
+    const pipelineCode = `
+import { definePipeline, node } from ${JSON.stringify(PIPELINE_SDK_PATH)};
+export default definePipeline({
+  name: "Concurrency Capped",
+  nodes: [
+    node.agent({ id: "design", name: "Design", prompt: "./prompts/design.md", concurrency: 1 }),
+    node.end({ id: "done", name: "Done" }),
+  ],
+});
 `;
-    const env = await createTestProjectRuntime({ pipelineYaml });
+    const env = await createTestProjectRuntime({ pipelineCode });
 
     let releaseFirstTurn!: () => void;
     const firstTurnStarted = new Promise<void>((resolve) => {
@@ -1138,23 +1175,18 @@ nodes:
   });
 
   it("lets a person chat with a waiting node while it is approved, without deadlocking", async () => {
-    const pipelineYaml = `
-name: Chat And Approve
-nodes:
-  - id: design
-    name: Design
-    executor: agent
-    prompt: ./prompts/design.md
-    gate: manual
-  - id: sign_off
-    name: Sign Off
-    executor: human
-  - id: done
-    name: Done
-    executor: terminal
-    terminal: true
+    const pipelineCode = `
+import { definePipeline, node } from ${JSON.stringify(PIPELINE_SDK_PATH)};
+export default definePipeline({
+  name: "Chat And Approve",
+  nodes: [
+    node.agent({ id: "design", name: "Design", prompt: "./prompts/design.md", gate: "manual" }),
+    node.human({ id: "sign_off", name: "Sign Off" }),
+    node.end({ id: "done", name: "Done" }),
+  ],
+});
 `;
-    const env = await createTestProjectRuntime({ pipelineYaml });
+    const env = await createTestProjectRuntime({ pipelineCode });
     env.runtime.enqueueTurnHandler(async ({ callAction }) => {
       await callAction("pipeline_next", { summary: "Design ready", content: "Doc" });
     });
@@ -1196,29 +1228,28 @@ nodes:
   it("never runs more node runs than the node's concurrency, however often the queue is drained", async () => {
     const gateFile = path.join(await makeTempDir("ao-cap-"), "gate.json");
     await writeFile(gateFile, JSON.stringify({ open: false }), "utf8");
-    const tsHandlerCode = `
+    const pipelineCode = `
 import { readFile } from "node:fs/promises";
-export default async function (ctx) {
-  while (!JSON.parse(await readFile(${JSON.stringify(gateFile)}, "utf8")).open) {
-    await Bun.sleep(10);
-  }
-  return { action: "next", summary: "done", content: "ok" };
-}
+import { definePipeline, node } from ${JSON.stringify(PIPELINE_SDK_PATH)};
+export default definePipeline({
+  name: "Capped",
+  nodes: [
+    node.code({
+      id: "worker",
+      name: "Worker",
+      concurrency: 1,
+      async run() {
+        while (!JSON.parse(await readFile(${JSON.stringify(gateFile)}, "utf8")).open) {
+          await Bun.sleep(10);
+        }
+        return { action: "next", summary: "done", content: "ok" };
+      },
+    }),
+    node.end({ id: "done", name: "Done" }),
+  ],
+});
 `;
-    const pipelineYaml = `
-name: Capped
-nodes:
-  - id: worker
-    name: Worker
-    executor: ts
-    handler: ./handlers/ci.ts
-    concurrency: 1
-  - id: done
-    name: Done
-    executor: terminal
-    terminal: true
-`;
-    const env = await createTestProjectRuntime({ pipelineYaml, tsHandlerCode });
+    const env = await createTestProjectRuntime({ pipelineCode });
     const engine = env.projectRuntime.pipelineEngine;
     try {
       const runs = await Promise.all(
@@ -1243,29 +1274,28 @@ nodes:
   it("does not try to claim queued runs of a node that is already full", async () => {
     const gateFile = path.join(await makeTempDir("ao-backlog-"), "gate.json");
     await writeFile(gateFile, JSON.stringify({ open: false }), "utf8");
-    const tsHandlerCode = `
+    const pipelineCode = `
 import { readFile } from "node:fs/promises";
-export default async function () {
-  while (!JSON.parse(await readFile(${JSON.stringify(gateFile)}, "utf8")).open) {
-    await Bun.sleep(10);
-  }
-  return { action: "next", summary: "done", content: "ok" };
-}
+import { definePipeline, node } from ${JSON.stringify(PIPELINE_SDK_PATH)};
+export default definePipeline({
+  name: "Backlog",
+  nodes: [
+    node.code({
+      id: "worker",
+      name: "Worker",
+      concurrency: 1,
+      async run() {
+        while (!JSON.parse(await readFile(${JSON.stringify(gateFile)}, "utf8")).open) {
+          await Bun.sleep(10);
+        }
+        return { action: "next", summary: "done", content: "ok" };
+      },
+    }),
+    node.end({ id: "done", name: "Done" }),
+  ],
+});
 `;
-    const pipelineYaml = `
-name: Backlog
-nodes:
-  - id: worker
-    name: Worker
-    executor: ts
-    handler: ./handlers/ci.ts
-    concurrency: 1
-  - id: done
-    name: Done
-    executor: terminal
-    terminal: true
-`;
-    const env = await createTestProjectRuntime({ pipelineYaml, tsHandlerCode });
+    const env = await createTestProjectRuntime({ pipelineCode });
     const engine = env.projectRuntime.pipelineEngine;
     const pipelines = env.store.pipelines;
     try {
@@ -1304,19 +1334,17 @@ nodes:
   });
 
   it("does not wake the scheduler when an agent registers a flow action", async () => {
-    const pipelineYaml = `
-name: Quiet Registration
-nodes:
-  - id: design
-    name: Design
-    executor: agent
-    prompt: ./prompts/design.md
-  - id: done
-    name: Done
-    executor: terminal
-    terminal: true
+    const pipelineCode = `
+import { definePipeline, node } from ${JSON.stringify(PIPELINE_SDK_PATH)};
+export default definePipeline({
+  name: "Quiet Registration",
+  nodes: [
+    node.agent({ id: "design", name: "Design", prompt: "./prompts/design.md" }),
+    node.end({ id: "done", name: "Done" }),
+  ],
+});
 `;
-    const env = await createTestProjectRuntime({ pipelineYaml });
+    const env = await createTestProjectRuntime({ pipelineCode });
     const engine = env.projectRuntime.pipelineEngine;
     const scheduler = engine["scheduler"];
     let refreshes = 0;
@@ -1344,27 +1372,26 @@ nodes:
   });
 
   it("fails a TS node that runs past its timeout even if its handler returns afterwards", async () => {
-    const tsHandlerCode = `
-export default async function () {
-  await Bun.sleep(150);
-  return { action: "next", summary: "late", content: "too late" };
-}
+    const pipelineCode = `
+import { definePipeline, node } from ${JSON.stringify(PIPELINE_SDK_PATH)};
+export default definePipeline({
+  name: "Timeout",
+  nodes: [
+    node.code({
+      id: "slow",
+      name: "Slow",
+      concurrency: 1,
+      timeoutMs: 40,
+      async run() {
+        await Bun.sleep(150);
+        return { action: "next", summary: "late", content: "too late" };
+      },
+    }),
+    node.end({ id: "done", name: "Done" }),
+  ],
+});
 `;
-    const pipelineYaml = `
-name: Timeout
-nodes:
-  - id: slow
-    name: Slow
-    executor: ts
-    handler: ./handlers/ci.ts
-    concurrency: 1
-    timeoutMs: 40
-  - id: done
-    name: Done
-    executor: terminal
-    terminal: true
-`;
-    const env = await createTestProjectRuntime({ pipelineYaml, tsHandlerCode });
+    const env = await createTestProjectRuntime({ pipelineCode });
     const engine = env.projectRuntime.pipelineEngine;
     try {
       const first = await engine.startRun({ pipelineId: "delivery", title: "First" });
@@ -1386,19 +1413,17 @@ nodes:
   });
 
   it("does not let a failed node's session move the run, while retry still works", async () => {
-    const pipelineYaml = `
-name: Fail Then Retry
-nodes:
-  - id: design
-    name: Design
-    executor: agent
-    prompt: ./prompts/design.md
-  - id: done
-    name: Done
-    executor: terminal
-    terminal: true
+    const pipelineCode = `
+import { definePipeline, node } from ${JSON.stringify(PIPELINE_SDK_PATH)};
+export default definePipeline({
+  name: "Fail Then Retry",
+  nodes: [
+    node.agent({ id: "design", name: "Design", prompt: "./prompts/design.md" }),
+    node.end({ id: "done", name: "Done" }),
+  ],
+});
 `;
-    const env = await createTestProjectRuntime({ pipelineYaml });
+    const env = await createTestProjectRuntime({ pipelineCode });
     const engine = env.projectRuntime.pipelineEngine;
     env.runtime.enqueueTurnHandler(async ({ callAction }) => {
       await callAction("pipeline_fail", { reason: "blocked" });
@@ -1438,33 +1463,32 @@ nodes:
   it("runs a step that returns nothing only once across suspends", async () => {
     const countFile = path.join(await makeTempDir("ao-step-"), "count.json");
     await writeFile(countFile, JSON.stringify({ calls: 0, ready: false }), "utf8");
-    const tsHandlerCode = `
+    const pipelineCode = `
 import { readFile, writeFile } from "node:fs/promises";
+import { definePipeline, node } from ${JSON.stringify(PIPELINE_SDK_PATH)};
 const file = ${JSON.stringify(countFile)};
 const read = async () => JSON.parse(await readFile(file, "utf8"));
-export default async function (ctx) {
-  await ctx.step("notify", async () => {
-    const state = await read();
-    state.calls += 1;
-    await writeFile(file, JSON.stringify(state), "utf8");
-  });
-  await ctx.waitUntil("ready", { intervalMs: 20 }, async () => (await read()).ready);
-  return { action: "next", summary: "done", content: "ok" };
-}
+export default definePipeline({
+  name: "Step Undefined",
+  nodes: [
+    node.code({
+      id: "worker",
+      name: "Worker",
+      async run(ctx) {
+        await ctx.step("notify", async () => {
+          const state = await read();
+          state.calls += 1;
+          await writeFile(file, JSON.stringify(state), "utf8");
+        });
+        await ctx.waitUntil("ready", { intervalMs: 20 }, async () => (await read()).ready);
+        return { action: "next", summary: "done", content: "ok" };
+      },
+    }),
+    node.end({ id: "done", name: "Done" }),
+  ],
+});
 `;
-    const pipelineYaml = `
-name: Step Undefined
-nodes:
-  - id: worker
-    name: Worker
-    executor: ts
-    handler: ./handlers/ci.ts
-  - id: done
-    name: Done
-    executor: terminal
-    terminal: true
-`;
-    const env = await createTestProjectRuntime({ pipelineYaml, tsHandlerCode });
+    const env = await createTestProjectRuntime({ pipelineCode });
     const engine = env.projectRuntime.pipelineEngine;
     try {
       const { run } = await engine.startRun({ pipelineId: "delivery", title: "Undefined step" });
@@ -1493,24 +1517,21 @@ nodes:
   });
 
   it("starts a new revision when a node's gate changes, so new runs follow the new gate", async () => {
-    const yaml = (gate: string) => `
-name: Gate Change
-nodes:
-  - id: design
-    name: Design
-    executor: agent
-    prompt: ./prompts/design.md
-    gate: ${gate}
-  - id: done
-    name: Done
-    executor: terminal
-    terminal: true
+    const makePipeline = (gate: "auto" | "manual") => `
+import { definePipeline, node } from ${JSON.stringify(PIPELINE_SDK_PATH)};
+export default definePipeline({
+  name: "Gate Change",
+  nodes: [
+    node.agent({ id: "design", name: "Design", prompt: "./prompts/design.md", gate: ${JSON.stringify(gate)} }),
+    node.end({ id: "done", name: "Done" }),
+  ],
+});
 `;
-    const env = await createTestProjectRuntime({ pipelineYaml: yaml("auto") });
+    const env = await createTestProjectRuntime({ pipelineCode: makePipeline("auto") });
     const engine = env.projectRuntime.pipelineEngine;
     try {
       expect(engine.getCurrentVersion("delivery")).toBe(1);
-      await writeFile(path.join(env.projectDir, "pipelines", "delivery.yaml"), yaml("manual"));
+      await writeFile(path.join(env.projectDir, "pipelines", "delivery.ts"), makePipeline("manual"));
       await engine.syncDefinitions();
       expect(engine.getCurrentVersion("delivery")).toBe(2);
 
@@ -1536,22 +1557,16 @@ describe("Gateway /api/v1 Pipeline REST & SSE Endpoints", () => {
     const projectDir = path.join(rootDir, "project");
     await mkdir(path.join(projectDir, "pipelines"), { recursive: true });
     await writeFile(
-      path.join(projectDir, "pipelines", "release.yaml"),
-      `
-name: Release Flow
-nodes:
-  - id: review
-    name: Review
-    executor: human
-  - id: ship
-    name: Ship
-    executor: human
-    allowPrev: true
-    prevTargets: [review]
-  - id: done
-    name: Done
-    executor: terminal
-    terminal: true
+      path.join(projectDir, "pipelines", "release.ts"),
+      `import { definePipeline, node } from ${JSON.stringify(PIPELINE_SDK_PATH)};
+export default definePipeline({
+  name: "Release Flow",
+  nodes: [
+    node.human({ id: "review", name: "Review" }),
+    node.human({ id: "ship", name: "Ship", allowPrev: true, prevTargets: ["review"] }),
+    node.end({ id: "done", name: "Done" }),
+  ],
+});
 `,
       "utf8",
     );

@@ -38,6 +38,19 @@ export interface PipelineMachineEnv {
   readonly now: string;
   readonly newRecordId: string;
   readonly newNodeRunId: string;
+  /**
+   * Resolves and validates the target node's strong-typed `data` payload:
+   * - `"advance"`: validates `rawData` against the target node's declared `input` schema (else `{}`).
+   * - `"rework"`: inherits the target node's latest validated `data`, shallow-merges `rawData`,
+   *   and validates against the target node's declared `input` schema (else `{}`).
+   */
+  readonly resolveNodeData?:
+    | ((
+        nodeId: string,
+        rawData: Record<string, unknown> | undefined,
+        mode: "advance" | "rework",
+      ) => Record<string, unknown>)
+    | undefined;
 }
 
 export type PipelineCommand =
@@ -71,6 +84,8 @@ export type PipelineCommand =
       /** What the approved node hands to the next one. */
       readonly handoff: PipelineActionContextPayload;
       readonly humanNote?: string | undefined;
+      readonly data?: Record<string, unknown> | undefined;
+      readonly metadata?: Record<string, unknown> | undefined;
       readonly actorId?: string | undefined;
     }
   | {
@@ -78,6 +93,8 @@ export type PipelineCommand =
       readonly reason: string;
       readonly feedback: string;
       readonly targetNodeId?: string | undefined;
+      readonly data?: Record<string, unknown> | undefined;
+      readonly metadata?: Record<string, unknown> | undefined;
       readonly actorId?: string | undefined;
     }
   | {
@@ -158,7 +175,7 @@ export function decide(
           `A flow transition action (${nodeRun.pendingDecision.action}) has already been registered for this turn. Complete your response without calling another flow action.`,
         );
       }
-      validateFlowAction(state, command.decision.action, command.decision.context);
+      validateFlowAction(state, command.decision.action, command.decision.context, env);
       return {
         runPatch: {},
         nodeRunPatch: { pendingDecision: command.decision },
@@ -181,12 +198,22 @@ export function decide(
 
     case "approve": {
       requireRunStatus(run, "waiting_confirmation", "approve");
+      const mergedData =
+        command.data !== undefined
+          ? { ...(command.handoff.data ?? {}), ...command.data }
+          : command.handoff.data;
+      const mergedMetadata =
+        command.metadata !== undefined
+          ? { ...(command.handoff.metadata ?? {}), ...command.metadata }
+          : command.handoff.metadata;
       const context: PipelineActionContextPayload = {
         ...command.handoff,
         summary:
           command.handoff.summary ||
           nodeRun.outputSummary ||
           `Approved at node "${currentNode(state).node.name}"`,
+        ...(mergedData !== undefined ? { data: mergedData } : {}),
+        ...(mergedMetadata !== undefined ? { metadata: mergedMetadata } : {}),
         ...(command.humanNote?.trim() ? { humanNote: command.humanNote.trim() } : {}),
       };
       return advance(state, "human_approve", "human", context, env, command.actorId);
@@ -200,6 +227,8 @@ export function decide(
         feedback: command.feedback,
         targetNodeId: target.id,
         humanNote: command.feedback,
+        ...(command.data !== undefined ? { data: command.data } : {}),
+        ...(command.metadata !== undefined ? { metadata: command.metadata } : {}),
       };
       // A person's decision to send work back is never stopped by the loop breaker.
       return routeBack(state, target, "human_reject", "human", context, env, command.actorId);
@@ -244,7 +273,7 @@ export function planNewRun(params: {
     { runId: run.runId, projectId: run.projectId, pipelineId: run.pipelineId },
     firstNode,
     nodeRunId,
-    { inputContext: { initialInput: run.input } },
+    { inputContext: { ...run.data } },
     run.createdAt,
   );
   return {
@@ -328,6 +357,7 @@ function tsResultToDecision(result: PipelineTsResult): {
   context: PipelineActionContextPayload;
 } {
   const data = result.data ? { data: result.data } : {};
+  const metadata = result.metadata ? { metadata: result.metadata } : {};
   switch (result.action) {
     case "next":
       return {
@@ -337,6 +367,7 @@ function tsResultToDecision(result: PipelineTsResult): {
           content: result.content.trim(),
           ...(result.artifacts ? { artifacts: result.artifacts } : {}),
           ...data,
+          ...metadata,
         },
       };
     case "prev":
@@ -347,6 +378,7 @@ function tsResultToDecision(result: PipelineTsResult): {
           feedback: result.feedback.trim(),
           ...(result.targetNodeId ? { targetNodeId: result.targetNodeId } : {}),
           ...data,
+          ...metadata,
         },
       };
     case "request_confirmation":
@@ -359,6 +391,7 @@ function tsResultToDecision(result: PipelineTsResult): {
           ...(result.content !== undefined ? { content: result.content } : {}),
           ...(result.artifacts ? { artifacts: result.artifacts } : {}),
           ...data,
+          ...metadata,
         },
       };
     case "fail":
@@ -368,9 +401,27 @@ function tsResultToDecision(result: PipelineTsResult): {
           reason: result.reason.trim(),
           ...(result.summary !== undefined ? { summary: result.summary } : {}),
           ...data,
+          ...metadata,
         },
       };
   }
+}
+
+function resolveTargetData(
+  env: PipelineMachineEnv,
+  targetNodeId: string,
+  rawData: Record<string, unknown> | undefined,
+  mode: "advance" | "rework",
+): Record<string, unknown> {
+  return env.resolveNodeData ? env.resolveNodeData(targetNodeId, rawData, mode) : {};
+}
+
+function withResolvedData(
+  context: PipelineActionContextPayload,
+  resolvedData: Record<string, unknown>,
+): PipelineActionContextPayload {
+  const { data: _ignored, ...rest } = context;
+  return Object.keys(resolvedData).length > 0 ? { ...rest, data: resolvedData } : rest;
 }
 
 /** Checks what can be checked before the flow action is applied, so a model can correct itself. */
@@ -378,14 +429,18 @@ function validateFlowAction(
   state: PipelineMachineState,
   action: PipelineFlowActionName,
   context: PipelineActionContextPayload,
+  env: PipelineMachineEnv,
 ): void {
   if (action === "pipeline_next") {
     const { node, index } = currentNode(state);
-    if (node.terminal || index >= state.nodes.length - 1) {
+    const nextNode = state.nodes[index + 1];
+    if (node.terminal || !nextNode) {
       throw new PipelineValidationError(`node "${node.id}" has no next node`);
     }
+    resolveTargetData(env, nextNode.id, context.data, "advance");
   } else if (action === "pipeline_prev") {
-    resolvePrevTarget(state, context.targetNodeId);
+    const target = resolvePrevTarget(state, context.targetNodeId);
+    resolveTargetData(env, target.id, context.data, "rework");
   }
 }
 
@@ -396,7 +451,7 @@ function applyFlowAction(
   context: PipelineActionContextPayload,
   env: PipelineMachineEnv,
 ): PipelineTransition {
-  validateFlowAction(state, action, context);
+  validateFlowAction(state, action, context, env);
   const { node } = currentNode(state);
   switch (action) {
     case "pipeline_next":
@@ -451,22 +506,19 @@ function advance(
     throw new PipelineConflictError(`node "${node.id}" has no next node`);
   }
 
+  const nextNodeData = resolveTargetData(env, nextNode.id, context.data, "advance");
+  const recordContext = withResolvedData(context, nextNodeData);
   const entered = enterNode(
     run,
     nextNode,
     env.newNodeRunId,
     {
       triggeredByRecordId: env.newRecordId,
-      inputContext: {
-        handoffFrom: node.id,
-        handoffRecordId: env.newRecordId,
-        handoffAction: action,
-        context,
-      },
+      inputContext: nextNodeData,
     },
     env.now,
   );
-  const summary = context.summary ?? nodeRun.outputSummary ?? `Completed ${node.name}`;
+  const summary = recordContext.summary ?? nodeRun.outputSummary ?? `Completed ${node.name}`;
   return {
     runPatch: {
       currentNodeId: nextNode.id,
@@ -486,7 +538,7 @@ function advance(
       actorId,
       toNodeId: nextNode.id,
       toStatus: entered.runStatus,
-      context,
+      context: recordContext,
       result: { nextNodeId: nextNode.id, terminal: nextNode.terminal },
     }),
     effects: [
@@ -524,23 +576,19 @@ function routeBack(
     return { ...transition, runPatch: { ...transition.runPatch, loopCounts } };
   }
 
+  const targetNodeData = resolveTargetData(env, target.id, context.data, "rework");
+  const recordContext = withResolvedData(context, targetNodeData);
   const entered = enterNode(
     run,
     target,
     env.newNodeRunId,
     {
       triggeredByRecordId: env.newRecordId,
-      inputContext: {
-        handoffFrom: node.id,
-        handoffRecordId: env.newRecordId,
-        handoffAction: action,
-        isRejection: true,
-        context,
-      },
+      inputContext: targetNodeData,
     },
     env.now,
   );
-  const summary = context.reason ?? context.summary ?? `Returned to ${target.name}`;
+  const summary = recordContext.reason ?? recordContext.summary ?? `Returned to ${target.name}`;
   return {
     runPatch: {
       currentNodeId: target.id,
@@ -560,7 +608,7 @@ function routeBack(
       actorId,
       toNodeId: target.id,
       toStatus: entered.runStatus,
-      context,
+      context: recordContext,
       result: { targetNodeId: target.id, loopCount },
     }),
     effects: archiveSession(nodeRun),
@@ -625,6 +673,7 @@ function failNode(
         reason,
         ...(context?.summary !== undefined ? { summary: context.summary } : {}),
         ...(context?.data ? { data: context.data } : {}),
+        ...(context?.metadata ? { metadata: context.metadata } : {}),
       },
       result: { failed: true },
     }),
@@ -669,7 +718,7 @@ function retry(
       toStatus: entered.runStatus,
       context: {
         summary: `Retrying node "${node.name}"`,
-        data: { preserveStepState },
+        metadata: { preserveStepState },
       },
       result: { nextNodeRunId: env.newNodeRunId },
     }),

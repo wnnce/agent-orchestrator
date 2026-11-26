@@ -1,3 +1,4 @@
+import type { z } from "zod";
 import type { McpToolCallOptions, McpToolInfo, McpToolResult } from "../mcp/index.ts";
 import type { NotificationMessage, NotificationOptions } from "../notifications/index.ts";
 import type { Logger } from "../observability/logger.ts";
@@ -8,14 +9,32 @@ import type {
   TaskExecutionLogLevel,
 } from "../domain/types.ts";
 
+export type PipelineInputSchema = z.ZodObject<z.ZodRawShape>;
+
+export type InferNodeData<TInput> = TInput extends z.ZodObject<z.ZodRawShape>
+  ? Readonly<z.infer<TInput>>
+  : Readonly<Record<string, never>>;
+
 export type PipelineNodeExecutorType = "agent" | "ts" | "human" | "terminal";
 export type PipelineNodeGate = "auto" | "manual";
 
 export type PipelineRunStatus =
-  "queued" | "running" | "waiting" | "waiting_confirmation" | "failed" | "completed" | "cancelled";
+  | "queued"
+  | "running"
+  | "waiting"
+  | "waiting_confirmation"
+  | "failed"
+  | "completed"
+  | "cancelled";
 
 export type PipelineNodeRunStatus =
-  "queued" | "running" | "waiting" | "waiting_confirmation" | "completed" | "failed" | "cancelled";
+  | "queued"
+  | "running"
+  | "waiting"
+  | "waiting_confirmation"
+  | "completed"
+  | "failed"
+  | "cancelled";
 
 /** A run that has not been completed or cancelled. A failed run is still active: it can be retried. */
 export function isActivePipelineRunStatus(status: PipelineRunStatus): boolean {
@@ -52,7 +71,12 @@ export interface PipelineNodeConfig {
   readonly description?: string | undefined;
   readonly promptPath?: string | undefined;
   readonly promptTemplate?: string | undefined;
-  readonly handlerPath?: string | undefined;
+  /** Executable handler for `ts` (`node.code`) nodes, bound directly from the TS definition. */
+  readonly handler?: PipelineTsHandler<Record<string, unknown>> | undefined;
+  /** Explicit Zod input contract declared by this node. Absent means `data` is always `{}`. */
+  readonly inputSchema?: PipelineInputSchema | undefined;
+  /** Standard JSON Schema representation of `inputSchema` (included in topology snapshots). */
+  readonly inputJsonSchema?: Record<string, unknown> | undefined;
   readonly runtime?: PipelineNodeRuntimeConfig | undefined;
   readonly concurrency: number;
   readonly gate: PipelineNodeGate;
@@ -77,8 +101,8 @@ export interface PipelineDefinition {
 /**
  * The part of a node that a PipelineRun is bound to for its whole life. Every field here takes
  * part in the topology hash, so editing any of them creates a new revision instead of silently
- * changing the rules of runs already in flight. Prompts, handlers, runtimes and concurrency are
- * read from the live definition instead.
+ * changing the rules of runs already in flight. Prompts, handlers, input schemas, runtimes and
+ * concurrency are read from the live definition instead.
  */
 export interface PipelineNodeSnapshot {
   readonly id: string;
@@ -120,7 +144,10 @@ export interface PipelineRunRecord {
   readonly externalUrl?: string | undefined;
   readonly title: string;
   readonly description?: string | undefined;
-  readonly input: Record<string, unknown>;
+  /** Validated entry `data` bound to the pipeline's first node (`{}` if first node declares no input). */
+  readonly data: Record<string, unknown>;
+  /** Free-form arbitrary run-level metadata passed at start time. */
+  readonly metadata: Record<string, unknown>;
   readonly currentNodeId: string;
   readonly status: PipelineRunStatus;
   readonly workspacePath?: string | undefined;
@@ -160,7 +187,10 @@ export interface PipelineStepState {
 }
 
 export type PipelineFlowActionName =
-  "pipeline_next" | "pipeline_prev" | "pipeline_request_confirmation" | "pipeline_fail";
+  | "pipeline_next"
+  | "pipeline_prev"
+  | "pipeline_request_confirmation"
+  | "pipeline_fail";
 
 /** A flow action an agent called during a turn; it takes effect when that turn finishes. */
 export interface PipelineAgentDecision {
@@ -182,6 +212,7 @@ export interface PipelineNodeRunRecord {
   readonly sessionId?: string | undefined;
   readonly triggeredByRecordId?: string | undefined;
   readonly status: PipelineNodeRunStatus;
+  /** Validated strong-typed `data` for this node attempt (`{}` if node declares no input). */
   readonly inputContext: Record<string, unknown>;
   readonly finalAction?: PipelineActionName | undefined;
   readonly outputSummary?: string | undefined;
@@ -211,7 +242,10 @@ export interface PipelineActionContextPayload {
   readonly options?: readonly string[] | undefined;
   readonly targetNodeId?: string | undefined;
   readonly artifacts?: readonly string[] | undefined;
+  /** Structured strong-typed handoff data for the target node's declared `input` schema. */
   readonly data?: Record<string, unknown> | undefined;
+  /** Free-form arbitrary metadata passed alongside this action (never schema-restricted). */
+  readonly metadata?: Record<string, unknown> | undefined;
   readonly humanNote?: string | undefined;
 }
 
@@ -361,7 +395,7 @@ export type PipelineTransitionResult =
   | { readonly status: "no_capacity" };
 
 // =====================================================================
-// TS Pipeline Handler SDK Types
+// Code (`node.code`) Pipeline Handler SDK Types
 // =====================================================================
 
 export interface PipelineWaitUntilOptions {
@@ -384,6 +418,12 @@ export interface PipelineHistoryEntrySummary {
   readonly createdAt: string;
 }
 
+export interface PipelineReworkInfo {
+  readonly fromNodeId: string;
+  readonly reason: string;
+  readonly feedback: string;
+}
+
 export interface PipelineGlobalContextView {
   readonly runId: string;
   readonly projectId: string;
@@ -393,7 +433,8 @@ export interface PipelineGlobalContextView {
   readonly description?: string | undefined;
   readonly externalKey?: string | undefined;
   readonly externalUrl?: string | undefined;
-  readonly input: Record<string, unknown>;
+  readonly data: Record<string, unknown>;
+  readonly metadata: Record<string, unknown>;
   readonly branchName?: string | undefined;
   readonly workspacePath?: string | undefined;
   readonly currentNodeId: string;
@@ -411,6 +452,7 @@ export type PipelineTsResult =
       readonly content: string;
       readonly artifacts?: readonly string[] | undefined;
       readonly data?: Record<string, unknown> | undefined;
+      readonly metadata?: Record<string, unknown> | undefined;
     }
   | {
       readonly action: "prev";
@@ -418,6 +460,7 @@ export type PipelineTsResult =
       readonly feedback: string;
       readonly targetNodeId?: string | undefined;
       readonly data?: Record<string, unknown> | undefined;
+      readonly metadata?: Record<string, unknown> | undefined;
     }
   | {
       readonly action: "request_confirmation";
@@ -427,15 +470,17 @@ export type PipelineTsResult =
       readonly content?: string | undefined;
       readonly artifacts?: readonly string[] | undefined;
       readonly data?: Record<string, unknown> | undefined;
+      readonly metadata?: Record<string, unknown> | undefined;
     }
   | {
       readonly action: "fail";
       readonly reason: string;
       readonly summary?: string | undefined;
       readonly data?: Record<string, unknown> | undefined;
+      readonly metadata?: Record<string, unknown> | undefined;
     };
 
-export interface PipelineTsRunContext {
+export interface PipelineTsRunContext<TData = Readonly<Record<string, unknown>>> {
   readonly projectId: string;
   readonly pipelineId: string;
   readonly runId: string;
@@ -444,6 +489,12 @@ export interface PipelineTsRunContext {
   readonly attempt: number;
   readonly workdir: string;
   readonly branchName?: string | undefined;
+  /** Validated strong-typed `data` for this node (strictly `{}` if no `input` schema declared). */
+  readonly data: TData;
+  /** Free-form metadata passed into this node (from upstream handoff or initial run metadata). */
+  readonly metadata: Readonly<Record<string, unknown>>;
+  /** Present when this attempt was triggered by an upstream rejection/rework. */
+  readonly rework?: PipelineReworkInfo | undefined;
   readonly env: Readonly<Record<string, string>>;
   readonly vars: Readonly<Record<string, ProjectVarValue>>;
   readonly logger: Logger;
@@ -502,8 +553,8 @@ export interface PipelineTsRunContext {
   listMcpTools(serverName: string, options?: McpToolCallOptions): Promise<readonly McpToolInfo[]>;
 }
 
-export type PipelineTsHandler = (
-  ctx: PipelineTsRunContext,
+export type PipelineTsHandler<TData = Readonly<Record<string, unknown>>> = (
+  ctx: PipelineTsRunContext<TData>,
 ) => Promise<PipelineTsResult> | PipelineTsResult;
 
 // =====================================================================
@@ -516,7 +567,10 @@ export interface StartPipelineRunParams {
   readonly description?: string | undefined;
   readonly externalKey?: string | undefined;
   readonly externalUrl?: string | undefined;
-  readonly input?: Record<string, unknown> | undefined;
+  /** Structured entry `data` validated against the first node's declared `input` schema. */
+  readonly data?: Record<string, unknown> | undefined;
+  /** Free-form arbitrary run-level metadata (not schema-restricted). */
+  readonly metadata?: Record<string, unknown> | undefined;
   readonly createdBy?: string | undefined;
 }
 
@@ -554,6 +608,8 @@ export interface PipelineSummaryWithVersions {
   readonly currentVersion: number;
   readonly currentTopologyHash: string;
   readonly nodes: readonly PipelineNodeSnapshot[];
+  /** Live JSON Schema of the entry node's declared `input` contract, if any. */
+  readonly entryInputSchema?: Record<string, unknown> | undefined;
   readonly notifyOn: readonly PipelineRunStatus[];
   readonly activeVersions: readonly {
     readonly version: number;

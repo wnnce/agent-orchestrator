@@ -44,7 +44,8 @@ export async function buildGlobalContext(
     ...(run.description !== undefined ? { description: run.description } : {}),
     ...(run.externalKey !== undefined ? { externalKey: run.externalKey } : {}),
     ...(run.externalUrl !== undefined ? { externalUrl: run.externalUrl } : {}),
-    input: run.input,
+    data: run.data,
+    metadata: run.metadata,
     ...(run.branchName !== undefined ? { branchName: run.branchName } : {}),
     ...(run.workspacePath !== undefined ? { workspacePath: run.workspacePath } : {}),
     currentNodeId: nodeRun.nodeId,
@@ -140,18 +141,39 @@ export async function buildAgentNodePrompt(params: {
   readonly nodes: readonly PipelineNodeSnapshot[];
   readonly nodeRun: PipelineNodeRunRecord;
   readonly node: PipelineNodeConfig;
+  readonly nextNode?: PipelineNodeConfig | undefined;
 }): Promise<string> {
-  const { store, project, run, nodes, nodeRun, node } = params;
-  // Flow rules come from the revision the run is bound to; the prompt from the live definition.
-  const bound = nodes.find((n) => n.id === node.id) ?? node;
+  const { store, project, run, nodes, nodeRun, node, nextNode } = params;
+  // Flow rules come from the revision the run is bound to; the prompt & input contract from live definition.
+  const boundIndex = nodes.findIndex((n) => n.id === node.id);
+  const bound: PipelineNodeSnapshot =
+    boundIndex >= 0
+      ? nodes[boundIndex]!
+      : {
+          id: node.id,
+          name: node.name,
+          executor: node.executor,
+          terminal: node.terminal,
+          gate: node.gate,
+          allowPrev: node.allowPrev,
+          prevTargets: node.prevTargets,
+          maxLoops: node.maxLoops,
+        };
   const upstream = nodeRun.triggeredByRecordId
     ? await store.getActionRecord(nodeRun.triggeredByRecordId)
     : null;
+  const nodeData = nodeRun.inputContext;
+  const nodeMetadata = {
+    ...run.metadata,
+    ...(upstream?.context.metadata ?? {}),
+  };
 
   const body = renderPromptTemplate(node.promptTemplate ?? "", {
     project: buildProjectPromptScope(project),
     vars: project.vars ?? {},
     now: buildNowPromptScope(),
+    data: nodeData,
+    metadata: nodeMetadata,
     pipeline: {
       id: run.pipelineId,
       version: run.pipelineVersion,
@@ -164,16 +186,17 @@ export async function buildAgentNodePrompt(params: {
       nodeId: node.id,
       nodeName: node.name,
       attempt: nodeRun.attempt,
-      input: run.input,
+      data: nodeData,
+      metadata: nodeMetadata,
     },
   }).rendered;
 
   return [
     body.trim(),
-    overviewSection(run, nodeRun, bound),
+    overviewSection(run, nodeRun, bound, nodeMetadata),
     ...(upstream ? [upstreamSection(upstream)] : []),
     ...summariesSection(run, nodes),
-    completionSection(bound),
+    completionSection(bound, nextNode),
   ].join("\n\n---\n\n");
 }
 
@@ -181,6 +204,7 @@ function overviewSection(
   run: PipelineRunRecord,
   nodeRun: PipelineNodeRunRecord,
   node: PipelineNodeSnapshot,
+  nodeMetadata: Record<string, unknown>,
 ): string {
   const lines = [
     "## Pipeline Run Context",
@@ -192,8 +216,15 @@ function overviewSection(
   if (run.description) lines.push(`- **Description**: ${run.description}`);
   if (run.externalUrl) lines.push(`- **External URL**: ${run.externalUrl}`);
   if (run.branchName) lines.push(`- **Shared Git Branch**: \`${run.branchName}\``);
-  if (Object.keys(run.input).length > 0) {
-    lines.push(`- **Initial Input**:\n\`\`\`json\n${JSON.stringify(run.input, null, 2)}\n\`\`\``);
+  if (Object.keys(nodeRun.inputContext).length > 0) {
+    lines.push(
+      `- **Node Input Data**:\n\`\`\`json\n${JSON.stringify(nodeRun.inputContext, null, 2)}\n\`\`\``,
+    );
+  }
+  if (Object.keys(nodeMetadata).length > 0) {
+    lines.push(
+      `- **Metadata**:\n\`\`\`json\n${JSON.stringify(nodeMetadata, null, 2)}\n\`\`\``,
+    );
   }
   return lines.join("\n");
 }
@@ -215,7 +246,10 @@ function upstreamSection(record: PipelineActionRecord): string {
     lines.push(`\n**Artifacts**: ${ctx.artifacts.map((a) => `\`${a}\``).join(", ")}`);
   }
   if (ctx.data && Object.keys(ctx.data).length > 0) {
-    lines.push(`\n\`\`\`json\n${JSON.stringify(ctx.data, null, 2)}\n\`\`\``);
+    lines.push(`\n### Structured Data\n\`\`\`json\n${JSON.stringify(ctx.data, null, 2)}\n\`\`\``);
+  }
+  if (ctx.metadata && Object.keys(ctx.metadata).length > 0) {
+    lines.push(`\n### Metadata\n\`\`\`json\n${JSON.stringify(ctx.metadata, null, 2)}\n\`\`\``);
   }
   return lines.join("\n");
 }
@@ -241,17 +275,23 @@ function summariesSection(
   ];
 }
 
-function completionSection(node: PipelineNodeSnapshot): string {
+function completionSection(
+  node: PipelineNodeSnapshot,
+  nextNode: PipelineNodeConfig | undefined,
+): string {
+  const nextHint = nextNode?.inputSchema
+    ? `- \`pipeline_next({ summary, content, data, artifacts?, metadata? })\` to proceed (populate \`data\` per the tool's required schema for \`${nextNode.id}\`).`
+    : "- `pipeline_next({ summary, content, artifacts?, metadata? })` to proceed.";
   const prevHint = node.allowPrev
-    ? `- \`pipeline_prev({ reason, feedback${node.prevTargets.length > 1 ? `, targetNodeId: one of [${node.prevTargets.join(", ")}]` : ""} })\` to reject back upstream.`
+    ? `- \`pipeline_prev({ reason, feedback${node.prevTargets.length > 1 ? `, targetNodeId: one of [${node.prevTargets.join(", ")}]` : ""}, data?, metadata? })\` to reject back upstream.`
     : "- `pipeline_prev` is disabled on this node.";
   return [
     "## Required Completion Action",
     "When you finish this node, you MUST invoke exactly one flow action with explicit context:",
-    "- `pipeline_next({ summary, content, artifacts?, data? })` to proceed.",
+    nextHint,
     prevHint,
-    "- `pipeline_request_confirmation({ summary, question, options?, content? })` to pause and ask a human.",
-    "- `pipeline_fail({ reason, summary? })` if blocked by an unrecoverable error.",
+    "- `pipeline_request_confirmation({ summary, question, options?, content?, metadata? })` to pause and ask a human.",
+    "- `pipeline_fail({ reason, summary?, metadata? })` if blocked by an unrecoverable error.",
   ].join("\n");
 }
 

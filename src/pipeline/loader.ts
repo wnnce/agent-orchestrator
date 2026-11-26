@@ -2,19 +2,23 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
-import YAML from "yaml";
 import { z } from "zod";
 import { REASONING_EFFORTS, type ProjectVars } from "../domain/types.ts";
 import { Logger } from "../observability/logger.ts";
-import { findMissingProjectVars } from "../prompt/template.ts";
+import { extractPromptVarRefs, findMissingProjectVars } from "../prompt/template.ts";
+import {
+  isPipelineBlueprint,
+  isZodObjectSchema,
+  toNodeInputJsonSchema,
+  type PipelineBlueprint,
+  type PipelineNodeSpec,
+} from "./sdk.ts";
 import type {
   PipelineDefinition,
+  PipelineInputSchema,
   PipelineNodeConfig,
-  PipelineNodeExecutorType,
   PipelineNodeSnapshot,
   PipelineRunStatus,
-  PipelineTsHandler,
 } from "./types.ts";
 
 const IDENTIFIER_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/;
@@ -34,43 +38,6 @@ const nodeRuntimeSchema = z
     type: z.string().trim().min(1).optional(),
     model: z.string().trim().min(1).optional(),
     reasoningEffort: z.enum(REASONING_EFFORTS).optional(),
-  })
-  .strict();
-
-const rawNodeSchema = z
-  .object({
-    id: z
-      .string()
-      .trim()
-      .regex(IDENTIFIER_RE, "node id must match /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/"),
-    name: z.string().trim().min(1),
-    description: z.string().optional(),
-    executor: z.enum(["agent", "ts", "human", "terminal"]).optional(),
-    terminal: z.boolean().optional(),
-    prompt: z.string().trim().min(1).optional(),
-    handler: z.string().trim().min(1).optional(),
-    runtime: nodeRuntimeSchema.optional(),
-    concurrency: z.number().int().min(1).max(64).optional(),
-    gate: z.enum(["auto", "manual"]).optional(),
-    allowPrev: z.boolean().optional(),
-    prevTargets: z.array(z.string().trim().min(1)).optional(),
-    maxLoops: z.number().int().min(1).max(100).optional(),
-    timeoutMs: z.number().int().positive().optional(),
-  })
-  .strict();
-
-const rawPipelineSchema = z
-  .object({
-    id: z
-      .string()
-      .trim()
-      .regex(IDENTIFIER_RE, "pipeline id must match /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/")
-      .optional(),
-    name: z.string().trim().min(1),
-    description: z.string().optional(),
-    enabled: z.boolean().optional().default(true),
-    notifyOn: z.array(notifyStatusSchema).optional(),
-    nodes: z.array(rawNodeSchema).min(2, "pipeline must contain at least 2 nodes"),
   })
   .strict();
 
@@ -114,7 +81,8 @@ export interface LoadPipelinesOptions {
 }
 
 /**
- * Loads and validates all YAML pipeline definitions under `<projectDir>/pipelines/*.yaml`.
+ * Loads and validates all TypeScript pipeline definitions under `<projectDir>/pipelines/*.ts`.
+ * Excludes test files (`*.test.ts`), declaration files (`*.d.ts`), and helper subdirectories.
  */
 export async function loadProjectPipelines(
   options: LoadPipelinesOptions,
@@ -124,7 +92,14 @@ export async function loadProjectPipelines(
 
   const entries = await readdir(pipelinesDir, { withFileTypes: true });
   const files = entries
-    .filter((e) => e.isFile() && (e.name.endsWith(".yaml") || e.name.endsWith(".yml")))
+    .filter(
+      (e) =>
+        e.isFile() &&
+        e.name.endsWith(".ts") &&
+        !e.name.endsWith(".d.ts") &&
+        !e.name.endsWith(".test.ts") &&
+        !e.name.startsWith("_"),
+    )
     .map((e) => path.join(pipelinesDir, e.name))
     .sort();
 
@@ -143,204 +118,328 @@ export async function loadProjectPipelines(
   return definitions;
 }
 
+let pipelineModuleImportSeq = 0;
+
 export async function loadSinglePipelineFile(
   filePath: string,
   options: LoadPipelinesOptions,
 ): Promise<PipelineDefinition> {
-  const source = await readFile(filePath, "utf8");
-  const doc = YAML.parseDocument(source);
-  if (doc.errors.length > 0) {
-    throw new Error(`Invalid pipeline YAML ${filePath}: ${doc.errors[0]?.message}`);
+  const resolved = path.resolve(filePath);
+  const fileStat = await stat(resolved);
+  // Bun preserves query-string cache busting on filesystem paths (whereas `file://` URLs strip `?v=`).
+  const specifier = `${resolved}?v=${fileStat.mtimeMs}-${++pipelineModuleImportSeq}`;
+  const mod = (await import(specifier)) as { default?: unknown };
+
+  if (!isPipelineBlueprint(mod.default)) {
+    throw new Error(
+      `Pipeline module ${filePath} must default-export a definePipeline(...) blueprint`,
+    );
   }
 
-  const parsed = rawPipelineSchema.safeParse(doc.toJSON());
-  if (!parsed.success) {
-    const issues = parsed.error.issues
-      .map((i) => `${i.path.join(".") || "pipeline"}: ${i.message}`)
-      .join("; ");
-    throw new Error(`Invalid pipeline configuration in ${filePath}: ${issues}`);
-  }
+  return compilePipelineBlueprint(mod.default, {
+    ...options,
+    filePath: resolved,
+  });
+}
 
-  const data = parsed.data;
+export interface CompilePipelineOptions extends LoadPipelinesOptions {
+  readonly filePath: string;
+}
+
+/**
+ * Validates and compiles an in-memory `PipelineBlueprint` into a runtime `PipelineDefinition`.
+ * Used both by the file loader and by tests that construct blueprints directly with `definePipeline`.
+ */
+export async function compilePipelineBlueprint(
+  blueprint: PipelineBlueprint,
+  options: CompilePipelineOptions,
+): Promise<PipelineDefinition> {
+  const { filePath } = options;
   const fallbackId = path.basename(filePath, path.extname(filePath));
-  const pipelineId = data.id ?? fallbackId;
+  const pipelineId = (blueprint.id ?? fallbackId).trim();
   if (!IDENTIFIER_RE.test(pipelineId)) {
     throw new Error(`Invalid pipeline id "${pipelineId}" in ${filePath}`);
   }
 
-  const rawNodes = data.nodes;
-  const nodeIndexById = new Map<string, number>();
-  for (let i = 0; i < rawNodes.length; i++) {
-    const n = rawNodes[i]!;
-    if (nodeIndexById.has(n.id)) {
-      throw new Error(`Duplicate node id "${n.id}" in pipeline ${pipelineId}`);
-    }
-    nodeIndexById.set(n.id, i);
+  const name = blueprint.name?.trim();
+  if (!name) {
+    throw new Error(`Pipeline "${pipelineId}" in ${filePath} requires a non-empty name`);
   }
 
-  const pipelineDir = path.dirname(filePath);
+  if (!Array.isArray(blueprint.nodes) || blueprint.nodes.length < 2) {
+    throw new Error(`Pipeline "${pipelineId}" must contain at least 2 nodes`);
+  }
+
+  let notifyOn: readonly PipelineRunStatus[] = DEFAULT_NOTIFY_ON;
+  if (blueprint.notifyOn !== undefined) {
+    const parsedNotify = z.array(notifyStatusSchema).safeParse(blueprint.notifyOn);
+    if (!parsedNotify.success) {
+      throw new Error(`Pipeline "${pipelineId}" has invalid notifyOn statuses`);
+    }
+    notifyOn = parsedNotify.data;
+  }
+
+  const rawNodes = blueprint.nodes;
+  const nodeIndexById = new Map<string, number>();
+  for (let i = 0; i < rawNodes.length; i++) {
+    const raw = rawNodes[i]!;
+    if (!raw.id || !IDENTIFIER_RE.test(raw.id.trim())) {
+      throw new Error(`Invalid node id "${raw.id}" in pipeline "${pipelineId}"`);
+    }
+    const id = raw.id.trim();
+    if (nodeIndexById.has(id)) {
+      throw new Error(`Duplicate node id "${id}" in pipeline "${pipelineId}"`);
+    }
+    nodeIndexById.set(id, i);
+  }
+
+  const pipelineDir = path.dirname(path.resolve(filePath));
   const projectRoot = path.resolve(options.projectDir);
   const nodes: PipelineNodeConfig[] = [];
 
   for (let i = 0; i < rawNodes.length; i++) {
     const raw = rawNodes[i]!;
+    const id = raw.id.trim();
+    const nodeName = raw.name?.trim();
+    if (!nodeName) {
+      throw new Error(`Pipeline "${pipelineId}" node "${id}" requires a non-empty name`);
+    }
+
     const isLast = i === rawNodes.length - 1;
-    const isTerminal = raw.terminal === true || raw.executor === "terminal";
+    const isTerminal = raw.executor === "terminal";
 
     if (isLast && !isTerminal) {
       throw new Error(
-        `Pipeline "${pipelineId}" last node "${raw.id}" must be marked with terminal: true`,
+        `Pipeline "${pipelineId}" last node "${id}" must be a terminal node created with node.end(...)`,
       );
     }
     if (!isLast && isTerminal) {
-      throw new Error(`Pipeline "${pipelineId}" non-final node "${raw.id}" cannot be terminal`);
-    }
-
-    let executor: PipelineNodeExecutorType;
-    if (isTerminal) {
-      executor = "terminal";
-    } else {
-      if (!raw.executor) {
-        throw new Error(
-          `Pipeline "${pipelineId}" node "${raw.id}" must specify executor ("agent" | "ts" | "human")`,
-        );
-      }
-      executor = raw.executor;
+      throw new Error(`Pipeline "${pipelineId}" non-final node "${id}" cannot be terminal`);
     }
 
     // Validate prevTargets & allowPrev
-    const allowPrev = isTerminal ? false : i === 0 ? false : (raw.allowPrev ?? true);
-    if (i === 0 && raw.allowPrev === true) {
-      throw new Error(`Pipeline "${pipelineId}" first node "${raw.id}" cannot set allowPrev: true`);
+    const rawAllowPrev = isTerminal ? false : raw.allowPrev;
+    const allowPrev = isTerminal ? false : i === 0 ? false : (rawAllowPrev ?? true);
+    if (i === 0 && rawAllowPrev === true) {
+      throw new Error(`Pipeline "${pipelineId}" first node "${id}" cannot set allowPrev: true`);
     }
-    if (i === 0 && raw.prevTargets && raw.prevTargets.length > 0) {
-      throw new Error(`Pipeline "${pipelineId}" first node "${raw.id}" cannot define prevTargets`);
+    const rawPrevTargets: readonly string[] | undefined =
+      raw.executor === "terminal" ? undefined : raw.prevTargets;
+    if (i === 0 && rawPrevTargets && rawPrevTargets.length > 0) {
+      throw new Error(`Pipeline "${pipelineId}" first node "${id}" cannot define prevTargets`);
     }
 
     let prevTargets: string[] = [];
     if (allowPrev) {
-      if (raw.prevTargets !== undefined) {
-        for (const targetId of raw.prevTargets) {
+      if (rawPrevTargets !== undefined) {
+        for (const targetId of rawPrevTargets) {
           const targetIdx = nodeIndexById.get(targetId);
           if (targetIdx === undefined) {
             throw new Error(
-              `Pipeline "${pipelineId}" node "${raw.id}" prevTarget "${targetId}" does not exist`,
+              `Pipeline "${pipelineId}" node "${id}" prevTarget "${targetId}" does not exist`,
             );
           }
           if (targetIdx >= i) {
             throw new Error(
-              `Pipeline "${pipelineId}" node "${raw.id}" prevTarget "${targetId}" must precede "${raw.id}"`,
+              `Pipeline "${pipelineId}" node "${id}" prevTarget "${targetId}" must precede "${id}"`,
             );
           }
         }
-        prevTargets = [...new Set(raw.prevTargets)];
+        prevTargets = Array.from(new Set<string>(rawPrevTargets));
       } else if (i > 0) {
-        prevTargets = [rawNodes[i - 1]!.id];
+        prevTargets = [rawNodes[i - 1]!.id.trim()];
       }
+    }
+
+    // Validate optional Zod input schema
+    const rawInput = "input" in raw ? raw.input : undefined;
+    let inputSchema: PipelineInputSchema | undefined;
+    let inputJsonSchema: Record<string, unknown> | undefined;
+    if (rawInput !== undefined) {
+      if (!isZodObjectSchema(rawInput)) {
+        throw new Error(
+          `Pipeline "${pipelineId}" node "${id}" input must be a z.object(...) schema`,
+        );
+      }
+      inputSchema = rawInput;
+      inputJsonSchema = toNodeInputJsonSchema(rawInput);
     }
 
     let promptPath: string | undefined;
     let promptTemplate: string | undefined;
-    let handlerPath: string | undefined;
+    let handler: PipelineNodeConfig["handler"];
+    let runtime: PipelineNodeConfig["runtime"];
+    let concurrency = 1;
+    let gate: PipelineNodeConfig["gate"] = "auto";
+    let timeoutMs: number | undefined;
+    let maxLoops = 3;
 
-    if (executor === "agent") {
-      if (!raw.prompt) {
-        throw new Error(`Pipeline "${pipelineId}" agent node "${raw.id}" requires a prompt`);
+    if (raw.executor === "agent") {
+      if (!raw.prompt?.trim()) {
+        throw new Error(`Pipeline "${pipelineId}" agent node "${id}" requires a non-empty prompt`);
       }
       const looksLikePath =
         raw.prompt.startsWith("./") ||
         raw.prompt.startsWith("../") ||
         /\.(md|txt)$/i.test(raw.prompt);
+      let resolvedPromptTemplate: string;
       if (looksLikePath) {
-        const resolved = path.resolve(pipelineDir, raw.prompt);
-        assertInsideRoot(projectRoot, resolved, `prompt path for node "${raw.id}"`);
-        if (!existsSync(resolved)) {
+        const resolvedPrompt = path.resolve(pipelineDir, raw.prompt);
+        assertInsideRoot(projectRoot, resolvedPrompt, `prompt path for node "${id}"`);
+        if (!existsSync(resolvedPrompt)) {
           throw new Error(
-            `Pipeline "${pipelineId}" node "${raw.id}" prompt file not found: ${resolved}`,
+            `Pipeline "${pipelineId}" node "${id}" prompt file not found: ${resolvedPrompt}`,
           );
         }
-        promptPath = resolved;
-        promptTemplate = await readFile(resolved, "utf8");
+        promptPath = resolvedPrompt;
+        resolvedPromptTemplate = await readFile(resolvedPrompt, "utf8");
       } else {
-        promptTemplate = raw.prompt;
+        resolvedPromptTemplate = raw.prompt;
       }
+      promptTemplate = resolvedPromptTemplate;
 
-      const missingVars = findMissingProjectVars(promptTemplate, options.projectVars);
+      // Static validation: {{ data.xxx }} placeholders must match declared node input schema
+      validatePromptDataRefs(pipelineId, id, resolvedPromptTemplate, inputSchema);
+
+      const missingVars = findMissingProjectVars(resolvedPromptTemplate, options.projectVars);
       if (missingVars.length > 0) {
         options.logger?.warn("pipeline node prompt references missing project vars", {
           projectId: options.projectId,
           pipelineId,
-          nodeId: raw.id,
+          nodeId: id,
           missingVars,
         });
       }
-    } else if (executor === "ts") {
-      if (!raw.handler) {
-        throw new Error(`Pipeline "${pipelineId}" ts node "${raw.id}" requires a handler path`);
+
+      if (raw.runtime !== undefined) {
+        const parsedRuntime = nodeRuntimeSchema.safeParse(raw.runtime);
+        if (!parsedRuntime.success) {
+          throw new Error(`Pipeline "${pipelineId}" node "${id}" has invalid runtime config`);
+        }
+        runtime = parsedRuntime.data;
       }
-      const resolved = path.resolve(pipelineDir, raw.handler);
-      assertInsideRoot(projectRoot, resolved, `handler path for node "${raw.id}"`);
-      if (!existsSync(resolved)) {
-        throw new Error(
-          `Pipeline "${pipelineId}" node "${raw.id}" handler file not found: ${resolved}`,
-        );
+      concurrency = validateConcurrency(pipelineId, id, raw.concurrency ?? 1);
+      gate = raw.gate ?? "auto";
+      timeoutMs = validateTimeoutMs(pipelineId, id, raw.timeoutMs);
+      maxLoops = validateMaxLoops(pipelineId, id, raw.maxLoops ?? 3);
+    } else if (raw.executor === "ts") {
+      if (typeof raw.run !== "function") {
+        throw new Error(`Pipeline "${pipelineId}" code node "${id}" requires a run function`);
       }
-      handlerPath = resolved;
+      handler = raw.run;
+      concurrency = validateConcurrency(pipelineId, id, raw.concurrency ?? 1);
+      gate = raw.gate ?? "auto";
+      timeoutMs = validateTimeoutMs(pipelineId, id, raw.timeoutMs);
+      maxLoops = validateMaxLoops(pipelineId, id, raw.maxLoops ?? 3);
+    } else if (raw.executor === "human") {
+      gate = "manual";
+      maxLoops = validateMaxLoops(pipelineId, id, raw.maxLoops ?? 3);
     }
 
     nodes.push({
-      id: raw.id,
-      name: raw.name,
-      executor,
+      id,
+      name: nodeName,
+      executor: raw.executor,
       terminal: isTerminal,
       ...(raw.description !== undefined ? { description: raw.description } : {}),
       ...(promptPath !== undefined ? { promptPath } : {}),
       ...(promptTemplate !== undefined ? { promptTemplate } : {}),
-      ...(handlerPath !== undefined ? { handlerPath } : {}),
-      ...(raw.runtime !== undefined ? { runtime: raw.runtime } : {}),
-      concurrency: isTerminal || executor === "human" ? 0 : (raw.concurrency ?? 2),
-      gate: executor === "human" ? "manual" : (raw.gate ?? "auto"),
-      allowPrev: allowPrev && prevTargets.length > 0,
+      ...(handler !== undefined ? { handler } : {}),
+      ...(inputSchema !== undefined ? { inputSchema } : {}),
+      ...(inputJsonSchema !== undefined ? { inputJsonSchema } : {}),
+      ...(runtime !== undefined ? { runtime } : {}),
+      concurrency,
+      gate,
+      allowPrev,
       prevTargets,
-      maxLoops: raw.maxLoops ?? 3,
-      ...(raw.timeoutMs !== undefined ? { timeoutMs: raw.timeoutMs } : {}),
+      maxLoops,
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     });
   }
+
+  const snapshot = toNodesSnapshot(nodes);
+  const topologyHash = computeTopologyHash(snapshot);
 
   return {
     projectId: options.projectId,
     id: pipelineId,
-    name: data.name,
-    ...(data.description !== undefined ? { description: data.description } : {}),
-    enabled: data.enabled,
-    notifyOn: data.notifyOn ?? DEFAULT_NOTIFY_ON,
+    name,
+    ...(blueprint.description !== undefined ? { description: blueprint.description } : {}),
+    enabled: blueprint.enabled ?? true,
+    notifyOn,
     nodes,
-    filePath,
-    topologyHash: computeTopologyHash(toNodesSnapshot(nodes)),
+    filePath: path.resolve(filePath),
+    topologyHash,
   };
 }
 
-const handlerCache = new Map<string, { mtimeMs: number; handler: PipelineTsHandler }>();
-
-/**
- * Imports a TS pipeline node handler (`export default` or a named `run` export). A handler is
- * imported once per file version: every import of a new URL stays in the module registry, so the
- * file's modification time, not the call, decides when to import again.
- */
-export async function loadPipelineTsHandler(handlerPath: string): Promise<PipelineTsHandler> {
-  const { mtimeMs } = await stat(handlerPath);
-  const cached = handlerCache.get(handlerPath);
-  if (cached?.mtimeMs === mtimeMs) return cached.handler;
-
-  const url = `${pathToFileURL(handlerPath).href}?v=${mtimeMs}`;
-  const mod = (await import(url)) as Record<string, unknown>;
-  const fn = typeof mod.default === "function" ? mod.default : mod.run;
-  if (typeof fn !== "function") {
+function validateConcurrency(pipelineId: string, nodeId: string, value: number): number {
+  if (!Number.isInteger(value) || value < 1 || value > 64) {
     throw new Error(
-      `Pipeline TS handler "${handlerPath}" must export a default function or named "run" function`,
+      `Pipeline "${pipelineId}" node "${nodeId}" concurrency must be an integer between 1 and 64`,
     );
   }
-  const handler = fn as PipelineTsHandler;
-  handlerCache.set(handlerPath, { mtimeMs, handler });
-  return handler;
+  return value;
+}
+
+function validateMaxLoops(pipelineId: string, nodeId: string, value: number): number {
+  if (!Number.isInteger(value) || value < 1 || value > 100) {
+    throw new Error(
+      `Pipeline "${pipelineId}" node "${nodeId}" maxLoops must be an integer between 1 and 100`,
+    );
+  }
+  return value;
+}
+
+function validateTimeoutMs(
+  pipelineId: string,
+  nodeId: string,
+  value: number | undefined,
+): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(
+      `Pipeline "${pipelineId}" node "${nodeId}" timeoutMs must be a positive integer`,
+    );
+  }
+  return value;
+}
+
+/**
+ * Statically verifies `{{ data.xxx }}` template references in an agent node prompt against
+ * that node's declared Zod `input` schema. Fails fast at load time if a prompt references
+ * undeclared data fields without a fallback default.
+ */
+function validatePromptDataRefs(
+  pipelineId: string,
+  nodeId: string,
+  template: string,
+  inputSchema: PipelineInputSchema | undefined,
+): void {
+  const refs = extractPromptVarRefs(template, ["data"]);
+  if (refs.length === 0) return;
+
+  const declaredKeys = inputSchema ? new Set(Object.keys(inputSchema.shape)) : new Set<string>();
+  const undeclared: string[] = [];
+
+  for (const ref of refs) {
+    if (ref.hasDefault) continue;
+    if (!ref.subPath) {
+      if (!inputSchema) {
+        undeclared.push(ref.path);
+      }
+      continue;
+    }
+    const topKey = ref.subPath.split(".")[0]!;
+    if (!declaredKeys.has(topKey)) {
+      undeclared.push(ref.path);
+    }
+  }
+
+  if (undeclared.length > 0) {
+    const unique = [...new Set(undeclared)].join(", ");
+    throw new Error(
+      `Pipeline "${pipelineId}" node "${nodeId}" prompt references undeclared data fields (${unique}); declare them in the node's "input" schema or provide a fallback default`,
+    );
+  }
 }

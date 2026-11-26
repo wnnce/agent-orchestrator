@@ -10,8 +10,9 @@ import {
   type ActionCallSite,
   actionContextFor,
   actionResultText,
-  actionScopeFor,
+  resolveActionsForSite,
 } from "../action-bridge.ts";
+import type { RuntimeContext } from "../runtime.ts";
 import { ACTION_SERVER_NAME } from "./options.ts";
 
 /**
@@ -23,14 +24,22 @@ export function createActionServer(
   taskKey: string | undefined,
   getSite: () => ActionCallSite,
   actionScope?: ActionScope,
+  actionParameterOverrides?: RuntimeContext["actionParameterOverrides"],
 ): McpSdkServerConfigWithInstance | undefined {
-  const actions = actionRegistry.list(actionScopeFor(taskKey, actionScope));
+  const actions = resolveActionsForSite(actionRegistry, {
+    taskKey,
+    actionScope,
+    actionParameterOverrides,
+  });
   if (actions.length === 0) return undefined;
   return createSdkMcpServer({
     name: ACTION_SERVER_NAME,
     tools: actions.map((action) =>
       tool(action.name, action.description, inputShape(action.parameters), async (args) => {
-        const result = await actionRegistry.execute(action.name, args, actionContextFor(getSite()));
+        const site = getSite();
+        const result = await actionRegistry.execute(action.name, args, actionContextFor(site), {
+          parameterOverride: site.actionParameterOverrides?.[action.name],
+        });
         return {
           content: [{ type: "text", text: actionResultText(result) }],
           isError: !result.success,

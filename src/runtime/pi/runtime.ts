@@ -256,6 +256,7 @@ export class PiRuntime implements AgentRuntime {
         turnId: wrapperHolder.wrapper?.currentTurnId,
         taskKey: context.taskKey,
         actionScope: context.actionScope,
+        actionParameterOverrides: context.actionParameterOverrides,
         createActionContext: context.createActionContext,
       }));
     }

@@ -156,6 +156,7 @@ export class ACPRuntime implements AgentRuntime {
       turnId: managed.activeTurn?.turnId,
       taskKey: managed.context.taskKey,
       actionScope: managed.context.actionScope,
+      actionParameterOverrides: managed.context.actionParameterOverrides,
       createActionContext: managed.context.createActionContext,
       logger: this.logger,
     }));
@@ -215,6 +216,7 @@ export class ACPRuntime implements AgentRuntime {
       turnId: managed.activeTurn?.turnId,
       taskKey: managed.context.taskKey,
       actionScope: managed.context.actionScope,
+      actionParameterOverrides: managed.context.actionParameterOverrides,
       createActionContext: managed.context.createActionContext,
       logger: this.logger,
     }));

@@ -10,10 +10,10 @@ import type {
   PipelineNodeConfig,
   PipelineNodeRunRecord,
   PipelineNodeSnapshot,
+  PipelineReworkInfo,
   PipelineRunRecord,
   PipelineStepCacheEntry,
   PipelineStepState,
-  PipelineTsHandler,
   PipelineTsResult,
   PipelineTsRunContext,
   PipelineWaitStateEntry,
@@ -45,7 +45,6 @@ export interface TsNodeExecution {
   readonly logger: Logger;
   readonly artifacts: ArtifactStore;
   readonly notifications: NotificationOutbox;
-  readonly resolveHandler: (handlerPath: string) => Promise<PipelineTsHandler>;
   readonly mcpClientFactory?: McpClientFactory | undefined;
 }
 
@@ -109,6 +108,24 @@ export async function runTsNode(execution: TsNodeExecution): Promise<TsNodeOutco
     if (controller.signal.aborted) throw new Error("pipeline node aborted");
   };
 
+  const upstreamAction = nodeRun.triggeredByRecordId
+    ? await store.getActionRecord(nodeRun.triggeredByRecordId)
+    : null;
+  const data = Object.freeze({ ...nodeRun.inputContext });
+  const metadata = Object.freeze({
+    ...run.metadata,
+    ...(upstreamAction?.context.metadata ?? {}),
+  });
+  const rework: PipelineReworkInfo | undefined =
+    upstreamAction &&
+    (upstreamAction.action === "pipeline_prev" || upstreamAction.action === "human_reject")
+      ? Object.freeze({
+          fromNodeId: upstreamAction.fromNodeId,
+          reason: upstreamAction.context.reason ?? "",
+          feedback: upstreamAction.context.feedback ?? "",
+        })
+      : undefined;
+
   const ctx: PipelineTsRunContext = {
     projectId: run.projectId,
     pipelineId: run.pipelineId,
@@ -118,6 +135,9 @@ export async function runTsNode(execution: TsNodeExecution): Promise<TsNodeOutco
     attempt: nodeRun.attempt,
     workdir: execution.workspacePath,
     ...(run.branchName ? { branchName: run.branchName } : {}),
+    data,
+    metadata,
+    ...(rework ? { rework } : {}),
     env,
     vars: Object.freeze({ ...(project.vars ?? {}) }),
     logger,
@@ -194,7 +214,10 @@ export async function runTsNode(execution: TsNodeExecution): Promise<TsNodeOutco
 
   let outcome: TsNodeOutcome;
   try {
-    const handler = await execution.resolveHandler(node.handlerPath!);
+    const handler = node.handler;
+    if (!handler) {
+      throw new Error(`TS pipeline node "${node.id}" has no handler function`);
+    }
     outcome = { kind: "result", result: validateTsResult(node.id, await handler(ctx)) };
   } catch (error) {
     outcome =

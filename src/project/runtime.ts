@@ -462,6 +462,7 @@ export class ProjectRuntime {
         reasoningEffort,
       },
       sessionActionScope(source, taskKey),
+      metadata,
     );
     const runtimeSession = await targetRuntime.startSession(context);
     this.boundSessions.add(sessionId);
@@ -966,6 +967,7 @@ export class ProjectRuntime {
       taskKey,
       boundRoute,
       sessionActionScope(boundRoute.source, taskKey),
+      boundRoute.metadata,
     );
     if (entity.status !== "closing") await entity.transitionTo("active");
     entity.touch();
@@ -1035,6 +1037,7 @@ export class ProjectRuntime {
         reasoningEffort: resolved ? route.reasoningEffort : undefined,
       },
       sessionActionScope(route.source, taskKey),
+      route.metadata,
     );
 
     if (previousId && requestedRuntime && !resolved) {
@@ -1165,12 +1168,30 @@ export class ProjectRuntime {
     taskKey?: string,
     runtimeOverride?: SessionRuntimeOverride,
     actionScope: ActionScope = sessionActionScope(undefined, taskKey),
+    sessionMetadata?: Record<string, unknown>,
   ): RuntimeContext {
+    const metadata = sessionMetadata ?? this.sessionManager.get(sessionId)?.toRoute().metadata;
+    let actionParameterOverrides: RuntimeContext["actionParameterOverrides"];
+    if (actionScope === "pipeline" && this.pipelineEngine) {
+      const pipelineId = typeof metadata?.pipelineId === "string" ? metadata.pipelineId : undefined;
+      const pipelineNodeId =
+        typeof metadata?.pipelineNodeId === "string" ? metadata.pipelineNodeId : undefined;
+      if (pipelineId && pipelineNodeId) {
+        const overrides = this.pipelineEngine.getActionParameterOverridesForNode(
+          pipelineId,
+          pipelineNodeId,
+        );
+        if (Object.keys(overrides).length > 0) {
+          actionParameterOverrides = overrides;
+        }
+      }
+    }
     return {
       project: this.effectiveProjectFor(runtimeOverride),
       workspacePath,
       ...(taskKey ? { taskKey } : {}),
       actionScope,
+      ...(actionParameterOverrides ? { actionParameterOverrides } : {}),
       ...(this.project.id === GLOBAL_PROJECT_ID ? { readOnly: true } : {}),
       onEvent: (event) => this.onRuntimeEvent(sessionId, event),
       createActionContext: (params) =>

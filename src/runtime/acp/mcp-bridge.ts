@@ -8,6 +8,7 @@ import {
   actionResultText,
   actionScopeFor,
   actionToJsonSchema,
+  resolveActionsForSite,
 } from "../action-bridge.ts";
 
 export const ACP_ACTION_SERVER_NAME = "orchestrator";
@@ -92,6 +93,17 @@ export class ACPMcpBridge {
     return this.server;
   }
 
+  private toolsForSite(site: ActionCallSite): MCPToolDescriptor[] {
+    if (site.actionParameterOverrides && Object.keys(site.actionParameterOverrides).length > 0) {
+      return resolveActionsForSite(this.actionRegistry, site).map((action) => ({
+        name: action.name,
+        description: action.description,
+        inputSchema: actionToJsonSchema(action.parameters),
+      }));
+    }
+    return this.toolsForScope(actionScopeFor(site.taskKey, site.actionScope));
+  }
+
   private toolsForScope(scope: ActionScope): MCPToolDescriptor[] {
     const cached = this.toolCache.get(scope);
     if (cached) return cached;
@@ -163,7 +175,7 @@ export class ACPMcpBridge {
 
       case "tools/list": {
         const site = getSite();
-        const tools = this.toolsForScope(actionScopeFor(site.taskKey, site.actionScope));
+        const tools = this.toolsForSite(site);
         return Response.json({ jsonrpc: "2.0", id, result: { tools } });
       }
 
@@ -171,8 +183,7 @@ export class ACPMcpBridge {
         const params = (body.params ?? {}) as { name?: unknown; arguments?: unknown };
         const name = typeof params.name === "string" ? params.name : "";
         const site = getSite();
-        const scope = actionScopeFor(site.taskKey, site.actionScope);
-        const allowed = this.toolsForScope(scope).some((t) => t.name === name);
+        const allowed = this.toolsForSite(site).some((t) => t.name === name);
         if (!name || !allowed) {
           return Response.json({
             jsonrpc: "2.0",
@@ -187,6 +198,7 @@ export class ACPMcpBridge {
           name,
           params.arguments ?? {},
           actionContextFor(site),
+          { parameterOverride: site.actionParameterOverrides?.[name] },
         );
         return Response.json({
           jsonrpc: "2.0",

@@ -330,6 +330,7 @@ export interface PipelineSummaryWithVersions {
   currentVersion: number;
   currentTopologyHash: string;
   nodes: PipelineNodeSnapshot[];
+  entryInputSchema?: Record<string, unknown>;
   notifyOn: PipelineRunStatus[];
   activeVersions: PipelineVersionSummary[];
 }
@@ -353,7 +354,8 @@ export interface PipelineRunRecord {
   description?: string;
   externalKey?: string;
   externalUrl?: string;
-  input: Record<string, unknown>;
+  data: Record<string, unknown>;
+  metadata: Record<string, unknown>;
   status: PipelineRunStatus;
   currentNodeId: string;
   activeNodeRunId?: string;
@@ -397,6 +399,7 @@ export interface PipelineActionContextPayload {
   targetNodeId?: string;
   artifacts?: string[];
   data?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
   humanNote?: string;
 }
 

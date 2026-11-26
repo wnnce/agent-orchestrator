@@ -1,3 +1,4 @@
+import type { z } from "zod";
 import type { ProjectConfig } from "../domain/types.ts";
 import type { ActionContext, ActionScope } from "../actions/types.ts";
 import type {
@@ -50,6 +51,11 @@ export interface RuntimeContext {
   taskKey?: string;
   /** Explicit action scope override (e.g. `"pipeline"`). Defaults to `"task"` if `taskKey` is set else `"conversation"`. */
   actionScope?: ActionScope;
+  /**
+   * Optional per-session Zod parameter schema overrides keyed by action name
+   * (e.g. tailoring `pipeline_next` to the next pipeline node's declared `input` contract).
+   */
+  actionParameterOverrides?: Readonly<Record<string, z.ZodObject<z.ZodRawShape>>>;
   /**
    * The agent may only read: no file edits and no shell commands (the global project). Each
    * runtime enforces it with its own means, e.g. a read-only sandbox or read-only tools.

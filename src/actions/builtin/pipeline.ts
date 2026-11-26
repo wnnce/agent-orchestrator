@@ -1,9 +1,43 @@
 import { z } from "zod";
 import type { PipelineEngine } from "../../pipeline/engine.ts";
-import type { PipelineActionName } from "../../pipeline/types.ts";
+import type { PipelineActionName, PipelineInputSchema } from "../../pipeline/types.ts";
 import type { ActionContext, ActionDefinition } from "../types.ts";
 
 const nonEmptyText = z.string().trim().min(1);
+const metadataSchema = z
+  .record(z.string(), z.unknown())
+  .optional()
+  .describe("Optional free-form metadata passed along without schema restrictions");
+
+/**
+ * Builds the session-specific parameter schema for `pipeline_next`.
+ * - When the next node declares an `input` schema, `data` is required and typed directly to it.
+ * - When the next node declares no `input` schema (or is terminal), `data` is omitted completely.
+ */
+export function buildPipelineNextParams(
+  nextInputSchema?: PipelineInputSchema,
+): z.ZodObject<z.ZodRawShape> {
+  const base = {
+    summary: nonEmptyText.describe("Concise conclusion summary of this node's work"),
+    content: nonEmptyText.describe(
+      "Full Markdown output or deliverable to hand off to the next node",
+    ),
+    artifacts: z
+      .array(nonEmptyText)
+      .optional()
+      .describe("Optional list of relevant file paths or artifact references"),
+    metadata: metadataSchema,
+  };
+  if (nextInputSchema) {
+    return z.object({
+      ...base,
+      data: nextInputSchema.describe(
+        "Required structured data matching the next node's declared input schema",
+      ),
+    });
+  }
+  return z.object(base);
+}
 
 const pipelineNextParams = z.object({
   summary: nonEmptyText.describe("Concise conclusion summary of this node's work"),
@@ -17,7 +51,8 @@ const pipelineNextParams = z.object({
   data: z
     .record(z.string(), z.unknown())
     .optional()
-    .describe("Optional structured JSON payload for downstream TS or Agent nodes"),
+    .describe("Structured JSON payload matching the next node's declared input schema"),
+  metadata: metadataSchema,
 });
 
 const pipelinePrevParams = z.object({
@@ -29,7 +64,8 @@ const pipelinePrevParams = z.object({
   data: z
     .record(z.string(), z.unknown())
     .optional()
-    .describe("Optional structured diagnostic data"),
+    .describe("Optional partial override merged into the target node's inherited input data"),
+  metadata: metadataSchema,
 });
 
 const pipelineRequestConfirmationParams = z.object({
@@ -39,12 +75,14 @@ const pipelineRequestConfirmationParams = z.object({
   content: z.string().optional().describe("Optional full Markdown deliverable so far"),
   artifacts: z.array(nonEmptyText).optional().describe("Optional list of file paths"),
   data: z.record(z.string(), z.unknown()).optional().describe("Optional structured data"),
+  metadata: metadataSchema,
 });
 
 const pipelineFailParams = z.object({
   reason: nonEmptyText.describe("Unrecoverable failure reason blocking progress"),
   summary: z.string().optional().describe("Optional short summary"),
   data: z.record(z.string(), z.unknown()).optional().describe("Optional diagnostic details"),
+  metadata: metadataSchema,
 });
 
 const pipelineGetContextParams = z.object({});
@@ -95,6 +133,7 @@ export const pipelineNextAction: ActionDefinition<z.infer<typeof pipelineNextPar
         content: params.content,
         artifacts: params.artifacts,
         data: params.data,
+        metadata: params.metadata,
       },
     });
   },
@@ -117,6 +156,7 @@ export const pipelinePrevAction: ActionDefinition<z.infer<typeof pipelinePrevPar
         feedback: params.feedback,
         targetNodeId: params.targetNodeId,
         data: params.data,
+        metadata: params.metadata,
       },
     });
   },
@@ -144,6 +184,7 @@ export const pipelineRequestConfirmationAction: ActionDefinition<
         content: params.content,
         artifacts: params.artifacts,
         data: params.data,
+        metadata: params.metadata,
       },
     });
   },
@@ -165,6 +206,7 @@ export const pipelineFailAction: ActionDefinition<z.infer<typeof pipelineFailPar
         reason: params.reason,
         summary: params.summary,
         data: params.data,
+        metadata: params.metadata,
       },
     });
   },

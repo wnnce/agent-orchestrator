@@ -112,6 +112,7 @@ export class ActionRegistry {
     name: string,
     rawArgs: unknown,
     context: ActionContext | CreateActionContextParams,
+    options?: { readonly parameterOverride?: z.ZodType | Record<string, unknown> | undefined },
   ): Promise<ActionResult<T>> {
     const startTime = Date.now();
 
@@ -152,8 +153,9 @@ export class ActionRegistry {
 
     // Validate parameters against Zod schema if available
     let validatedArgs: unknown = parsedArgs;
-    if (this.isZodType(action.parameters)) {
-      const result = action.parameters.safeParse(parsedArgs);
+    const effectiveParameters = options?.parameterOverride ?? action.parameters;
+    if (this.isZodType(effectiveParameters)) {
+      const result = effectiveParameters.safeParse(parsedArgs);
       if (!result.success) {
         const resultError: ActionResult<T> = {
           success: false,

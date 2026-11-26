@@ -244,12 +244,16 @@ export function PipelineRunView() {
     }
   };
 
-  const boardHref = generatePath(
+  const baseBoardHref = generatePath(
     pipelineId ? ROUTES.pipeline : ROUTES.pipelines,
     pipelineId
       ? { projectId: project.projectId, pipelineId }
       : { projectId: project.projectId },
   );
+  const boardHref =
+    pipelineId && detail?.run.pipelineVersion !== undefined
+      ? `${baseBoardHref}?version=${detail.run.pipelineVersion}`
+      : baseBoardHref;
 
   if (loading && !detail) {
     return (

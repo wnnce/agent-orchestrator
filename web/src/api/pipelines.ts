@@ -25,7 +25,8 @@ export interface StartPipelineRunParams {
   description?: string;
   externalKey?: string;
   externalUrl?: string;
-  input?: Record<string, unknown>;
+  data?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
   createdBy?: string;
 }
 
@@ -132,7 +133,12 @@ export const pipelinesApi = {
 
   async approveRun(
     runId: string,
-    params?: { humanNote?: string; actorId?: string },
+    params?: {
+      humanNote?: string;
+      data?: Record<string, unknown>;
+      metadata?: Record<string, unknown>;
+      actorId?: string;
+    },
   ): Promise<PipelineRunRecord> {
     const data = await http.post<{ run: PipelineRunRecord }>(
       `/pipeline-runs/${encodeURIComponent(runId)}/approve`,
@@ -143,7 +149,14 @@ export const pipelinesApi = {
 
   async rejectRun(
     runId: string,
-    params: { reason: string; feedback: string; targetNodeId?: string; actorId?: string },
+    params: {
+      reason: string;
+      feedback: string;
+      targetNodeId?: string;
+      data?: Record<string, unknown>;
+      metadata?: Record<string, unknown>;
+      actorId?: string;
+    },
   ): Promise<PipelineRunRecord> {
     const data = await http.post<{ run: PipelineRunRecord }>(
       `/pipeline-runs/${encodeURIComponent(runId)}/reject`,

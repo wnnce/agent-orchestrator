@@ -74,16 +74,13 @@ export function extractDerivedRunLinks(
     });
   }
 
-  for (let i = actions.length - 1; i >= 0; i--) {
-    const data = actions[i]?.context?.data;
-    if (!data || typeof data !== "object") continue;
-
-    if (!workingBranch && typeof data.branch === "string" && data.branch.trim()) {
-      workingBranch = data.branch.trim();
+  const scanPayload = (payload: Record<string, unknown> | undefined) => {
+    if (!payload || typeof payload !== "object") return;
+    if (!workingBranch && typeof payload.branch === "string" && payload.branch.trim()) {
+      workingBranch = payload.branch.trim();
     }
-
-    if (Array.isArray(data.links)) {
-      for (const item of data.links) {
+    if (Array.isArray(payload.links)) {
+      for (const item of payload.links) {
         if (item && typeof item === "object") {
           const rec = item as Record<string, unknown>;
           if (isHttpUrl(rec.url)) {
@@ -101,19 +98,25 @@ export function extractDerivedRunLinks(
         }
       }
     }
-
-    for (const [key, val] of Object.entries(data)) {
+    for (const [key, val] of Object.entries(payload)) {
       if (!isHttpUrl(val)) continue;
       const url = val.trim();
       if (seenUrls.has(url)) continue;
       seenUrls.add(url);
       links.push({
         url,
-        label: formatLinkKeyLabel(key, data),
+        label: formatLinkKeyLabel(key, payload),
         source: "action",
       });
     }
+  };
+
+  for (let i = actions.length - 1; i >= 0; i--) {
+    scanPayload(actions[i]?.context?.data);
+    scanPayload(actions[i]?.context?.metadata);
   }
+  scanPayload(run.data);
+  scanPayload(run.metadata);
 
   return {
     links,

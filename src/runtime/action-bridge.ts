@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { createActionContext } from "../actions/context.ts";
-import type { ActionContext, ActionResult, ActionScope } from "../actions/types.ts";
+import type { ActionRegistry } from "../actions/registry.ts";
+import type {
+  ActionContext,
+  ActionDefinition,
+  ActionResult,
+  ActionScope,
+} from "../actions/types.ts";
 import type { ProjectConfig } from "../domain/types.ts";
 import type { Logger } from "../observability/logger.ts";
 import type { RuntimeContext } from "./runtime.ts";
@@ -13,6 +19,7 @@ export interface ActionCallSite {
   turnId?: string | undefined;
   taskKey?: string | undefined;
   actionScope?: ActionScope | undefined;
+  actionParameterOverrides?: RuntimeContext["actionParameterOverrides"] | undefined;
   createActionContext?: RuntimeContext["createActionContext"] | undefined;
   logger?: Logger | undefined;
 }
@@ -24,6 +31,23 @@ export function actionScopeFor(
 ): ActionScope {
   if (explicitScope) return explicitScope;
   return taskKey ? "task" : "conversation";
+}
+
+/**
+ * Lists actions available to `site`, applying any per-session parameter schema overrides
+ * (such as a node-specific `pipeline_next` schema).
+ */
+export function resolveActionsForSite(
+  actionRegistry: ActionRegistry,
+  site: Pick<ActionCallSite, "taskKey" | "actionScope" | "actionParameterOverrides">,
+): ActionDefinition<unknown, unknown>[] {
+  const actions = actionRegistry.list(actionScopeFor(site.taskKey, site.actionScope));
+  const overrides = site.actionParameterOverrides;
+  if (!overrides || Object.keys(overrides).length === 0) return actions;
+  return actions.map((action) => {
+    const override = overrides[action.name];
+    return override ? { ...action, parameters: override } : action;
+  });
 }
 
 /** The ActionContext for one call, from the session's factory when it has one. */

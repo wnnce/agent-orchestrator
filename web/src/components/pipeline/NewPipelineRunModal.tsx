@@ -11,6 +11,7 @@ interface NewPipelineRunModalProps {
   projectId: string;
   pipelineId: string;
   pipelineName: string;
+  entryInputSchema?: Record<string, unknown>;
   onClose: () => void;
   onCreated: (run: PipelineRunRecord, created: boolean) => void;
 }
@@ -20,6 +21,7 @@ export function NewPipelineRunModal({
   projectId,
   pipelineId,
   pipelineName,
+  entryInputSchema,
   onClose,
   onCreated,
 }: NewPipelineRunModalProps) {
@@ -27,9 +29,22 @@ export function NewPipelineRunModal({
   const [description, setDescription] = useState("");
   const [externalKey, setExternalKey] = useState("");
   const [externalUrl, setExternalUrl] = useState("");
-  const [inputJson, setInputJson] = useState("");
-  const [jsonError, setJsonError] = useState<string | null>(null);
+  const [dataJson, setDataJson] = useState("");
+  const [metadataJson, setMetadataJson] = useState("");
+  const [dataError, setDataError] = useState<string | null>(null);
+  const [metadataError, setMetadataError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const schemaProperties =
+    entryInputSchema &&
+    typeof entryInputSchema.properties === "object" &&
+    entryInputSchema.properties !== null
+      ? Object.keys(entryInputSchema.properties as Record<string, unknown>)
+      : [];
+  const hasEntrySchema = schemaProperties.length > 0;
+  const requiredFields = Array.isArray(entryInputSchema?.required)
+    ? (entryInputSchema.required as string[])
+    : [];
 
   useEffect(() => {
     if (!open) return;
@@ -47,14 +62,39 @@ export function NewPipelineRunModal({
     setDescription("");
     setExternalKey("");
     setExternalUrl("");
-    setInputJson("");
-    setJsonError(null);
+    setDataJson("");
+    setMetadataJson("");
+    setDataError(null);
+    setMetadataError(null);
   };
 
   const handleClose = () => {
     if (submitting) return;
     resetForm();
     onClose();
+  };
+
+  const parseJsonObject = (
+    raw: string,
+    label: string,
+    setError: (msg: string | null) => void,
+  ): { ok: true; value?: Record<string, unknown> } | { ok: false } => {
+    if (!raw.trim()) {
+      setError(null);
+      return { ok: true };
+    }
+    try {
+      const parsed = JSON.parse(raw.trim());
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        setError(`${label} must be a JSON object (e.g. {"issueNumber": 42})`);
+        return { ok: false };
+      }
+      setError(null);
+      return { ok: true, value: parsed as Record<string, unknown> };
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Invalid JSON");
+      return { ok: false };
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -65,23 +105,10 @@ export function NewPipelineRunModal({
       return;
     }
 
-    let parsedInput: Record<string, unknown> | undefined;
-    if (inputJson.trim()) {
-      try {
-        const parsed = JSON.parse(inputJson.trim());
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-          setJsonError("Input must be a JSON object (e.g. {\"issueNumber\": 42})");
-          return;
-        }
-        parsedInput = parsed as Record<string, unknown>;
-        setJsonError(null);
-      } catch (err) {
-        setJsonError(err instanceof Error ? err.message : "Invalid JSON");
-        return;
-      }
-    } else {
-      setJsonError(null);
-    }
+    const parsedData = parseJsonObject(dataJson, "Data", setDataError);
+    if (!parsedData.ok) return;
+    const parsedMetadata = parseJsonObject(metadataJson, "Metadata", setMetadataError);
+    if (!parsedMetadata.ok) return;
 
     setSubmitting(true);
     try {
@@ -90,7 +117,8 @@ export function NewPipelineRunModal({
         description: description.trim() || undefined,
         externalKey: externalKey.trim() || undefined,
         externalUrl: externalUrl.trim() || undefined,
-        input: parsedInput,
+        data: parsedData.value,
+        metadata: parsedMetadata.value,
         createdBy: "studio-ui",
       });
       if (result.created) {
@@ -209,23 +237,57 @@ export function NewPipelineRunModal({
                   </div>
                 </div>
 
+                {hasEntrySchema && (
+                  <div>
+                    <label className="block text-xs font-medium text-[var(--text-primary)] mb-1.5">
+                      Entry Data{" "}
+                      {requiredFields.length > 0 ? (
+                        <span className="text-red-500">*</span>
+                      ) : (
+                        <span className="text-[var(--text-muted)] font-normal">(optional JSON)</span>
+                      )}
+                    </label>
+                    <p className="text-[11px] font-mono text-[var(--text-muted)] mb-1.5">
+                      Schema fields:{" "}
+                      {schemaProperties
+                        .map((k) => (requiredFields.includes(k) ? `${k}*` : k))
+                        .join(", ")}
+                    </p>
+                    <textarea
+                      rows={4}
+                      value={dataJson}
+                      onChange={(e) => {
+                        setDataJson(e.target.value);
+                        if (dataError) setDataError(null);
+                      }}
+                      placeholder={`{\n${schemaProperties.map((k) => `  "${k}": ""`).join(",\n")}\n}`}
+                      className="w-full px-3 py-2 rounded-[var(--radius-sm)] text-xs font-mono bg-[var(--bg-input)] border border-[var(--border-default)] focus:border-[var(--border-focus)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none transition-colors resize-y"
+                    />
+                    {dataError && (
+                      <p className="mt-1.5 text-[11px] text-red-600 dark:text-red-400 font-mono">
+                        {dataError}
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-xs font-medium text-[var(--text-primary)] mb-1.5">
-                    Input Payload <span className="text-[var(--text-muted)] font-normal">(optional JSON object)</span>
+                    Metadata <span className="text-[var(--text-muted)] font-normal">(optional free-form JSON)</span>
                   </label>
                   <textarea
-                    rows={3}
-                    value={inputJson}
+                    rows={2}
+                    value={metadataJson}
                     onChange={(e) => {
-                      setInputJson(e.target.value);
-                      if (jsonError) setJsonError(null);
+                      setMetadataJson(e.target.value);
+                      if (metadataError) setMetadataError(null);
                     }}
-                    placeholder={'{\n  "issueNumber": 42\n}'}
+                    placeholder={'{\n  "source": "studio"\n}'}
                     className="w-full px-3 py-2 rounded-[var(--radius-sm)] text-xs font-mono bg-[var(--bg-input)] border border-[var(--border-default)] focus:border-[var(--border-focus)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none transition-colors resize-y"
                   />
-                  {jsonError && (
+                  {metadataError && (
                     <p className="mt-1.5 text-[11px] text-red-600 dark:text-red-400 font-mono">
-                      {jsonError}
+                      {metadataError}
                     </p>
                   )}
                 </div>

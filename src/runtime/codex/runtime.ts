@@ -10,7 +10,12 @@ import type {
 } from "../runtime.ts";
 import { RuntimeSessionNotFoundError } from "../runtime.ts";
 import { defaultActionRegistry, ActionRegistry } from "../../actions/index.ts";
-import { actionContextFor, actionResultText, actionScopeFor } from "../action-bridge.ts";
+import {
+  actionContextFor,
+  actionResultText,
+  actionToJsonSchema,
+  resolveActionsForSite,
+} from "../action-bridge.ts";
 import { normalizeCodexNotification, notificationThreadId } from "./normalizer.ts";
 import { CodexUsageTracker } from "./usage.ts";
 import { CodexConnection } from "./connection.ts";
@@ -363,9 +368,16 @@ export class CodexRuntime implements AgentRuntime {
       serviceName: "agent-orchestrator",
     };
     // Expose orchestrator actions as Codex dynamic tools (task, pipeline, and conversation scopes differ).
-    const tools = this.actionRegistry.toCodexTools(
-      actionScopeFor(context.taskKey, context.actionScope),
-    );
+    const tools = resolveActionsForSite(this.actionRegistry, {
+      taskKey: context.taskKey,
+      actionScope: context.actionScope,
+      actionParameterOverrides: context.actionParameterOverrides,
+    }).map((action) => ({
+      type: "function" as const,
+      name: action.name,
+      description: action.description,
+      inputSchema: actionToJsonSchema(action.parameters),
+    }));
     if (tools.length > 0) params.dynamicTools = tools;
     return params;
   }
@@ -417,6 +429,7 @@ export class CodexRuntime implements AgentRuntime {
         params.tool,
         params.arguments,
         actionContext,
+        { parameterOverride: context.actionParameterOverrides?.[params.tool] },
       );
       const response: DynamicToolCallResponse = {
         success: result.success,

@@ -47,7 +47,8 @@ function state(
       pipelineId: "delivery",
       pipelineVersion: 1,
       title: "Run",
-      input: {},
+      data: {},
+      metadata: {},
       currentNodeId: nodeId,
       status,
       workspaceStatus: "active",
@@ -134,8 +135,9 @@ describe("pipeline state machine", () => {
     expect(t.newNodeRun).toMatchObject({
       nodeId: "ci",
       triggeredByRecordId: "pact_new",
-      inputContext: { handoffFrom: "implement", context: next.context },
+      inputContext: {},
     });
+    expect(t.record?.context).toEqual(next.context);
     expect(t.effects).toEqual([{ kind: "archive_session", sessionId: "ses_1" }]);
   });
 

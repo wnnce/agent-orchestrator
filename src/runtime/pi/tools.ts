@@ -4,8 +4,8 @@ import {
   type ActionCallSite,
   actionContextFor,
   actionResultText,
-  actionScopeFor,
   actionToJsonSchema,
+  resolveActionsForSite,
 } from "../action-bridge.ts";
 
 export { actionToJsonSchema };
@@ -21,9 +21,7 @@ export function bridgeActionsToPiTools(
   getContext: ActionBridgeContextGetter,
 ): ToolDefinition[] {
   const initialSite = getContext();
-  const actions = actionRegistry.list(
-    actionScopeFor(initialSite.taskKey, initialSite.actionScope),
-  );
+  const actions = resolveActionsForSite(actionRegistry, initialSite);
 
   return actions.map((action) => {
     const jsonSchema = actionToJsonSchema(action.parameters);
@@ -35,8 +33,11 @@ export function bridgeActionsToPiTools(
       // Pi accepts plain JSON Schema here; its type expects a TypeBox schema object.
       parameters: jsonSchema as unknown as ToolDefinition["parameters"],
       execute: async (_toolCallId: string, params: unknown, signal?: AbortSignal) => {
-        const actionContext = actionContextFor(getContext(), signal);
-        const result = await actionRegistry.execute(action.name, params, actionContext);
+        const site = getContext();
+        const actionContext = actionContextFor(site, signal);
+        const result = await actionRegistry.execute(action.name, params, actionContext, {
+          parameterOverride: site.actionParameterOverrides?.[action.name],
+        });
         return {
           content: [{ type: "text" as const, text: actionResultText(result) }],
           isError: !result.success,

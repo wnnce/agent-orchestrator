@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import type { z } from "zod";
+import { buildPipelineNextParams } from "../actions/builtin/pipeline.ts";
 import type { ArtifactStore } from "../artifacts/store.ts";
 import type { ProjectConfig, SessionRoute } from "../domain/types.ts";
 import type { McpClientFactory } from "../mcp/index.ts";
@@ -17,7 +19,7 @@ import {
 } from "./context.ts";
 import { PipelineConflictError, PipelineNotFoundError, PipelineValidationError } from "./errors.ts";
 import type { PipelineEventHub } from "./hub.ts";
-import { loadPipelineTsHandler, loadProjectPipelines, toNodesSnapshot } from "./loader.ts";
+import { loadProjectPipelines, toNodesSnapshot } from "./loader.ts";
 import {
   decide,
   planNewRun,
@@ -27,6 +29,7 @@ import {
   type PipelineTransition,
 } from "./machine.ts";
 import { PipelineScheduler, type PipelineClaimResult } from "./scheduler.ts";
+import { validateNodeInputData } from "./sdk.ts";
 import { runTsNode } from "./ts-node.ts";
 import type {
   ListPipelineActionsFilter,
@@ -48,7 +51,6 @@ import type {
   PipelineRunRecord,
   PipelineStreamEventType,
   PipelineSummaryWithVersions,
-  PipelineTsHandler,
   StartPipelineRunParams,
   StartPipelineRunResult,
 } from "./types.ts";
@@ -76,7 +78,6 @@ export interface PipelineEngineDeps {
   readonly hub: PipelineEventHub;
   readonly logger: Logger;
   readonly sessions: PipelineSessionPort;
-  readonly resolveTsHandler?: ((handlerPath: string) => Promise<PipelineTsHandler>) | undefined;
   readonly mcpClientFactory?: McpClientFactory | undefined;
   /** Polls of waiting TS nodes are aligned to this window so nearby polls run together. */
   readonly minPollCoalesceMs?: number | undefined;
@@ -190,6 +191,25 @@ export class PipelineEngine {
     return this.currentVersions.get(pipelineId);
   }
 
+  /**
+   * Returns per-session action parameter overrides for an agent executing `nodeId` in `pipelineId`.
+   * Tailors `pipeline_next` natively to the next node's declared `input` schema (or omits `data`
+   * when the next node does not declare an input contract).
+   */
+  getActionParameterOverridesForNode(
+    pipelineId: string,
+    nodeId: string,
+  ): Readonly<Record<string, z.ZodObject<z.ZodRawShape>>> {
+    const def = this.definitions.get(pipelineId);
+    if (!def) return {};
+    const index = def.nodes.findIndex((n) => n.id === nodeId);
+    if (index < 0) return {};
+    const nextNode = def.nodes[index + 1];
+    return {
+      pipeline_next: buildPipelineNextParams(nextNode?.inputSchema),
+    };
+  }
+
   async listPipelinesWithVersions(): Promise<PipelineSummaryWithVersions[]> {
     const { project, store } = this.deps;
     const summaries: PipelineSummaryWithVersions[] = [];
@@ -208,6 +228,7 @@ export class PipelineEngine {
         currentVersion,
         currentTopologyHash: def.topologyHash,
         nodes: toNodesSnapshot(def.nodes),
+        ...(def.nodes[0]?.inputJsonSchema ? { entryInputSchema: def.nodes[0].inputJsonSchema } : {}),
         notifyOn: def.notifyOn,
         activeVersions: revisions
           .filter((rev) => rev.version === currentVersion || countsByVersion.has(rev.version))
@@ -242,6 +263,12 @@ export class PipelineEngine {
 
     const version = this.currentVersions.get(def.id) ?? 1;
     const nodes = await this.nodesOf(def.id, version);
+    const firstNodeCfg = def.nodes[0];
+    const validatedData = validateNodeInputData(
+      firstNodeCfg?.id ?? nodes[0]!.id,
+      firstNodeCfg?.inputSchema,
+      params.data,
+    );
     const now = new Date().toISOString();
     const planned = planNewRun({
       run: {
@@ -253,7 +280,8 @@ export class PipelineEngine {
         ...(params.externalUrl ? { externalUrl: params.externalUrl } : {}),
         title: params.title.trim(),
         ...(params.description !== undefined ? { description: params.description } : {}),
-        input: params.input ?? {},
+        data: validatedData,
+        metadata: params.metadata ?? {},
         createdBy: params.createdBy?.trim() || "api",
         createdAt: now,
         updatedAt: now,
@@ -404,13 +432,20 @@ export class PipelineEngine {
 
   async approveRun(
     runId: string,
-    options?: { readonly humanNote?: string | undefined; readonly actorId?: string | undefined },
+    options?: {
+      readonly humanNote?: string | undefined;
+      readonly data?: Record<string, unknown> | undefined;
+      readonly metadata?: Record<string, unknown> | undefined;
+      readonly actorId?: string | undefined;
+    },
   ): Promise<PipelineRunRecord> {
     return this.transition(runId, {
       command: async (state) => ({
         kind: "approve",
         handoff: await resolveApprovalHandoff(this.deps.store, state.nodeRun),
         humanNote: options?.humanNote,
+        data: options?.data,
+        metadata: options?.metadata,
         actorId: options?.actorId,
       }),
     });
@@ -422,6 +457,8 @@ export class PipelineEngine {
       readonly reason: string;
       readonly feedback: string;
       readonly targetNodeId?: string | undefined;
+      readonly data?: Record<string, unknown> | undefined;
+      readonly metadata?: Record<string, unknown> | undefined;
       readonly actorId?: string | undefined;
     },
   ): Promise<PipelineRunRecord> {
@@ -438,6 +475,8 @@ export class PipelineEngine {
         reason,
         feedback,
         targetNodeId: params.targetNodeId,
+        data: params.data,
+        metadata: params.metadata,
         actorId: params.actorId,
       },
     });
@@ -506,11 +545,31 @@ export class PipelineEngine {
       }
       const command =
         typeof request.command === "function" ? await request.command(state) : request.command;
+      const def = this.definitions.get(state.run.pipelineId);
+      const nodeRuns = await this.deps.store.listNodeRuns(runId);
+      const latestDataByNodeId = new Map<string, Record<string, unknown>>();
+      for (const nr of nodeRuns) {
+        latestDataByNodeId.set(nr.nodeId, nr.inputContext);
+      }
+      const resolveNodeData = (
+        targetNodeId: string,
+        rawData: Record<string, unknown> | undefined,
+        mode: "advance" | "rework",
+      ): Record<string, unknown> => {
+        const nodeCfg = def?.nodes.find((n) => n.id === targetNodeId);
+        if (!nodeCfg?.inputSchema) return {};
+        const candidate =
+          mode === "rework"
+            ? { ...(latestDataByNodeId.get(targetNodeId) ?? {}), ...(rawData ?? {}) }
+            : rawData;
+        return validateNodeInputData(targetNodeId, nodeCfg.inputSchema, candidate);
+      };
       const now = new Date().toISOString();
       const transition = decide(state, command, {
         now,
         newRecordId: `pact_${randomUUID()}`,
         newNodeRunId: `pnr_${randomUUID()}`,
+        resolveNodeData,
       });
       if (!transition) return state.run;
 
@@ -702,6 +761,9 @@ export class PipelineEngine {
     }
 
     const nodeRun = { ...state.nodeRun, sessionId: session.sessionId };
+    const defNodes = this.definitions.get(run.pipelineId)?.nodes;
+    const defIndex = defNodes ? defNodes.findIndex((n) => n.id === node.id) : -1;
+    const nextNode = defIndex >= 0 ? defNodes?.[defIndex + 1] : undefined;
     const prompt = await buildAgentNodePrompt({
       store,
       project: this.deps.project,
@@ -709,6 +771,7 @@ export class PipelineEngine {
       nodes: state.nodes,
       nodeRun,
       node,
+      nextNode,
     });
     await this.startAgentTurn(nodeRun, session.sessionId, prompt);
   }
@@ -765,7 +828,6 @@ export class PipelineEngine {
         logger: this.deps.logger,
         artifacts: this.deps.artifacts,
         notifications: this.deps.notifications,
-        resolveHandler: this.deps.resolveTsHandler ?? loadPipelineTsHandler,
         mcpClientFactory: this.deps.mcpClientFactory,
       });
       switch (outcome.kind) {

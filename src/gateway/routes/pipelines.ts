@@ -88,6 +88,7 @@ const pipelineSummaryWithVersionsSchema = z
     currentVersion: z.number().int(),
     currentTopologyHash: z.string(),
     nodes: z.array(pipelineNodeSnapshotSchema),
+    entryInputSchema: z.record(z.string(), z.unknown()).optional(),
     notifyOn: z.array(pipelineRunStatusSchema),
     activeVersions: z.array(
       z.object({
@@ -120,7 +121,8 @@ const pipelineRunRecordSchema = z
     description: z.string().optional(),
     externalKey: z.string().optional(),
     externalUrl: z.string().optional(),
-    input: z.record(z.string(), z.unknown()),
+    data: z.record(z.string(), z.unknown()),
+    metadata: z.record(z.string(), z.unknown()),
     status: pipelineRunStatusSchema,
     currentNodeId: z.string(),
     activeNodeRunId: z.string().optional(),
@@ -226,7 +228,8 @@ const startRunBodySchema = z.object({
   description: z.string().optional(),
   externalKey: z.string().trim().min(1).optional(),
   externalUrl: z.string().trim().min(1).optional(),
-  input: z.record(z.string(), z.unknown()).optional(),
+  data: z.record(z.string(), z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   createdBy: z.string().trim().min(1).optional(),
 });
 
@@ -245,6 +248,8 @@ const listNodeLogsQuerySchema = z.object({
 
 const approveRunBodySchema = z.object({
   humanNote: z.string().optional(),
+  data: z.record(z.string(), z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   actorId: z.string().optional(),
 });
 
@@ -252,6 +257,8 @@ const rejectRunBodySchema = z.object({
   reason: z.string().trim().min(1, "reason is required"),
   feedback: z.string().trim().min(1, "feedback is required"),
   targetNodeId: z.string().trim().min(1).optional(),
+  data: z.record(z.string(), z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   actorId: z.string().optional(),
 });
 
