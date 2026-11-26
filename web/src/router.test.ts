@@ -37,6 +37,35 @@ describe("web router table", () => {
       title: "Sessions",
     });
 
+    const pipelinesIndex = matchRoutes(routes, "/demo/pipelines");
+    expect(pipelinesIndex?.at(-1)?.route.handle as RouteHandle).toEqual({
+      nav: "pipelines",
+      title: "Pipelines",
+      transitionKey: "pipelines",
+    });
+
+    const pipelineBoard = matchRoutes(routes, "/demo/pipelines/issue-to-pr");
+    expect(pipelineBoard?.at(-1)?.params).toEqual({
+      projectId: "demo",
+      pipelineId: "issue-to-pr",
+    });
+    expect(pipelineBoard?.at(-1)?.route.handle as RouteHandle).toEqual({
+      nav: "pipelines",
+      title: "Pipelines",
+      transitionKey: "pipelines",
+    });
+
+    const pipelineRun = matchRoutes(routes, "/demo/pipelines/issue-to-pr/runs/prun_123");
+    expect(pipelineRun?.at(-1)?.params).toEqual({
+      projectId: "demo",
+      pipelineId: "issue-to-pr",
+      runId: "prun_123",
+    });
+    expect(pipelineRun?.at(-1)?.route.handle as RouteHandle).toEqual({
+      nav: "pipelines",
+      title: "Pipelines",
+    });
+
     const taskExec = matchRoutes(routes, "/demo/tasks/daily/exec_1");
     expect(taskExec?.at(-1)?.params).toEqual({
       projectId: "demo",
@@ -60,6 +89,7 @@ describe("web router table", () => {
     for (const path of [
       "/demo/unknown-view",
       "/demo/sessions/ses_1/extra",
+      "/demo/pipelines/p1/runs/r1/extra",
       "/demo/tasks/t1/e1/extra",
       "/a/b/c/d",
     ]) {

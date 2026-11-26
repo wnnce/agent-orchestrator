@@ -2,6 +2,8 @@ import React from "react";
 import { createBrowserRouter, generatePath, Navigate, useParams, type RouteObject } from "react-router";
 import { SessionConversation } from "./components/session/SessionConversation";
 import { NotFoundView } from "./components/views/NotFoundView";
+import { PipelineRunView } from "./components/views/PipelineRunView";
+import { PipelinesView } from "./components/views/PipelinesView";
 import { ProjectInfoView } from "./components/views/ProjectInfoView";
 import { ScheduledJobsView } from "./components/views/ScheduledJobsView";
 import { TasksView } from "./components/views/TasksView";
@@ -66,6 +68,21 @@ export const routes: RouteObject[] = [
         path: "sessions/:sessionId",
         element: <SessionConversationRoute />,
         handle: { nav: "sessions", title: "Sessions" } satisfies RouteHandle,
+      },
+      {
+        path: "pipelines",
+        element: <PipelinesView />,
+        handle: { nav: "pipelines", title: "Pipelines", transitionKey: "pipelines" } satisfies RouteHandle,
+      },
+      {
+        path: "pipelines/:pipelineId",
+        element: <PipelinesView />,
+        handle: { nav: "pipelines", title: "Pipelines", transitionKey: "pipelines" } satisfies RouteHandle,
+      },
+      {
+        path: "pipelines/:pipelineId/runs/:runId",
+        element: <PipelineRunView />,
+        handle: { nav: "pipelines", title: "Pipelines" } satisfies RouteHandle,
       },
       {
         path: "tasks",

@@ -42,6 +42,13 @@ import { EASE_OUT_EXPO } from "../../utils/motion";
 import { ChatArea } from "../ChatArea";
 import { Inspector } from "../Inspector";
 
+export interface SessionInspectorData {
+  events: RuntimeEvent[];
+  artifacts: ArtifactRecord[];
+  session: SessionRoute | null;
+  usage: SessionUsageSummary | null;
+}
+
 export interface SessionConversationProps {
   sessionId: string;
   /** Force read-only mode (disables message composer & interrupt, e.g. for task execution playback). */
@@ -51,10 +58,13 @@ export interface SessionConversationProps {
   /**
    * "standalone" (default, Sessions page): ChatArea + collapsible right Inspector drawer.
    * "embedded" (Tasks Studio): inline top execution bar with Chat / Events / Artifacts / Info tabs.
+   * "canvas" (Pipeline Workbench): pure centered ChatArea without top bar; exposes inspector data via callback.
    */
-  mode?: "standalone" | "embedded";
+  mode?: "standalone" | "embedded" | "canvas";
   /** Optional task execution metadata shown in embedded mode or Inspector. */
   taskExecution?: TaskExecutionRecord | null;
+  /** Optional callback receiving live session inspector data (used in "canvas" mode). */
+  onInspectorDataChange?: (data: SessionInspectorData) => void;
 }
 
 function isTerminalStatus(status?: SessionRoute["status"]): boolean {
@@ -72,6 +82,7 @@ export function SessionConversation({
   readOnlyReason,
   mode = "standalone",
   taskExecution = null,
+  onInspectorDataChange,
 }: SessionConversationProps) {
   const activeProject = useCurrentProject();
   const activeProjectId = activeProject.projectId;
@@ -453,6 +464,32 @@ export function SessionConversation({
               : currentSession?.status === "failed"
                 ? "This session failed and is read-only."
                 : "This session is closed and read-only.");
+
+  useEffect(() => {
+    if (!onInspectorDataChange) return;
+    onInspectorDataChange({
+      events,
+      artifacts,
+      session: currentSession,
+      usage: sessionUsage,
+    });
+  }, [onInspectorDataChange, events, artifacts, currentSession, sessionUsage]);
+
+  if (mode === "canvas") {
+    return (
+      <div className="flex-1 flex overflow-hidden min-h-0 min-w-0 relative select-text bg-[var(--bg-canvas)]">
+        <ChatArea
+          messages={messages}
+          isRunning={isRunning}
+          isLoading={isLoadingHistory}
+          isClosed={isClosed}
+          closedReason={resolvedClosedReason}
+          onSendMessage={handleSendMessage}
+          onInterrupt={handleInterrupt}
+        />
+      </div>
+    );
+  }
 
   if (mode === "embedded") {
     const idToCopy = taskExecution?.executionId ?? sessionId;

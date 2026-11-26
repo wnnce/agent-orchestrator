@@ -1,7 +1,7 @@
 import React from "react";
 import { m } from "motion/react";
 import { NavLink } from "react-router";
-import { FolderKanban, MessagesSquare, ListTodo, Timer } from "lucide-react";
+import { FolderKanban, MessagesSquare, GitBranch, ListTodo, Timer } from "lucide-react";
 import { useCurrentRouteHandle } from "../../layouts/ProjectLayout";
 import { viewPath } from "../../routes";
 import type { StudioView } from "../../types";
@@ -22,13 +22,18 @@ export function ActivityBar({ projectId }: ActivityBarProps) {
       icon: <FolderKanban className="w-4 h-4" />,
     },
     {
+      view: "pipelines",
+      label: "Pipelines (项目流水线)",
+      icon: <GitBranch className="w-4 h-4" />,
+    },
+    {
       view: "sessions",
       label: "Sessions & Flow (会话信息与对话)",
       icon: <MessagesSquare className="w-4 h-4" />,
     },
     {
       view: "tasks",
-      label: "Tasks & Pipeline (任务与流水线)",
+      label: "Scheduled Tasks (定时任务)",
       icon: <ListTodo className="w-4 h-4" />,
     },
     {

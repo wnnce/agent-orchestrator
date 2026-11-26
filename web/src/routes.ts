@@ -6,6 +6,9 @@ export const ROUTES = {
   project: "/:projectId/project",
   sessions: "/:projectId/sessions",
   session: "/:projectId/sessions/:sessionId",
+  pipelines: "/:projectId/pipelines",
+  pipeline: "/:projectId/pipelines/:pipelineId",
+  pipelineRun: "/:projectId/pipelines/:pipelineId/runs/:runId",
   tasks: "/:projectId/tasks",
   task: "/:projectId/tasks/:taskId",
   taskExecution: "/:projectId/tasks/:taskId/:executionId",
@@ -15,12 +18,14 @@ export const ROUTES = {
 type ViewRoutePattern =
   | typeof ROUTES.project
   | typeof ROUTES.sessions
+  | typeof ROUTES.pipelines
   | typeof ROUTES.tasks
   | typeof ROUTES.jobs;
 
 const VIEW_ROUTES: Record<StudioView, ViewRoutePattern> = {
   project: ROUTES.project,
   sessions: ROUTES.sessions,
+  pipelines: ROUTES.pipelines,
   tasks: ROUTES.tasks,
   jobs: ROUTES.jobs,
 };

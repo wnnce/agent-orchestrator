@@ -1,4 +1,4 @@
-export type StudioView = "project" | "sessions" | "tasks" | "jobs";
+export type StudioView = "project" | "sessions" | "pipelines" | "tasks" | "jobs";
 export type ThemeMode = "dark" | "light" | "cyber";
 
 export interface ProjectSkillMetadata {
@@ -251,4 +251,247 @@ export interface ChatMessage {
   error?: string;
   status?: "pending" | "streaming" | "completed" | "failed" | "interrupted";
   timestamp: number;
+}
+
+// =====================================================================
+// Project Pipeline Workflow Types
+// =====================================================================
+
+export type PipelineNodeExecutorType = "agent" | "ts" | "human" | "terminal";
+export type PipelineNodeGate = "auto" | "manual";
+
+export type PipelineRunStatus =
+  | "queued"
+  | "running"
+  | "waiting"
+  | "waiting_confirmation"
+  | "failed"
+  | "completed"
+  | "cancelled";
+
+export type PipelineNodeRunStatus =
+  | "queued"
+  | "running"
+  | "waiting"
+  | "waiting_confirmation"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type PipelineWorkspaceStatus = "none" | "active" | "cleaned";
+
+export type PipelineActionName =
+  | "pipeline_next"
+  | "pipeline_prev"
+  | "pipeline_request_confirmation"
+  | "pipeline_fail"
+  | "human_approve"
+  | "human_reject"
+  | "human_retry"
+  | "human_cancel"
+  | "system_fallback"
+  | "system_loop_breaker";
+
+export type PipelineActorType = "agent" | "ts" | "human" | "system";
+
+export interface PipelineNodeSnapshot {
+  id: string;
+  name: string;
+  executor: PipelineNodeExecutorType;
+  terminal: boolean;
+  gate: PipelineNodeGate;
+  allowPrev: boolean;
+  prevTargets: string[];
+  maxLoops: number;
+}
+
+export interface PipelineRevisionRecord {
+  id?: number;
+  projectId: string;
+  pipelineId: string;
+  version: number;
+  topologyHash: string;
+  nodesSnapshot: PipelineNodeSnapshot[];
+  createdAt: string;
+}
+
+export interface PipelineVersionSummary {
+  version: number;
+  activeRunCount: number;
+  totalRunCount: number;
+  nodes: PipelineNodeSnapshot[];
+}
+
+export interface PipelineSummaryWithVersions {
+  id: string;
+  name: string;
+  description?: string;
+  enabled: boolean;
+  currentVersion: number;
+  currentTopologyHash: string;
+  nodes: PipelineNodeSnapshot[];
+  notifyOn: PipelineRunStatus[];
+  activeVersions: PipelineVersionSummary[];
+}
+
+export interface PipelineNodeOutputSummary {
+  nodeId: string;
+  attempt: number;
+  recordId: string;
+  action: PipelineActionName;
+  summary: string;
+  createdAt: string;
+}
+
+export interface PipelineRunRecord {
+  id?: number;
+  runId: string;
+  projectId: string;
+  pipelineId: string;
+  pipelineVersion: number;
+  title: string;
+  description?: string;
+  externalKey?: string;
+  externalUrl?: string;
+  input: Record<string, unknown>;
+  status: PipelineRunStatus;
+  currentNodeId: string;
+  activeNodeRunId?: string;
+  workspacePath?: string;
+  branchName?: string;
+  workspaceStatus: PipelineWorkspaceStatus;
+  loopCounts: Record<string, number>;
+  latestNodeOutputs: Record<string, PipelineNodeOutputSummary>;
+  statusSummary?: string;
+  createdBy: string;
+  stateVersion: number;
+  createdAt: string;
+  updatedAt: string;
+  finishedAt?: string;
+}
+
+export interface PipelineWaitStateEntry {
+  status: "waiting" | "done";
+  startedAt: string;
+  completedAt?: string;
+  value?: unknown;
+  summary?: string;
+}
+
+export interface PipelineStepCacheEntry {
+  value?: unknown;
+}
+
+export interface PipelineStepState {
+  steps?: Record<string, PipelineStepCacheEntry>;
+  waits?: Record<string, PipelineWaitStateEntry>;
+}
+
+export interface PipelineActionContextPayload {
+  summary?: string;
+  content?: string;
+  reason?: string;
+  feedback?: string;
+  question?: string;
+  options?: string[];
+  targetNodeId?: string;
+  artifacts?: string[];
+  data?: Record<string, unknown>;
+  humanNote?: string;
+}
+
+export interface PipelineAgentDecision {
+  action: PipelineActionName;
+  context: PipelineActionContextPayload;
+  turnId?: string;
+}
+
+export interface PipelineNodeRunRecord {
+  nodeRunId: string;
+  runId: string;
+  projectId: string;
+  pipelineId: string;
+  nodeId: string;
+  attempt: number;
+  sequence: number;
+  executorType: PipelineNodeExecutorType;
+  triggeredByRecordId?: string;
+  status: PipelineNodeRunStatus;
+  sessionId?: string;
+  inputContext: Record<string, unknown>;
+  stepState: PipelineStepState;
+  nextPollAt?: string;
+  pollCount: number;
+  agentTurnId?: string;
+  reminderSent: boolean;
+  pendingDecision?: PipelineAgentDecision;
+  outputSummary?: string;
+  finalAction?: PipelineActionName;
+  errorMessage?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  durationMs?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PipelineActionRecord {
+  id?: number;
+  recordId: string;
+  runId: string;
+  projectId: string;
+  sequence: number;
+  nodeRunId?: string;
+  nodeId: string;
+  attempt: number;
+  action: PipelineActionName;
+  actorType: PipelineActorType;
+  actorId?: string;
+  fromNodeId: string;
+  toNodeId?: string;
+  fromStatus: PipelineRunStatus;
+  toStatus: PipelineRunStatus;
+  context: PipelineActionContextPayload;
+  result: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface PipelineNodeLogRecord {
+  id?: number;
+  nodeRunId: string;
+  runId: string;
+  projectId: string;
+  sequence: number;
+  level: TaskExecutionLogLevel;
+  message: string;
+  fields?: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface PipelineRunDetail {
+  run: PipelineRunRecord;
+  revision: PipelineRevisionRecord | null;
+  nodeRuns: PipelineNodeRunRecord[];
+  actionCount: number;
+}
+
+export type PipelineStreamEventType =
+  | "pipeline.run.created"
+  | "pipeline.run.updated"
+  | "pipeline.node.updated"
+  | "pipeline.action.recorded"
+  | "pipeline.run.completed"
+  | "pipeline.run.cancelled";
+
+export interface PipelineStreamEvent {
+  id: string;
+  type: PipelineStreamEventType;
+  projectId: string;
+  pipelineId: string;
+  pipelineVersion: number;
+  runId: string;
+  nodeId: string;
+  status: PipelineRunStatus;
+  payload: Record<string, unknown>;
+  createdAt: string;
 }

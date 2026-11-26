@@ -7,9 +7,6 @@ import {
   Clock,
   Copy,
   Database,
-  Loader2,
-  RotateCw,
-  Search,
   Terminal,
 } from "lucide-react";
 import { tasksApi } from "../../api";
@@ -22,21 +19,7 @@ import type {
 import { copyToClipboard } from "../../utils/clipboard";
 import { formatDateTime, formatDuration } from "../../utils/formatters";
 import { EASE_OUT_EXPO } from "../../utils/motion";
-
-const LOG_LEVEL_BADGE: Record<TaskExecutionLogLevel, string> = {
-  debug: "text-zinc-500 dark:text-zinc-400 bg-zinc-500/10 border-zinc-500/20",
-  info: "text-sky-600 dark:text-sky-400 bg-sky-500/10 border-sky-500/25",
-  warn: "text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/25",
-  error: "text-red-600 dark:text-red-400 bg-red-500/10 border-red-500/25",
-};
-
-function formatLogTime(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  const pad2 = (n: number) => String(n).padStart(2, "0");
-  const pad3 = (n: number) => String(n).padStart(3, "0");
-  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}.${pad3(d.getMilliseconds())}`;
-}
+import { LogViewer, type LogEntry } from "../common/LogViewer";
 
 export interface TaskExecutionDetailProps {
   execution: TaskExecutionRecord;
@@ -49,12 +32,10 @@ export function TaskExecutionDetail({ execution, task }: TaskExecutionDetailProp
   const [hasMore, setHasMore] = useState(false);
   const [nextAfterSeq, setNextAfterSeq] = useState(0);
   const [level, setLevel] = useState<TaskExecutionLogLevel | "all">("all");
-  const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadedExecutionId, setLoadedExecutionId] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [copiedId, setCopiedId] = useState(false);
-  const [copiedLogs, setCopiedLogs] = useState(false);
   const loadReqIdRef = useRef(0);
 
   const taskType = (task?.type ?? "ts").toLowerCase();
@@ -115,22 +96,24 @@ export function TaskExecutionDetail({ execution, task }: TaskExecutionDetailProp
     setHasMore(false);
     setNextAfterSeq(0);
     setLevel("all");
-    setSearchQuery("");
     setActiveTab("logs");
     if (!isScriptOutput && !isActionOutput) {
       void loadLogs({ level: "all", append: false, afterSeq: 0 });
     }
   }, [execution.executionId, isScriptOutput, isActionOutput]);
 
-  const filteredLogs = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return logs;
-    return logs.filter(
-      (entry) =>
-        entry.message.toLowerCase().includes(q) ||
-        (entry.fields && JSON.stringify(entry.fields).toLowerCase().includes(q)),
-    );
-  }, [logs, searchQuery]);
+  const logEntries: LogEntry[] = useMemo(
+    () =>
+      logs.map((entry) => ({
+        key: `${entry.executionId}:${entry.sequence}`,
+        sequence: entry.sequence,
+        level: entry.level,
+        message: entry.message,
+        fields: entry.fields,
+        createdAt: entry.createdAt,
+      })),
+    [logs],
+  );
 
   const handleCopyExecutionId = async () => {
     const ok = await copyToClipboard(execution.executionId);
@@ -138,25 +121,6 @@ export function TaskExecutionDetail({ execution, task }: TaskExecutionDetailProp
       setCopiedId(true);
       setTimeout(() => setCopiedId(false), 1600);
       toast.success("已复制 Execution ID");
-    }
-  };
-
-  const handleCopyLogs = async () => {
-    const text = filteredLogs
-      .map(
-        (entry) =>
-          `${entry.createdAt} [${entry.level.toUpperCase()}] #${entry.sequence} ${entry.message}${
-            entry.fields && Object.keys(entry.fields).length > 0
-              ? ` ${JSON.stringify(entry.fields)}`
-              : ""
-          }`,
-      )
-      .join("\n");
-    const ok = await copyToClipboard(text);
-    if (ok) {
-      setCopiedLogs(true);
-      setTimeout(() => setCopiedLogs(false), 1600);
-      toast.success(`已复制 ${filteredLogs.length} 条日志`);
     }
   };
 
@@ -322,130 +286,21 @@ export function TaskExecutionDetail({ execution, task }: TaskExecutionDetailProp
             </div>
           ) : (
             <div className="flex-1 flex flex-col min-h-0 p-5">
-              <div className="flex-1 flex flex-col min-h-0 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] overflow-hidden">
-                {/* Unified Card Header: Log Filter Bar */}
-                <div className="px-4 py-2 border-b border-[var(--border-default)] bg-[var(--bg-table-header)] flex flex-wrap items-center justify-between gap-2 shrink-0">
-                  <div className="relative w-52 sm:w-64">
-                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="过滤日志关键字..."
-                      className="w-full pl-8 pr-2.5 py-1 rounded-[var(--radius-sm)] text-xs font-mono bg-[var(--bg-input)] border border-[var(--border-default)] text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-hidden focus:border-[var(--border-focus)] transition-colors"
-                    />
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-1 font-mono">
-                    {(["all", "debug", "info", "warn", "error"] as const).map((lvl) => {
-                      const active = level === lvl;
-                      return (
-                        <button
-                          key={lvl}
-                          type="button"
-                          onClick={() => {
-                            setLevel(lvl);
-                            void loadLogs({ level: lvl, append: false, afterSeq: 0 });
-                          }}
-                          className={`px-2 py-0.5 rounded-[var(--radius-xs)] text-[10px] uppercase border transition-colors cursor-pointer ${
-                            active
-                              ? "bg-[var(--primary)] text-[var(--text-inverted)] border-[var(--primary)]"
-                              : "bg-[var(--bg-surface)] text-[var(--text-muted)] border-[var(--border-default)] hover:text-[var(--text-primary)]"
-                          }`}
-                        >
-                          {lvl}
-                        </button>
-                      );
-                    })}
-
-                    <button
-                      type="button"
-                      onClick={handleCopyLogs}
-                      disabled={filteredLogs.length === 0}
-                      title="Copy visible logs"
-                      className="ml-1 px-2 py-0.5 rounded-[var(--radius-xs)] text-[10px] bg-[var(--bg-surface)] border border-[var(--border-default)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] disabled:opacity-40 cursor-pointer inline-flex items-center gap-1"
-                    >
-                      {copiedLogs ? (
-                        <Check className="w-3 h-3 text-emerald-500" />
-                      ) : (
-                        <Copy className="w-3 h-3" />
-                      )}
-                      <span>Copy</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => void loadLogs({ level, append: false, afterSeq: 0 })}
-                      disabled={loading}
-                      title="Refresh logs"
-                      className="p-1 rounded-[var(--radius-xs)] bg-[var(--bg-surface)] border border-[var(--border-default)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] disabled:opacity-40 cursor-pointer"
-                    >
-                      <RotateCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Scrollable Terminal Stream inside Card */}
-                <div className="flex-1 overflow-y-auto bg-[var(--bg-code)] font-mono">
-                  {isLoadingInitialLogs ? (
-                    <div className="h-full flex items-center justify-center gap-2 text-xs text-[var(--text-muted)] animate-delayed-fade">
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Loading logs...</span>
-                    </div>
-                  ) : filteredLogs.length === 0 ? (
-                    <div className="h-full flex flex-col items-center justify-center gap-1.5 text-xs text-[var(--text-muted)] p-8">
-                      <Terminal className="w-5 h-5 opacity-40" />
-                      <span>
-                        {logs.length === 0 ? "本次执行无日志输出" : "没有匹配当前筛选条件的日志"}
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="divide-y divide-[var(--border-subtle)]/70">
-                      {filteredLogs.map((entry) => (
-                        <div
-                          key={`${entry.executionId}:${entry.sequence}`}
-                          className="px-4 py-1.5 flex items-start gap-2.5 text-[11.5px] leading-relaxed hover:bg-[var(--bg-surface-hover)]/40"
-                        >
-                          <span className="text-[10px] text-[var(--text-muted)] opacity-60 shrink-0 w-9 text-right tabular-nums select-none">
-                            #{entry.sequence}
-                          </span>
-                          <span className="text-[10.5px] text-[var(--text-muted)] shrink-0 tabular-nums select-none">
-                            {formatLogTime(entry.createdAt)}
-                          </span>
-                          <span
-                            className={`text-[9.5px] uppercase px-1.5 py-0 rounded-[var(--radius-xs)] border shrink-0 w-12 text-center select-none ${LOG_LEVEL_BADGE[entry.level]}`}
-                          >
-                            {entry.level}
-                          </span>
-                          <div className="min-w-0 flex-1 break-words">
-                            <span className="text-[var(--text-primary)]">{entry.message}</span>
-                            {entry.fields && Object.keys(entry.fields).length > 0 && (
-                              <span className="ml-2 text-[10.5px] text-[var(--text-muted)]">
-                                {JSON.stringify(entry.fields)}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                      {hasMore && (
-                        <div className="p-3 text-center bg-[var(--bg-surface)]">
-                          <button
-                            type="button"
-                            disabled={loadingMore}
-                            onClick={() =>
-                              void loadLogs({ level, append: true, afterSeq: nextAfterSeq })
-                            }
-                            className="px-3 py-1.5 rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer disabled:opacity-50 inline-flex items-center gap-1.5"
-                          >
-                            {loadingMore && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                            <span>加载更多日志</span>
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
+              <LogViewer
+                logs={logEntries}
+                loading={isLoadingInitialLogs}
+                emptyText="本次执行无日志输出"
+                level={level}
+                onLevelChange={(nextLevel) => {
+                  setLevel(nextLevel);
+                  void loadLogs({ level: nextLevel, append: false, afterSeq: 0 });
+                }}
+                onRefresh={() => void loadLogs({ level, append: false, afterSeq: 0 })}
+                hasMore={hasMore}
+                loadingMore={loadingMore}
+                onLoadMore={() => void loadLogs({ level, append: true, afterSeq: nextAfterSeq })}
+                fillHeight
+              />
             </div>
           )
         ) : (

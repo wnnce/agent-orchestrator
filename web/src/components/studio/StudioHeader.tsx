@@ -33,7 +33,11 @@ export function StudioHeader({ project }: StudioHeaderProps) {
     refreshSessions,
     isReady,
   } = useStudio();
-  const { sessionId } = useParams<{ sessionId?: string }>();
+  const { sessionId, pipelineId, runId } = useParams<{
+    sessionId?: string;
+    pipelineId?: string;
+    runId?: string;
+  }>();
   const handle = useCurrentRouteHandle();
   const navigate = useNavigate();
 
@@ -180,6 +184,48 @@ export function StudioHeader({ project }: StudioHeaderProps) {
             {(activeSession?.status === "archived" || activeSession?.status === "closing") && (
               <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-normal text-[var(--text-muted)] bg-[var(--bg-surface-elevated)] border border-[var(--border-default)] leading-none shrink-0">
                 {activeSession.status === "archived" ? "Archived" : "Closing"}
+              </span>
+            )}
+          </div>
+        ) : activeNav === "pipelines" && pipelineId ? (
+          <div className="flex items-center gap-1.5 h-7 text-xs font-mono leading-none">
+            <Link
+              to={generatePath(ROUTES.pipelines, { projectId: project.projectId })}
+              className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer leading-none"
+            >
+              Pipelines
+            </Link>
+            <span className="text-[var(--border-strong)] text-xs font-mono select-none leading-none">
+              /
+            </span>
+            {runId ? (
+              <>
+                <Link
+                  to={generatePath(ROUTES.pipeline, {
+                    projectId: project.projectId,
+                    pipelineId,
+                  })}
+                  className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer leading-none max-w-[180px] truncate"
+                  title={pipelineId}
+                >
+                  {pipelineId}
+                </Link>
+                <span className="text-[var(--border-strong)] text-xs font-mono select-none leading-none">
+                  /
+                </span>
+                <span
+                  className="font-medium text-[var(--text-primary)] leading-none max-w-[180px] truncate"
+                  title={runId}
+                >
+                  {runId.length > 18 ? `${runId.slice(0, 14)}…` : runId}
+                </span>
+              </>
+            ) : (
+              <span
+                className="font-medium text-[var(--text-primary)] leading-none max-w-[200px] truncate"
+                title={pipelineId}
+              >
+                {pipelineId}
               </span>
             )}
           </div>
