@@ -140,14 +140,20 @@ export class ClaudeRuntime implements AgentRuntime {
           plugins,
           actionServer:
             this.actionRegistry &&
-            createActionServer(this.actionRegistry, context.taskKey, () => ({
-              project: session.context.project,
-              workspacePath: session.context.workspacePath,
-              sessionId,
-              taskKey: session.context.taskKey,
-              createActionContext: session.context.createActionContext,
-              logger: this.logger,
-            })),
+            createActionServer(
+              this.actionRegistry,
+              context.taskKey,
+              () => ({
+                project: session.context.project,
+                workspacePath: session.context.workspacePath,
+                sessionId,
+                taskKey: session.context.taskKey,
+                actionScope: session.context.actionScope,
+                createActionContext: session.context.createActionContext,
+                logger: this.logger,
+              }),
+              context.actionScope,
+            ),
           canUseTool,
           stderr: (data) => this.logger.debug("claude code stderr", { sessionId, data }),
         }),

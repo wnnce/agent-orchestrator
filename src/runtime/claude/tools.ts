@@ -5,6 +5,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import type { ActionRegistry } from "../../actions/registry.ts";
+import type { ActionScope } from "../../actions/types.ts";
 import {
   type ActionCallSite,
   actionContextFor,
@@ -21,8 +22,9 @@ export function createActionServer(
   actionRegistry: ActionRegistry,
   taskKey: string | undefined,
   getSite: () => ActionCallSite,
+  actionScope?: ActionScope,
 ): McpSdkServerConfigWithInstance | undefined {
-  const actions = actionRegistry.list(actionScopeFor(taskKey));
+  const actions = actionRegistry.list(actionScopeFor(taskKey, actionScope));
   if (actions.length === 0) return undefined;
   return createSdkMcpServer({
     name: ACTION_SERVER_NAME,

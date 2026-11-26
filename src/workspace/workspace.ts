@@ -107,6 +107,7 @@ async function refExists(repoPath: string, ref: string): Promise<boolean> {
  */
 export class WorkspaceManager {
   private readonly sessionRoot: string;
+  private readonly pipelineRoot: string;
   private readonly baseRoot: string;
   private readonly secretsRoot: string;
   private readonly inFlightBases = new Map<string, Promise<string>>();
@@ -117,8 +118,10 @@ export class WorkspaceManager {
     baseRoot?: string,
     secretsRoot?: string,
     private readonly logger = new Logger(),
+    pipelineRoot?: string,
   ) {
     this.sessionRoot = sessionRoot;
+    this.pipelineRoot = pipelineRoot ?? path.join(path.dirname(sessionRoot), "pipelines");
     this.baseRoot = baseRoot ?? path.join(path.dirname(sessionRoot), "bases");
     this.secretsRoot = secretsRoot ?? path.join(path.dirname(sessionRoot), "secrets");
   }
@@ -369,13 +372,66 @@ export class WorkspaceManager {
       if (!existsSync(agentsMdPath)) await Bun.write(agentsMdPath, DEFAULT_GLOBAL_PROMPT);
       return workspace;
     }
+    await this.ensureWorktree(project, workspace, `agent/${safe(sessionId)}`);
+    return workspace;
+  }
 
+  async removeSession(project: ProjectConfig, sessionId: string): Promise<void> {
+    if (usesSharedWorkspace(project)) return;
+    await this.removeWorktree(
+      project,
+      this.sessionPath(project, sessionId),
+      path.join(this.sessionRoot, safe(project.id), safe(sessionId)),
+    );
+  }
+
+  /** The working directory shared by all nodes of a PipelineRun. Never runs git. */
+  pipelinePath(project: ProjectConfig, runId: string): string {
+    if (usesSharedWorkspace(project)) return sharedWorkspacePath(project);
+    return path.join(this.pipelineRoot, safe(project.id), safe(runId));
+  }
+
+  /**
+   * Creates the shared workspace of a PipelineRun, a worktree on branch `pipeline/<runId>`. An
+   * existing worktree is kept as it is, so every node of the run works on the same changes.
+   */
+  async ensurePipelineWorkspace(
+    project: ProjectConfig,
+    runId: string,
+  ): Promise<{ workspacePath: string; branchName?: string | undefined }> {
+    const workspacePath = this.pipelinePath(project, runId);
+    if (usesSharedWorkspace(project)) {
+      await mkdir(workspacePath, { recursive: true, mode: 0o750 });
+      return { workspacePath };
+    }
+    const branchName = `pipeline/${safe(runId)}`;
+    const isGit = await this.ensureWorktree(project, workspacePath, branchName);
+    return isGit ? { workspacePath, branchName } : { workspacePath };
+  }
+
+  /** Removes the shared workspace of a completed or cancelled PipelineRun. */
+  async removePipelineWorkspace(project: ProjectConfig, runId: string): Promise<void> {
+    if (usesSharedWorkspace(project)) return;
+    const workspacePath = this.pipelinePath(project, runId);
+    await this.removeWorktree(project, workspacePath, workspacePath);
+  }
+
+  /**
+   * Makes `workspace` a worktree of the project's base repository on `branchName`, after running
+   * scripts/sync.sh and syncing the base. A repository without a URL gets a plain directory.
+   * Returns whether the workspace is a git worktree.
+   */
+  private async ensureWorktree(
+    project: ProjectConfig,
+    workspace: string,
+    branchName: string,
+  ): Promise<boolean> {
     const repository = project.repository!;
     await this.runSyncScript(project);
     const basePath = await this.ensureBase(project, repository);
     if (!repository.url) {
       await mkdir(workspace, { recursive: true, mode: 0o750 });
-      return workspace;
+      return false;
     }
     await this.withWorktreeLock(basePath, async () => {
       if (existsSync(path.join(workspace, ".git"))) return;
@@ -384,16 +440,21 @@ export class WorkspaceManager {
       const startPoint = (await refExists(basePath, originRef))
         ? originRef
         : repository.baseBranch;
-      const branchName = `agent/${safe(sessionId)}`;
       await run("git", ["worktree", "add", "-B", branchName, workspace, startPoint], basePath);
     });
-    return workspace;
+    return true;
   }
 
-  async removeSession(project: ProjectConfig, sessionId: string): Promise<void> {
-    if (usesSharedWorkspace(project)) return;
+  /**
+   * Unregisters the worktree at `workspace` from the base repository and deletes `directory`
+   * (the worktree itself, or the folder that contains it).
+   */
+  private async removeWorktree(
+    project: ProjectConfig,
+    workspace: string,
+    directory: string,
+  ): Promise<void> {
     const repository = project.repository!;
-    const workspace = this.sessionPath(project, sessionId);
     if (repository.url && existsSync(workspace)) {
       const basePath = this.getBasePath(project, repository);
       await this.withWorktreeLock(basePath, async () => {
@@ -401,18 +462,15 @@ export class WorkspaceManager {
           await run("git", ["worktree", "remove", "--force", workspace], basePath);
           await run("git", ["worktree", "prune"], basePath);
         } catch (error) {
-          this.logger.warn("failed to remove session worktree", {
+          this.logger.warn("failed to remove worktree", {
             projectId: project.id,
-            sessionId,
+            workspace,
             error,
           });
         }
       });
     }
-    await rm(path.join(this.sessionRoot, safe(project.id), safe(sessionId)), {
-      recursive: true,
-      force: true,
-    });
+    await rm(directory, { recursive: true, force: true });
   }
 }
 

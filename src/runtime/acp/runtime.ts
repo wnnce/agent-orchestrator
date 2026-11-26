@@ -155,6 +155,7 @@ export class ACPRuntime implements AgentRuntime {
       sessionId: managed.sessionId,
       turnId: managed.activeTurn?.turnId,
       taskKey: managed.context.taskKey,
+      actionScope: managed.context.actionScope,
       createActionContext: managed.context.createActionContext,
       logger: this.logger,
     }));
@@ -213,6 +214,7 @@ export class ACPRuntime implements AgentRuntime {
       sessionId: runtimeSessionId,
       turnId: managed.activeTurn?.turnId,
       taskKey: managed.context.taskKey,
+      actionScope: managed.context.actionScope,
       createActionContext: managed.context.createActionContext,
       logger: this.logger,
     }));
@@ -687,10 +689,14 @@ export class ACPRuntime implements AgentRuntime {
     bridgeSessionId: string,
   ): { mcpServers: McpServer[]; orchestratorTools: Set<string> } {
     const projectServers = toACPMcpServers(context.project.runtime?.mcpServers ?? []);
-    const bridgeServer = this.mcpBridge.mcpServerForSession(bridgeSessionId, context.taskKey);
+    const bridgeServer = this.mcpBridge.mcpServerForSession(
+      bridgeSessionId,
+      context.taskKey,
+      context.actionScope,
+    );
     const mcpServers = bridgeServer ? [...projectServers, bridgeServer] : projectServers;
     const orchestratorTools = bridgeServer
-      ? this.mcpBridge.toolNamesForScope(context.taskKey)
+      ? this.mcpBridge.toolNamesForScope(context.taskKey, context.actionScope)
       : new Set<string>();
     return { mcpServers, orchestratorTools };
   }

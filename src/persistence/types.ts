@@ -16,9 +16,27 @@ import type {
   TaskExecutionRecord,
   TurnRecord,
 } from "../domain/types.ts";
+import type {
+  ListPipelineActionsFilter,
+  ListPipelineNodeLogsFilter,
+  ListPipelineRunsFilter,
+  NewPipelineNodeRun,
+  PipelineActionRecord,
+  PipelineNodeLogRecord,
+  PipelineNodeRunPatch,
+  PipelineNodeRunRecord,
+  PipelineNodeRunStatus,
+  PipelineRevisionRecord,
+  PipelineRunRecord,
+  PipelineRunWorkspacePatch,
+  PipelineTransitionResult,
+  PipelineTransitionWrite,
+  PipelineVersionRunCounts,
+} from "../pipeline/types.ts";
 
 export interface ListSessionsOptions {
   includeTasks?: boolean | undefined;
+  includePipelines?: boolean | undefined;
 }
 
 export type TurnPatch = Partial<
@@ -40,6 +58,63 @@ export interface ListScheduledJobsFilter {
   projectId?: string | undefined;
   status?: ScheduledJobStatusCode | undefined;
   limit?: number | undefined;
+}
+
+/** Persistence of pipeline revisions, runs, node runs, action records and node logs. */
+export interface PipelineStore {
+  createRevision(revision: PipelineRevisionRecord): Promise<PipelineRevisionRecord>;
+  getRevision(
+    projectId: string,
+    pipelineId: string,
+    version: number,
+  ): Promise<PipelineRevisionRecord | null>;
+  getLatestRevision(projectId: string, pipelineId: string): Promise<PipelineRevisionRecord | null>;
+  listRevisions(projectId: string, pipelineId: string): Promise<PipelineRevisionRecord[]>;
+
+  /** Creates a run together with its first node run. */
+  createRun(run: PipelineRunRecord, firstNodeRun: NewPipelineNodeRun): Promise<PipelineRunRecord>;
+  getRun(runId: string): Promise<PipelineRunRecord | null>;
+  findRunByExternalKey(
+    projectId: string,
+    pipelineId: string,
+    externalKey: string,
+  ): Promise<PipelineRunRecord | null>;
+  listRuns(filter?: ListPipelineRunsFilter): Promise<PipelineRunRecord[]>;
+  countRunsByVersion(projectId: string, pipelineId: string): Promise<PipelineVersionRunCounts[]>;
+  /** Records where the run's shared workspace is; never changes the run's state. */
+  updateRunWorkspace(runId: string, patch: PipelineRunWorkspacePatch): Promise<void>;
+
+  /** Applies one state transition atomically; see `PipelineTransitionWrite`. */
+  commitTransition(write: PipelineTransitionWrite): Promise<PipelineTransitionResult>;
+
+  getNodeRun(nodeRunId: string): Promise<PipelineNodeRunRecord | null>;
+  findNodeRunBySession(sessionId: string): Promise<PipelineNodeRunRecord | null>;
+  listNodeRuns(runId: string): Promise<PipelineNodeRunRecord[]>;
+  listNodeRunsByStatus(
+    projectId: string,
+    statuses: readonly PipelineNodeRunStatus[],
+  ): Promise<PipelineNodeRunRecord[]>;
+  listDueNodeRuns(projectId: string, asOf: Date): Promise<PipelineNodeRunRecord[]>;
+  getNextPollAt(projectId: string): Promise<string | null>;
+  /** Records what a node's executor did (session, turn, step state); never changes its status. */
+  updateNodeRunProgress(
+    nodeRunId: string,
+    patch: Pick<PipelineNodeRunPatch, "sessionId" | "agentTurnId" | "stepState">,
+  ): Promise<void>;
+
+  listActionRecords(
+    runId: string,
+    filter?: ListPipelineActionsFilter,
+  ): Promise<PipelineActionRecord[]>;
+  getActionRecord(recordId: string): Promise<PipelineActionRecord | null>;
+  getLatestActionSequence(runId: string): Promise<number>;
+
+  appendNodeLogs(logs: readonly PipelineNodeLogRecord[]): Promise<void>;
+  listNodeLogs(
+    nodeRunId: string,
+    filter?: ListPipelineNodeLogsFilter,
+  ): Promise<PipelineNodeLogRecord[]>;
+  getLatestNodeLogSequence(nodeRunId: string): Promise<number>;
 }
 
 export interface Store {
@@ -99,6 +174,7 @@ export interface Store {
   ): Promise<void>;
   recordActionExecution(record: ActionExecutionRecord): Promise<void>;
   listActionExecutions(filter?: ActionExecutionFilter): Promise<ActionExecutionRecord[]>;
+  readonly pipelines: PipelineStore;
   close(): Promise<void>;
 }
 

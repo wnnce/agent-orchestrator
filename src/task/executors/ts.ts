@@ -11,6 +11,7 @@ import {
 } from "../../prompt/template.ts";
 import { TaskLogBuffer } from "../log-buffer.ts";
 import type { TaskRunContext, TsTaskHandler, TsTaskResult } from "../sdk.ts";
+import type { StartPipelineRunParams, StartPipelineRunResult } from "../../pipeline/types.ts";
 import type {
   ITaskExecutor,
   TaskDefinition,
@@ -41,6 +42,9 @@ export interface TsTaskExecutorOptions {
   readonly logMaxBatchSize?: number | undefined;
   readonly logMaxConsecutiveFailures?: number | undefined;
   readonly defaultTimeoutMs?: number | undefined;
+  readonly startPipelineRun?:
+    | ((params: StartPipelineRunParams) => Promise<StartPipelineRunResult>)
+    | undefined;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -231,6 +235,15 @@ export class TsTaskExecutor implements ITaskExecutor {
         callOptions?: { readonly timeoutMs?: number | undefined; readonly signal?: AbortSignal | undefined },
       ) => mcpPool.callTool<T>(serverName, toolName, args, callOptions),
       listMcpTools: (serverName, callOptions) => mcpPool.listTools(serverName, callOptions),
+      startPipelineRun: async (params: StartPipelineRunParams): Promise<StartPipelineRunResult> => {
+        if (!this.options.startPipelineRun) {
+          throw new Error("PipelineEngine is not configured for TS task execution");
+        }
+        return this.options.startPipelineRun({
+          ...params,
+          createdBy: params.createdBy ?? `task:${task.taskKey}`,
+        });
+      },
     };
 
     try {

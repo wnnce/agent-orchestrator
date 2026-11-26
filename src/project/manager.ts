@@ -17,10 +17,12 @@ import { SkillManager, type ProjectSkill } from "./skills.ts";
 import { GLOBAL_PROJECT_ID, createGlobalProjectConfig } from "./global.ts";
 import { SessionManager } from "../session/index.ts";
 import { ActionRegistry, defaultActionRegistry } from "../actions/index.ts";
+import { PipelineEventHub } from "../pipeline/index.ts";
 
 export class ProjectManager {
   private readonly runtimes = new Map<string, ProjectRuntime>();
   readonly eventHub: EventHub;
+  readonly pipelineEventHub = new PipelineEventHub();
   private readonly globalProject: ProjectConfig;
 
   constructor(
@@ -151,7 +153,7 @@ export class ProjectManager {
       this.logger,
       this.eventHub,
       this.sessionManager,
-      { runtimeFactory: createAgentRuntime },
+      { runtimeFactory: createAgentRuntime, pipelineEventHub: this.pipelineEventHub },
       project.id === GLOBAL_PROJECT_ID ? undefined : this.globalProject,
       undefined,
       undefined,

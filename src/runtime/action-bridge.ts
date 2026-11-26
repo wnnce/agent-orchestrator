@@ -12,12 +12,17 @@ export interface ActionCallSite {
   sessionId: string;
   turnId?: string | undefined;
   taskKey?: string | undefined;
+  actionScope?: ActionScope | undefined;
   createActionContext?: RuntimeContext["createActionContext"] | undefined;
   logger?: Logger | undefined;
 }
 
-/** Actions offered to an agent: task sessions and conversations see different sets. */
-export function actionScopeFor(taskKey: string | undefined): ActionScope {
+/** Actions offered to an agent: task, pipeline, and conversation sessions see different sets. */
+export function actionScopeFor(
+  taskKey: string | undefined,
+  explicitScope?: ActionScope,
+): ActionScope {
+  if (explicitScope) return explicitScope;
   return taskKey ? "task" : "conversation";
 }
 
@@ -29,6 +34,7 @@ export function actionContextFor(site: ActionCallSite, signal?: AbortSignal): Ac
     sessionId: site.sessionId,
     turnId: site.turnId,
     taskKey: site.taskKey,
+    scope: actionScopeFor(site.taskKey, site.actionScope),
     workspacePath: site.workspacePath,
     logger: site.logger,
     signal,

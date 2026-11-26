@@ -10,6 +10,7 @@ import type { ArtifactRecord, ProjectVarValue } from "../domain/types.ts";
 import type { McpToolCallOptions, McpToolInfo, McpToolResult } from "../mcp/index.ts";
 import type { NotificationMessage, NotificationOptions } from "../notifications/index.ts";
 import type { Logger } from "../observability/logger.ts";
+import type { StartPipelineRunParams, StartPipelineRunResult } from "../pipeline/types.ts";
 
 /**
  * Optional structured return value from a TypeScript task handler.
@@ -86,6 +87,11 @@ export interface TaskRunContext {
 
   /** List allowed tools exposed by a project-configured MCP server. */
   listMcpTools(serverName: string, options?: McpToolCallOptions): Promise<readonly McpToolInfo[]>;
+
+  /**
+   * Start (or idempotently locate via `externalKey`) a Pipeline run in the current project.
+   */
+  startPipelineRun(params: StartPipelineRunParams): Promise<StartPipelineRunResult>;
 }
 
 export type TsTaskHandler = (

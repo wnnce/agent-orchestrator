@@ -362,8 +362,10 @@ export class CodexRuntime implements AgentRuntime {
       ...this.threadOverrides(context),
       serviceName: "agent-orchestrator",
     };
-    // Expose orchestrator actions as Codex dynamic tools (task and conversation scopes differ).
-    const tools = this.actionRegistry.toCodexTools(actionScopeFor(context.taskKey));
+    // Expose orchestrator actions as Codex dynamic tools (task, pipeline, and conversation scopes differ).
+    const tools = this.actionRegistry.toCodexTools(
+      actionScopeFor(context.taskKey, context.actionScope),
+    );
     if (tools.length > 0) params.dynamicTools = tools;
     return params;
   }
@@ -400,6 +402,7 @@ export class CodexRuntime implements AgentRuntime {
       sessionId: params.threadId,
       turnId: params.turnId,
       taskKey: context.taskKey,
+      actionScope: context.actionScope,
       createActionContext: context.createActionContext,
       logger: this.logger,
     });

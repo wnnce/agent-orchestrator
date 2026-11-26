@@ -1,5 +1,5 @@
 import type { ProjectConfig } from "../domain/types.ts";
-import type { ActionContext } from "../actions/types.ts";
+import type { ActionContext, ActionScope } from "../actions/types.ts";
 import type {
   CanonicalEventType,
   CanonicalEventPayloadMap,
@@ -48,6 +48,8 @@ export interface RuntimeContext {
   project: ProjectConfig;
   workspacePath: string;
   taskKey?: string;
+  /** Explicit action scope override (e.g. `"pipeline"`). Defaults to `"task"` if `taskKey` is set else `"conversation"`. */
+  actionScope?: ActionScope;
   /**
    * The agent may only read: no file edits and no shell commands (the global project). Each
    * runtime enforces it with its own means, e.g. a read-only sandbox or read-only tools.

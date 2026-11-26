@@ -20,7 +20,10 @@ export function bridgeActionsToPiTools(
   actionRegistry: ActionRegistry,
   getContext: ActionBridgeContextGetter,
 ): ToolDefinition[] {
-  const actions = actionRegistry.list(actionScopeFor(getContext().taskKey));
+  const initialSite = getContext();
+  const actions = actionRegistry.list(
+    actionScopeFor(initialSite.taskKey, initialSite.actionScope),
+  );
 
   return actions.map((action) => {
     const jsonSchema = actionToJsonSchema(action.parameters);

@@ -58,6 +58,10 @@ import {
   type ActionContext,
   type ActionScope,
 } from "../actions/index.ts";
+import {
+  PipelineEngine,
+  PipelineEventHub,
+} from "../pipeline/index.ts";
 
 interface ActiveTurn {
   turn: TurnRecord;
@@ -75,6 +79,32 @@ export interface SessionExecutionOptions {
   scheduledJobPollIntervalMs?: number;
   /** Optional lazy factory for creating additional runtimes requested at session creation time. */
   runtimeFactory?: ((runtimeType: string) => AgentRuntime) | undefined;
+  /** Optional shared PipelineEventHub across all ProjectRuntimes. */
+  pipelineEventHub?: PipelineEventHub | undefined;
+}
+
+function toSessionRuntimeOverride(
+  config?: {
+    readonly type?: string | undefined;
+    readonly model?: string | undefined;
+    readonly reasoningEffort?: string | undefined;
+  },
+): SessionRuntimeOverride | undefined {
+  if (!config) return undefined;
+  return {
+    runtime: config.type,
+    model: config.model,
+    reasoningEffort: config.reasoningEffort,
+  };
+}
+
+/** Which actions a session's agent sees: chosen by who created the session. */
+function sessionActionScope(
+  source: string | undefined,
+  taskKey: string | undefined,
+): ActionScope {
+  if (source === "pipeline") return "pipeline";
+  return taskKey ? "task" : "conversation";
 }
 
 export class ProjectRuntime {
@@ -97,6 +127,8 @@ export class ProjectRuntime {
   readonly taskScheduler: TaskScheduler;
   readonly taskLoader: TaskLoader;
   readonly actionRegistry: ActionRegistry;
+  readonly pipelineEventHub: PipelineEventHub;
+  readonly pipelineEngine: PipelineEngine;
 
   constructor(
     readonly project: ProjectConfig,
@@ -123,22 +155,35 @@ export class ProjectRuntime {
       taskScheduler ?? new TaskScheduler(this.taskEngine, logger);
     this.taskLoader = taskLoader ?? new TaskLoader(logger);
     this.actionRegistry = actionRegistry ?? defaultActionRegistry;
+    this.pipelineEventHub = options.pipelineEventHub ?? new PipelineEventHub();
+    this.pipelineEngine = new PipelineEngine({
+      project: this.project,
+      store: this.store.pipelines,
+      workspaces: this.workspaces,
+      artifacts: this.artifactStore,
+      notifications: this.notifications,
+      hub: this.pipelineEventHub,
+      logger: this.logger,
+      sessions: {
+        create: ({ workspacePath, title, metadata, runtimeOverride }) =>
+          this.createSession(
+            { ...metadata, title },
+            "pipeline",
+            toSessionRuntimeOverride(runtimeOverride),
+            { externalWorkspacePath: workspacePath },
+          ),
+        runTurn: async (sessionId, input, turnId) => {
+          await this.enqueueTurn(sessionId, input, turnId);
+        },
+        archive: (sessionId) => this.archivePipelineSession(sessionId),
+        interrupt: (sessionId) => this.interrupt(sessionId),
+      },
+    });
     this.runtimes.set(this.runtimeName(this.runtime), this.runtime);
 
     const taskRegistry = new TaskExecutorRegistry(logger);
     const agentRunner: AgentSessionRunner = {
       createSession: async (task) => {
-        const runtimeOverride: SessionRuntimeOverride | undefined =
-          task.runtime &&
-          (task.runtime.type || task.runtime.model || task.runtime.reasoningEffort)
-            ? {
-                ...(task.runtime.type ? { runtime: task.runtime.type } : {}),
-                ...(task.runtime.model ? { model: task.runtime.model } : {}),
-                ...(task.runtime.reasoningEffort
-                  ? { reasoningEffort: task.runtime.reasoningEffort }
-                  : {}),
-              }
-            : undefined;
         const sessionRoute = await this.createSession(
           {
             title: `Task: ${task.name}`,
@@ -146,7 +191,7 @@ export class ProjectRuntime {
             taskId: task.taskId,
           },
           "task",
-          runtimeOverride,
+          toSessionRuntimeOverride(task.runtime),
         );
         return { sessionId: sessionRoute.sessionId };
       },
@@ -204,6 +249,7 @@ export class ProjectRuntime {
           getVars: () => this.project.vars,
           getProjectScope: () => buildProjectPromptScope(this.project),
           getMcpServers: () => this.project.runtime?.mcpServers,
+          startPipelineRun: (params) => this.pipelineEngine.startRun(params),
           ...(this.project.projectDir
             ? { getWorkdir: () => this.project.projectDir }
             : {}),
@@ -256,6 +302,7 @@ export class ProjectRuntime {
         taskEngine: this.taskEngine,
         eventHub: this.eventHub,
         sessionManager: this.sessionManager,
+        pipelineEngine: this.pipelineEngine,
       },
       onEmit: async (type, payload) => {
         await this.emit(
@@ -324,11 +371,20 @@ export class ProjectRuntime {
         });
       });
     }
+    if (this.project.id !== GLOBAL_PROJECT_ID) {
+      await this.pipelineEngine.start().catch((err) => {
+        this.logger.warn("failed to start pipeline engine", {
+          projectId: this.project.id,
+          error: (err as Error).message,
+        });
+      });
+    }
   }
   async stop(): Promise<void> {
     this.stopping = true;
     for (const timer of this.timers) clearInterval(timer);
     this.taskScheduler.stop();
+    await this.pipelineEngine.stop().catch(() => {});
     await this.taskEngine.drain().catch(() => {});
     await this.notifications.drain().catch(() => {});
     await Promise.allSettled([...this.admissions.values()]);
@@ -349,6 +405,7 @@ export class ProjectRuntime {
   private async reconcileSessions(): Promise<void> {
     const sessions = await this.store.listSessions(this.project.id, {
       includeTasks: true,
+      includePipelines: true,
     });
     for (const session of sessions) {
       const abandonedTask =
@@ -367,13 +424,13 @@ export class ProjectRuntime {
   }
 
   /**
-   * Creates a session. `source` records who created it and is the only thing that marks a
-   * session as a scheduled-task session (`"task"`).
+   * Creates a session. `source` records who created it (e.g. `"api"`, `"task"`, `"pipeline"`).
    */
   async createSession(
     metadata?: Record<string, unknown>,
     source = "api",
     runtimeOverride?: SessionRuntimeOverride,
+    options?: { externalWorkspacePath?: string | undefined },
   ): Promise<SessionRoute> {
     if (!this.project.repository && this.project.id !== GLOBAL_PROJECT_ID)
       throw new Error(`project ${this.project.id} has no repository`);
@@ -389,18 +446,23 @@ export class ProjectRuntime {
       explicitEffort ?? (isDefaultRuntime ? this.project.runtime?.reasoningEffort : undefined);
 
     const sessionId = `ses_${randomUUID()}`;
-    const workspacePath = await this.workspaces.ensureSessionWorkspace(
-      this.project,
-      sessionId,
-    );
+    const workspacePath =
+      options?.externalWorkspacePath ??
+      (await this.workspaces.ensureSessionWorkspace(this.project, sessionId));
 
     const taskKey =
       typeof metadata?.taskKey === "string" ? metadata.taskKey : undefined;
-    const context = this.context(workspacePath, sessionId, taskKey, {
-      runtime: runtimeName,
-      model,
-      reasoningEffort,
-    });
+    const context = this.context(
+      workspacePath,
+      sessionId,
+      taskKey,
+      {
+        runtime: runtimeName,
+        model,
+        reasoningEffort,
+      },
+      sessionActionScope(source, taskKey),
+    );
     const runtimeSession = await targetRuntime.startSession(context);
     this.boundSessions.add(sessionId);
     const route: SessionRoute = {
@@ -611,7 +673,59 @@ export class ProjectRuntime {
       if (this.admissions.get(id) === next) this.admissions.delete(id);
     }
   }
+  /**
+   * Archives a pipeline session as read-only WITHOUT deleting its shared pipeline worktree.
+   */
+  async archivePipelineSession(sessionId: string): Promise<void> {
+    const existing = await this.store.getSession(sessionId);
+    if (!existing) return;
+    if (existing.status === "archived" || existing.status === "closed") {
+      this.boundSessions.delete(sessionId);
+      return;
+    }
+    await this.admissions.get(sessionId)?.catch(() => {});
+    await this.cancelQueued(sessionId);
+    await this.stopActiveTurn(sessionId);
+    try {
+      await this.bounded(
+        this.pumps.get(sessionId) ?? Promise.resolve(),
+        "pipeline session archive timed out",
+      );
+    } catch (e) {
+      this.logger.warn("pipeline session pump wait timed out during archive", {
+        sessionId,
+        error: e,
+      });
+    }
+    const entity = await this.entity(sessionId);
+    const route = entity.toRoute();
+    try {
+      await this.releaseRuntimeSession(route);
+    } catch (e) {
+      this.logger.warn("runtime releaseSession failed during pipeline archive", {
+        sessionId,
+        error: e,
+      });
+    }
+    if (entity.status !== "archived") {
+      await entity.transitionTo("archived");
+      await entity.flush(this.store);
+    }
+    await this.emit(entity.toRoute(), "session.archived", "gateway", {
+      reason: "pipeline_node_completed",
+    });
+  }
+
   async turn(sessionId: string, input: string): Promise<TurnRecord> {
+    return this.enqueueTurn(sessionId, input);
+  }
+
+  /** `turnId` lets a caller record the turn before it can start, as the pipeline engine does. */
+  private async enqueueTurn(
+    sessionId: string,
+    input: string,
+    turnId: string = `turn_${randomUUID()}`,
+  ): Promise<TurnRecord> {
     return this.admit(sessionId, async () => {
       const entity = await this.entity(sessionId);
       if (this.stopping) throw new Error("runtime is stopping");
@@ -629,7 +743,7 @@ export class ProjectRuntime {
       if (entity.status !== "suspended") await entity.transitionTo("active");
       await entity.flush(this.store);
       const turn: TurnRecord = {
-        id: `turn_${randomUUID()}`,
+        id: turnId,
         sessionId,
         input,
         status: "queued",
@@ -846,7 +960,13 @@ export class ProjectRuntime {
       taskKey,
     );
     const boundRoute = entity.toRoute();
-    const context = this.context(workspacePath, id, taskKey, boundRoute);
+    const context = this.context(
+      workspacePath,
+      id,
+      taskKey,
+      boundRoute,
+      sessionActionScope(boundRoute.source, taskKey),
+    );
     if (entity.status !== "closing") await entity.transitionTo("active");
     entity.touch();
     await entity.flush(this.store);
@@ -905,11 +1025,17 @@ export class ProjectRuntime {
     const runtimeName = this.runtimeName(targetRuntime);
     let resetReason: "not_found" | "runtime_changed" | undefined;
     let runtimeSessionId: string | undefined;
-    const context = this.context(workspacePath, route.sessionId, taskKey, {
-      runtime: runtimeName,
-      model: resolved ? route.model : undefined,
-      reasoningEffort: resolved ? route.reasoningEffort : undefined,
-    });
+    const context = this.context(
+      workspacePath,
+      route.sessionId,
+      taskKey,
+      {
+        runtime: runtimeName,
+        model: resolved ? route.model : undefined,
+        reasoningEffort: resolved ? route.reasoningEffort : undefined,
+      },
+      sessionActionScope(route.source, taskKey),
+    );
 
     if (previousId && requestedRuntime && !resolved) {
       resetReason = "runtime_changed";
@@ -1012,6 +1138,18 @@ export class ProjectRuntime {
   }
   /** Recreates the session's worktrees when they are missing, e.g. after the data dir was cleaned. */
   private async ensureWorkspace(route: SessionRoute): Promise<string> {
+    if (route.source === "pipeline") {
+      const wsPath = route.workspacePath;
+      if (!wsPath) {
+        throw new Error(`pipeline session ${route.sessionId} has no workspacePath`);
+      }
+      try {
+        await access(wsPath, constants.F_OK);
+      } catch {
+        throw new Error(`pipeline workspace is missing or already cleaned: ${wsPath}`);
+      }
+      return wsPath;
+    }
     if (!this.workspaces.isSessionReady(this.project, route.sessionId)) {
       this.logger.warn("session workspace is missing; recreating it", {
         projectId: this.project.id,
@@ -1026,11 +1164,13 @@ export class ProjectRuntime {
     sessionId: string,
     taskKey?: string,
     runtimeOverride?: SessionRuntimeOverride,
+    actionScope: ActionScope = sessionActionScope(undefined, taskKey),
   ): RuntimeContext {
     return {
       project: this.effectiveProjectFor(runtimeOverride),
       workspacePath,
       ...(taskKey ? { taskKey } : {}),
+      actionScope,
       ...(this.project.id === GLOBAL_PROJECT_ID ? { readOnly: true } : {}),
       onEvent: (event) => this.onRuntimeEvent(sessionId, event),
       createActionContext: (params) =>
@@ -1038,6 +1178,7 @@ export class ProjectRuntime {
           sessionId,
           workspacePath,
           taskKey,
+          scope: actionScope,
           turnId: this.activeTurns.get(sessionId)?.turn.id ?? params.turnId,
           signal: params.signal,
         }),
@@ -1141,6 +1282,15 @@ export class ProjectRuntime {
   ): Promise<void> {
     if (active.settled) return;
     active.settled = true;
+    let pipelineNotification:
+      | {
+          readonly sessionId: string;
+          readonly turnId: string;
+          readonly status: "completed" | "failed" | "interrupted";
+          readonly output?: string | undefined;
+          readonly error?: string | undefined;
+        }
+      | undefined;
     try {
       const entity = await this.entity(id);
       const rawUsage =
@@ -1185,9 +1335,32 @@ export class ProjectRuntime {
           },
         );
       }
+      if (route.source === "pipeline" && !this.stopping) {
+        const storedTurn = await this.store.getTurn(active.turn.id);
+        pipelineNotification = {
+          sessionId: id,
+          turnId: active.turn.id,
+          status,
+          ...(storedTurn?.output !== undefined ? { output: storedTurn.output } : {}),
+          ...(error !== undefined ? { error } : {}),
+        };
+      }
     } finally {
       if (this.activeTurns.get(id) === active) this.activeTurns.delete(id);
       active.resolve();
+    }
+
+    if (pipelineNotification) {
+      // Reported after the turn has settled, without waiting: the engine's reaction may archive
+      // this session or queue another turn on it, and both wait for the session to become idle.
+      void this.pipelineEngine.onSessionTurnFinished(pipelineNotification).catch((err) => {
+        this.logger.error("pipeline turn completion hook failed", {
+          projectId: this.project.id,
+          sessionId: id,
+          turnId: active.turn.id,
+          error: (err as Error).message,
+        });
+      });
     }
   }
   private async emit(

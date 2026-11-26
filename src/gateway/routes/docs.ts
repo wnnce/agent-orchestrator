@@ -79,6 +79,10 @@ export function createDocsRouter(app: Hono, options: DocsRouterOptions = {}): Ho
               description: "Requested resource was not found",
               content: errorContent,
             },
+            Conflict: {
+              description: "Operation conflicts with current resource state",
+              content: errorContent,
+            },
           },
         },
       },

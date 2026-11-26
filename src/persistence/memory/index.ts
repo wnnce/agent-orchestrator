@@ -22,6 +22,7 @@ import type {
   Store,
   TurnPatch,
 } from "../types.ts";
+import { MemoryPipelineStore } from "./pipeline-store.ts";
 import { MemorySessionStore } from "./session-store.ts";
 import { MemoryTaskAuditStore } from "./task-audit-store.ts";
 import { MemoryTurnEventStore } from "./turn-event-store.ts";
@@ -31,6 +32,7 @@ export class MemoryStore implements Store {
   private readonly sessionStore = new MemorySessionStore();
   private readonly turnEventStore = new MemoryTurnEventStore();
   private readonly taskAuditStore = new MemoryTaskAuditStore();
+  readonly pipelines = new MemoryPipelineStore();
 
   get sessions(): Map<string, SessionRoute> {
     return this.sessionStore.sessions;

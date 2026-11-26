@@ -21,6 +21,7 @@ import {
   createActionsRouter,
   createScheduledJobsRouter,
   createSessionsRouter,
+  createPipelinesRouter,
   createWebhooksRouter,
 } from "./routes/index.ts";
 
@@ -161,6 +162,7 @@ export class Gateway {
         service: this.service,
       }),
     );
+    apiV1.route("/", createPipelinesRouter({ projects: this.projects, store: this.store }));
     apiV1.route("/", createWebhooksRouter({ service: this.service }));
 
     app.route(API_V1_PREFIX, apiV1);

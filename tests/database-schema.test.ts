@@ -6,7 +6,7 @@ import { NOT_DELETED, type BaseEntity, type BaseLogRecord } from "../src/domain/
 import { schema } from "../src/persistence/schema.ts";
 
 describe("database schema definition", () => {
-  test("defines the 10 active tables in Drizzle schema without legacy unused tables", () => {
+  test("defines the 15 active tables in Drizzle schema without legacy unused tables", () => {
     const tableConfigs = Object.values(schema).map((table) => getTableConfig(table));
     const tableNames = tableConfigs.map((cfg) => cfg.name).sort();
 
@@ -17,6 +17,11 @@ describe("database schema definition", () => {
         "events",
         "inbound_messages",
         "notification_deliveries",
+        "pipeline_action_records",
+        "pipeline_node_logs",
+        "pipeline_node_runs",
+        "pipeline_revisions",
+        "pipeline_runs",
         "scheduled_jobs",
         "sessions",
         "task_execution_logs",
@@ -77,6 +82,10 @@ describe("database schema definition", () => {
       expect(col!.notNull).toBe(true);
       expect(col!.default).toBe(0);
     }
+    const pipelineNodeRunsCfg = tableConfigs.find((t) => t.name === "pipeline_node_runs")!;
+    expect(pipelineNodeRunsCfg.columns.find((c) => c.name === "step_state")).toBeDefined();
+    expect(pipelineNodeRunsCfg.columns.find((c) => c.name === "next_poll_at")).toBeDefined();
+    expect(pipelineNodeRunsCfg.columns.find((c) => c.name === "poll_count")).toBeDefined();
   });
 
   test("base persistence types retain entity and append-only semantics", () => {

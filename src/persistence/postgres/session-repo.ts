@@ -61,6 +61,9 @@ export class PostgresSessionRepo {
     if (!options?.includeTasks) {
       conditions.push(ne(sessions.source, "task"));
     }
+    if (!options?.includePipelines) {
+      conditions.push(ne(sessions.source, "pipeline"));
+    }
 
     const rows = await this.db
       .select()

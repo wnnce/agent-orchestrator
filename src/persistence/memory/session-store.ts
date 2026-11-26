@@ -27,6 +27,7 @@ export class MemorySessionStore {
     for (const session of this.sessions.values()) {
       if (projectId && session.projectId !== projectId) continue;
       if (!options?.includeTasks && session.source === "task") continue;
+      if (!options?.includePipelines && session.source === "pipeline") continue;
       result.push(structuredClone(session));
     }
     return result.sort((a, b) => b.lastActiveAt.localeCompare(a.lastActiveAt));

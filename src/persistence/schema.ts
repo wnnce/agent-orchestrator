@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   bigint,
   bigserial,
+  boolean,
   index,
   integer,
   jsonb,
@@ -26,6 +27,19 @@ import {
   type TurnStatus,
   type TurnUsageDetails,
 } from "../domain/types.ts";
+import type {
+  PipelineActionContextPayload,
+  PipelineActionName,
+  PipelineAgentDecision,
+  PipelineActorType,
+  PipelineNodeExecutorType,
+  PipelineNodeOutputSummary,
+  PipelineNodeRunStatus,
+  PipelineNodeSnapshot,
+  PipelineRunStatus,
+  PipelineStepState,
+  PipelineWorkspaceStatus,
+} from "../pipeline/types.ts";
 
 export const sessions = pgTable(
   "sessions",
@@ -287,6 +301,177 @@ export const taskExecutionLogs = pgTable(
   ],
 );
 
+export const pipelineRevisions = pgTable(
+  "pipeline_revisions",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    projectId: varchar("project_id", { length: 100 }).notNull(),
+    pipelineId: varchar("pipeline_id", { length: 100 }).notNull(),
+    version: integer("version").notNull(),
+    topologyHash: varchar("topology_hash", { length: 64 }).notNull(),
+    nodesSnapshot: jsonb("nodes_snapshot").$type<PipelineNodeSnapshot[]>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("idx_pipeline_revisions_version").on(
+      table.projectId,
+      table.pipelineId,
+      table.version,
+    ),
+    index("idx_pipeline_revisions_lookup").on(
+      table.projectId,
+      table.pipelineId,
+      table.version.desc(),
+    ),
+  ],
+);
+
+export const pipelineRuns = pgTable(
+  "pipeline_runs",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    runId: varchar("run_id", { length: 100 }).notNull(),
+    projectId: varchar("project_id", { length: 100 }).notNull(),
+    pipelineId: varchar("pipeline_id", { length: 100 }).notNull(),
+    pipelineVersion: integer("pipeline_version").notNull(),
+    externalKey: varchar("external_key", { length: 255 }),
+    externalUrl: text("external_url"),
+    title: varchar("title", { length: 255 }).notNull(),
+    description: text("description"),
+    input: jsonb("input").$type<Record<string, unknown>>().notNull().default({}),
+    currentNodeId: varchar("current_node_id", { length: 100 }).notNull(),
+    status: varchar("status", { length: 40 }).$type<PipelineRunStatus>().notNull(),
+    workspacePath: text("workspace_path"),
+    branchName: varchar("branch_name", { length: 255 }),
+    workspaceStatus: varchar("workspace_status", { length: 30 })
+      .$type<PipelineWorkspaceStatus>()
+      .notNull()
+      .default("none"),
+    loopCounts: jsonb("loop_counts").$type<Record<string, number>>().notNull().default({}),
+    statusSummary: text("status_summary"),
+    activeNodeRunId: varchar("active_node_run_id", { length: 100 }),
+    latestNodeOutputs: jsonb("latest_node_outputs")
+      .$type<Record<string, PipelineNodeOutputSummary>>()
+      .notNull()
+      .default({}),
+    createdBy: varchar("created_by", { length: 100 }).notNull().default("system"),
+    stateVersion: integer("state_version").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("idx_pipeline_runs_run_id").on(table.runId),
+    uniqueIndex("idx_pipeline_runs_external_key")
+      .on(table.projectId, table.pipelineId, table.externalKey)
+      .where(sql`external_key IS NOT NULL`),
+    index("idx_pipeline_runs_board").on(
+      table.projectId,
+      table.pipelineId,
+      table.pipelineVersion,
+      table.currentNodeId,
+      table.id.desc(),
+    ),
+    index("idx_pipeline_runs_status").on(table.projectId, table.status, table.id.desc()),
+  ],
+);
+
+export const pipelineNodeRuns = pgTable(
+  "pipeline_node_runs",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    nodeRunId: varchar("node_run_id", { length: 100 }).notNull(),
+    runId: varchar("run_id", { length: 100 }).notNull(),
+    projectId: varchar("project_id", { length: 100 }).notNull(),
+    pipelineId: varchar("pipeline_id", { length: 100 }).notNull(),
+    nodeId: varchar("node_id", { length: 100 }).notNull(),
+    attempt: integer("attempt").notNull(),
+    sequence: integer("sequence").notNull(),
+    executorType: varchar("executor_type", { length: 30 })
+      .$type<PipelineNodeExecutorType>()
+      .notNull(),
+    sessionId: varchar("session_id", { length: 100 }),
+    triggeredByRecordId: varchar("triggered_by_record_id", { length: 100 }),
+    status: varchar("status", { length: 40 }).$type<PipelineNodeRunStatus>().notNull(),
+    inputContext: jsonb("input_context").$type<Record<string, unknown>>().notNull().default({}),
+    finalAction: varchar("final_action", { length: 50 }).$type<PipelineActionName>(),
+    outputSummary: text("output_summary"),
+    errorMessage: text("error_message"),
+    stepState: jsonb("step_state").$type<PipelineStepState>().notNull().default({}),
+    nextPollAt: timestamp("next_poll_at", { withTimezone: true }),
+    pollCount: integer("poll_count").notNull().default(0),
+    agentTurnId: varchar("agent_turn_id", { length: 100 }),
+    reminderSent: boolean("reminder_sent").notNull().default(false),
+    pendingDecision: jsonb("pending_decision").$type<PipelineAgentDecision>(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    durationMs: bigint("duration_ms", { mode: "number" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("idx_pipeline_node_runs_id").on(table.nodeRunId),
+    uniqueIndex("idx_pipeline_node_runs_run_seq").on(table.runId, table.sequence),
+    index("idx_pipeline_node_runs_session").on(table.sessionId),
+    // Only queued and running rows: the scheduler, restart recovery and the capacity check read
+    // these, and they stay few however much history a project collects.
+    index("idx_pipeline_node_runs_active")
+      .on(table.projectId, table.status, table.id)
+      .where(sql`status IN ('queued', 'running')`),
+    index("idx_pipeline_node_runs_poll")
+      .on(table.projectId, table.nextPollAt)
+      .where(sql`status = 'waiting' AND next_poll_at IS NOT NULL`),
+  ],
+);
+
+export const pipelineActionRecords = pgTable(
+  "pipeline_action_records",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    recordId: varchar("record_id", { length: 100 }).notNull(),
+    runId: varchar("run_id", { length: 100 }).notNull(),
+    projectId: varchar("project_id", { length: 100 }).notNull(),
+    sequence: integer("sequence").notNull(),
+    nodeRunId: varchar("node_run_id", { length: 100 }),
+    nodeId: varchar("node_id", { length: 100 }).notNull(),
+    attempt: integer("attempt").notNull(),
+    action: varchar("action", { length: 50 }).$type<PipelineActionName>().notNull(),
+    actorType: varchar("actor_type", { length: 20 }).$type<PipelineActorType>().notNull(),
+    actorId: varchar("actor_id", { length: 100 }),
+    fromNodeId: varchar("from_node_id", { length: 100 }).notNull(),
+    toNodeId: varchar("to_node_id", { length: 100 }),
+    fromStatus: varchar("from_status", { length: 40 }).$type<PipelineRunStatus>().notNull(),
+    toStatus: varchar("to_status", { length: 40 }).$type<PipelineRunStatus>().notNull(),
+    context: jsonb("context").$type<PipelineActionContextPayload>().notNull().default({}),
+    result: jsonb("result").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("idx_pipeline_action_records_id").on(table.recordId),
+    uniqueIndex("idx_pipeline_action_records_run_seq").on(table.runId, table.sequence),
+    index("idx_pipeline_action_records_node").on(table.runId, table.nodeId, table.attempt),
+  ],
+);
+
+export const pipelineNodeLogs = pgTable(
+  "pipeline_node_logs",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    nodeRunId: varchar("node_run_id", { length: 100 }).notNull(),
+    runId: varchar("run_id", { length: 100 }).notNull(),
+    projectId: varchar("project_id", { length: 100 }).notNull(),
+    sequence: integer("sequence").notNull(),
+    level: varchar("level", { length: 16 }).$type<TaskExecutionLogLevel>().notNull(),
+    message: text("message").notNull(),
+    fields: jsonb("fields").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("idx_pipeline_node_logs_run_seq").on(table.nodeRunId, table.sequence),
+    index("idx_pipeline_node_logs_run_id").on(table.runId, table.id.desc()),
+  ],
+);
+
 export const schema = {
   sessions,
   turns,
@@ -298,6 +483,11 @@ export const schema = {
   taskExecutionLogs,
   scheduledJobs,
   actionExecutions,
+  pipelineRevisions,
+  pipelineRuns,
+  pipelineNodeRuns,
+  pipelineActionRecords,
+  pipelineNodeLogs,
 };
 
 export type SessionRow = typeof sessions.$inferSelect;
@@ -313,3 +503,8 @@ export type TaskExecutionLogRow = typeof taskExecutionLogs.$inferSelect;
 export type NewTaskExecutionLogRow = typeof taskExecutionLogs.$inferInsert;
 export type ScheduledJobRow = typeof scheduledJobs.$inferSelect;
 export type ActionExecutionRow = typeof actionExecutions.$inferSelect;
+export type PipelineRevisionRow = typeof pipelineRevisions.$inferSelect;
+export type PipelineRunRow = typeof pipelineRuns.$inferSelect;
+export type PipelineNodeRunRow = typeof pipelineNodeRuns.$inferSelect;
+export type PipelineActionRecordRow = typeof pipelineActionRecords.$inferSelect;
+export type PipelineNodeLogRow = typeof pipelineNodeLogs.$inferSelect;

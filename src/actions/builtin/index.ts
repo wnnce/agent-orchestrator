@@ -3,12 +3,14 @@ export * from "./notify.ts";
 export * from "./artifact.ts";
 export * from "./scheduled-job.ts";
 export * from "./dispatch-task.ts";
+export * from "./pipeline.ts";
 
 import { updateTaskStateAction } from "./task-state.ts";
 import { sendNotificationAction } from "./notify.ts";
 import { createArtifactAction } from "./artifact.ts";
 import { scheduleJobAction, cancelJobAction } from "./scheduled-job.ts";
 import { dispatchAgentTaskAction } from "./dispatch-task.ts";
+import { pipelineActions } from "./pipeline.ts";
 import type { ActionDefinition } from "../types.ts";
 
 /**
@@ -21,4 +23,5 @@ export const builtinActions: readonly ActionDefinition<unknown, unknown>[] = [
   scheduleJobAction as ActionDefinition<unknown, unknown>,
   cancelJobAction as ActionDefinition<unknown, unknown>,
   dispatchAgentTaskAction as ActionDefinition<unknown, unknown>,
+  ...pipelineActions,
 ];

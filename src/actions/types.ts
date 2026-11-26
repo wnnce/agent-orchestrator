@@ -12,14 +12,16 @@ import type { Store } from "../persistence/store.ts";
 import type { TaskEngine } from "../task/engine.ts";
 import type { EventHub } from "../events/hub.ts";
 import type { SessionManager } from "../session/manager.ts";
+import type { PipelineEngine } from "../pipeline/engine.ts";
 
 /**
  * Action applicability scope:
  * - task: Available only in project static task execution sessions
  * - conversation: Available only in interactive chat sessions
- * - all: Available in both contexts (default)
+ * - pipeline: Available only in project pipeline agent node sessions
+ * - all: Available in all contexts (default)
  */
-export type ActionScope = "task" | "conversation" | "all";
+export type ActionScope = "task" | "conversation" | "pipeline" | "all";
 
 /**
  * Underlying system services map for dependency injection.
@@ -33,6 +35,7 @@ export interface ActionServicesMap {
   readonly taskEngine: TaskEngine;
   readonly eventHub: EventHub;
   readonly sessionManager: SessionManager;
+  readonly pipelineEngine: PipelineEngine;
 }
 
 export type ActionServiceToken = keyof ActionServicesMap;

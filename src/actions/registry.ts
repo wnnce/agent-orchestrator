@@ -249,6 +249,7 @@ export class ActionRegistry {
 }
 
 function determineCaller(context: ActionContext): string {
+  if (context.scope === "pipeline") return "pipeline";
   if (context.taskKey) return "task";
   if (context.turnId) return "model";
   if (context.scope === "conversation") return "conversation";

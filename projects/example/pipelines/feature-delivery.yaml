@@ -1,0 +1,43 @@
+# Example Pipeline Template
+# Demonstrates all four node executors: agent, ts, human, and terminal.
+
+id: feature-delivery
+name: Feature Delivery
+description: Minimal example pipeline showing design, implementation, TS verification, human approval, and completion.
+enabled: true
+
+nodes:
+  - id: design
+    name: Design
+    executor: agent
+    prompt: ./prompts/design.md
+    gate: manual
+    concurrency: 2
+
+  - id: implement
+    name: Implement
+    executor: agent
+    prompt: ./prompts/implement.md
+    gate: auto
+    concurrency: 2
+    allowPrev: true
+    prevTargets: [design]
+
+  - id: verify
+    name: Verify
+    executor: ts
+    handler: ./handlers/verify.ts
+    concurrency: 4
+    allowPrev: true
+    prevTargets: [implement]
+
+  - id: approve
+    name: Approve
+    executor: human
+    allowPrev: true
+    prevTargets: [implement]
+
+  - id: done
+    name: Done
+    executor: terminal
+    terminal: true

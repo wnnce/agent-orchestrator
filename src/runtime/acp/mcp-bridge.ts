@@ -48,16 +48,20 @@ export class ACPMcpBridge {
   }
 
   /** Lists orchestrator action names visible in this session's scope. */
-  toolNamesForScope(taskKey: string | undefined): Set<string> {
-    return new Set(this.toolsForScope(actionScopeFor(taskKey)).map((t) => t.name));
+  toolNamesForScope(taskKey: string | undefined, explicitScope?: ActionScope): Set<string> {
+    return new Set(this.toolsForScope(actionScopeFor(taskKey, explicitScope)).map((t) => t.name));
   }
 
   /**
    * Returns an ACP HTTP `McpServer` descriptor for the session, starting the bridge if needed.
    * Returns `undefined` when no actions exist for the session's scope.
    */
-  mcpServerForSession(bridgeSessionId: string, taskKey: string | undefined): McpServer | undefined {
-    if (this.toolsForScope(actionScopeFor(taskKey)).length === 0) {
+  mcpServerForSession(
+    bridgeSessionId: string,
+    taskKey: string | undefined,
+    explicitScope?: ActionScope,
+  ): McpServer | undefined {
+    if (this.toolsForScope(actionScopeFor(taskKey, explicitScope)).length === 0) {
       return undefined;
     }
     const server = this.ensureStarted();
@@ -159,7 +163,7 @@ export class ACPMcpBridge {
 
       case "tools/list": {
         const site = getSite();
-        const tools = this.toolsForScope(actionScopeFor(site.taskKey));
+        const tools = this.toolsForScope(actionScopeFor(site.taskKey, site.actionScope));
         return Response.json({ jsonrpc: "2.0", id, result: { tools } });
       }
 
@@ -167,7 +171,7 @@ export class ACPMcpBridge {
         const params = (body.params ?? {}) as { name?: unknown; arguments?: unknown };
         const name = typeof params.name === "string" ? params.name : "";
         const site = getSite();
-        const scope = actionScopeFor(site.taskKey);
+        const scope = actionScopeFor(site.taskKey, site.actionScope);
         const allowed = this.toolsForScope(scope).some((t) => t.name === name);
         if (!name || !allowed) {
           return Response.json({
