@@ -212,3 +212,11 @@ A node's `input` schema is tightly coupled to its live `prompt` (`{{ data.xxx }}
 - Adding optional or `.default(...)` fields to a node's `input` does not split the Kanban board into a new topology version and remains backwards-compatible with in-flight runs.
 - Adding a new required field to a node that an in-flight run has not entered yet is enforced by the live schema on transition (and exposed via the dynamic `pipeline_next` tool schema to the preceding agent).
 - The entry node's compiled JSON Schema is exposed as `entryInputSchema` on the live `GET /projects/:projectId/pipelines` summary for UI forms.
+
+## 9. Triggering Pipelines from Agent Conversations & Tasks
+
+Two built-in actions are exposed in `conversation` and `task` scopes (and intentionally hidden inside `pipeline` scope to avoid unintended recursive pipeline launches):
+
+- **`list_project_pipelines({ includeDisabled? })`**: Lists pipelines configured for the current project along with their stages and `entryInputSchema` (JSON Schema of `nodes[0].input`).
+- **`dispatch_pipeline_run({ pipelineId, title, description?, externalKey?, externalUrl?, data?, metadata? })`**: Starts a new run (idempotent on `externalKey`), validates `data` against `nodes[0].input`, and records `createdBy` as `session:<sessionId>` or `task:<taskKey>`.
+

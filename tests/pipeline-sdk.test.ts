@@ -644,4 +644,206 @@ export default definePipeline({
       await projectRuntime.stop();
     }
   });
+
+  it("exposes list_project_pipelines and dispatch_pipeline_run in conversation/task scopes (hidden from pipeline scope) with full schema validation & idempotency", async () => {
+    const rootDir = await makeTempDir("ao-pipe-dispatch-action-");
+    const repoDir = await createTempGitRepo(rootDir);
+    const projectDir = path.join(rootDir, "project");
+    const dataDir = path.join(rootDir, "data");
+    const artifactDir = path.join(rootDir, "artifacts");
+
+    await mkdir(path.join(projectDir, "pipelines"), { recursive: true });
+    await writeFile(
+      path.join(projectDir, "pipelines", "release.ts"),
+      `import { definePipeline, node, z } from ${JSON.stringify(SDK_PATH)};
+export default definePipeline({
+  id: "release",
+  name: "Release Flow",
+  description: "Human-gated release pipeline",
+  nodes: [
+    node.human({
+      id: "approve",
+      name: "Approve",
+      input: z.object({
+        version: z.string().min(1).describe("Release semver"),
+        dryRun: z.boolean().default(false),
+      }),
+    }),
+    node.end({ id: "done", name: "Done" }),
+  ],
+});
+`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(projectDir, "pipelines", "paused.ts"),
+      `import { definePipeline, node } from ${JSON.stringify(SDK_PATH)};
+export default definePipeline({
+  id: "paused",
+  name: "Paused Flow",
+  enabled: false,
+  nodes: [
+    node.human({ id: "wait", name: "Wait" }),
+    node.end({ id: "done", name: "Done" }),
+  ],
+});
+`,
+      "utf8",
+    );
+
+    const store = new MemoryStore();
+    const logger = new Logger({ level: "error" });
+    const actionRegistry = new ActionRegistry(logger, store);
+    actionRegistry.registerAll(builtinActions);
+
+    // Scope isolation: visible in conversation & task, hidden in pipeline
+    expect(actionRegistry.list("conversation").map((a) => a.name)).toContain("list_project_pipelines");
+    expect(actionRegistry.list("conversation").map((a) => a.name)).toContain("dispatch_pipeline_run");
+    expect(actionRegistry.list("task").map((a) => a.name)).toContain("list_project_pipelines");
+    expect(actionRegistry.list("task").map((a) => a.name)).toContain("dispatch_pipeline_run");
+    expect(actionRegistry.list("pipeline").map((a) => a.name)).not.toContain("list_project_pipelines");
+    expect(actionRegistry.list("pipeline").map((a) => a.name)).not.toContain("dispatch_pipeline_run");
+
+    const project: ProjectConfig = {
+      id: "dispatch-demo",
+      displayName: "Dispatch Demo",
+      description: "Dispatch Demo",
+      routing: {
+        projectId: "dispatch-demo",
+        displayName: "Dispatch Demo",
+        summary: "Dispatch Demo",
+        keywords: [],
+      },
+      projectDir,
+      repository: { url: repoDir, baseBranch: "main" },
+      runtime: { type: "fake" },
+    };
+
+    const workspaces = new WorkspaceManager(
+      path.join(dataDir, "projects"),
+      path.join(dataDir, "bases"),
+      path.join(dataDir, "secrets"),
+      logger,
+      path.join(dataDir, "pipelines"),
+    );
+    await workspaces.syncBase(project);
+
+    const runtime = new InspectableScriptedRuntime(actionRegistry);
+    const artifacts = new ArtifactStore(artifactDir, store);
+    const pipelineHub = new PipelineEventHub();
+    const projectRuntime = new ProjectRuntime(
+      project,
+      store,
+      runtime,
+      workspaces,
+      artifacts,
+      undefined,
+      logger,
+      undefined,
+      undefined,
+      { pipelineEventHub: pipelineHub },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      actionRegistry,
+    );
+    await projectRuntime.start();
+
+    try {
+      const convCtx = projectRuntime["createActionContext"]({
+        sessionId: "ses_chat_1",
+        workspacePath: repoDir,
+        scope: "conversation",
+      });
+
+      // 1. list_project_pipelines hides disabled by default and exposes entryInputSchema
+      const listEnabled = await actionRegistry.execute<{
+        projectId: string;
+        pipelines: Array<{ id: string; entryInputSchema?: { required?: string[] } }>;
+      }>("list_project_pipelines", {}, convCtx);
+      expect(listEnabled.success).toBe(true);
+      expect(listEnabled.data?.pipelines.map((p) => p.id)).toEqual(["release"]);
+      expect(listEnabled.data?.pipelines[0]?.entryInputSchema?.required).toContain("version");
+
+      const listAll = await actionRegistry.execute<{
+        pipelines: Array<{ id: string; enabled: boolean }>;
+      }>("list_project_pipelines", { includeDisabled: true }, convCtx);
+      expect(listAll.success).toBe(true);
+      expect(listAll.data?.pipelines.map((p) => p.id).sort()).toEqual(["paused", "release"]);
+
+      // 2. dispatch_pipeline_run fails with clear validation error when entry `data` is missing
+      const invalidDispatch = await actionRegistry.execute(
+        "dispatch_pipeline_run",
+        { pipelineId: "release", title: "Bad Release", data: {} },
+        convCtx,
+      );
+      expect(invalidDispatch.success).toBe(false);
+      expect(invalidDispatch.error).toContain("version");
+
+      // 3. Valid dispatch creates run, applies defaults, stores metadata, and sets createdBy
+      const first = await actionRegistry.execute<{
+        created: boolean;
+        runId: string;
+        status: string;
+        currentNodeId: string;
+      }>(
+        "dispatch_pipeline_run",
+        {
+          pipelineId: "release",
+          title: "Release v1.2.0",
+          externalKey: "rel:1.2.0",
+          data: { version: "1.2.0" },
+          metadata: { requestedBy: "alice" },
+        },
+        convCtx,
+      );
+      expect(first.success).toBe(true);
+      expect(first.data?.created).toBe(true);
+      expect(first.data?.status).toBe("waiting_confirmation");
+      expect(first.data?.currentNodeId).toBe("approve");
+
+      const storedRun = await store.pipelines.getRun(first.data!.runId);
+      expect(storedRun?.data).toEqual({ version: "1.2.0", dryRun: false });
+      expect(storedRun?.metadata).toEqual({ requestedBy: "alice" });
+      expect(storedRun?.createdBy).toBe("session:ses_chat_1");
+
+      // 4. Duplicate externalKey returns existing run idempotently
+      const dup = await actionRegistry.execute<{ created: boolean; runId: string }>(
+        "dispatch_pipeline_run",
+        {
+          pipelineId: "release",
+          title: "Release v1.2.0 dup",
+          externalKey: "rel:1.2.0",
+          data: { version: "1.2.0" },
+        },
+        convCtx,
+      );
+      expect(dup.success).toBe(true);
+      expect(dup.data?.created).toBe(false);
+      expect(dup.data?.runId).toBe(first.data?.runId);
+
+      // 5. Task scope sets createdBy to task:<taskKey>
+      const taskCtx = projectRuntime["createActionContext"]({
+        sessionId: "ses_task_1",
+        taskKey: "dispatch-demo:nightly",
+        workspacePath: repoDir,
+        scope: "task",
+      });
+      const fromTask = await actionRegistry.execute<{ created: boolean; runId: string }>(
+        "dispatch_pipeline_run",
+        {
+          pipelineId: "release",
+          title: "Nightly Release",
+          data: { version: "1.2.1-nightly", dryRun: true },
+        },
+        taskCtx,
+      );
+      expect(fromTask.success).toBe(true);
+      const taskRun = await store.pipelines.getRun(fromTask.data!.runId);
+      expect(taskRun?.createdBy).toBe("task:dispatch-demo:nightly");
+    } finally {
+      await projectRuntime.stop();
+    }
+  });
 });
