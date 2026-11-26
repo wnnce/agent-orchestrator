@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
-  FolderKanban,
   GitBranch,
   Wrench,
   ArrowRight,
@@ -8,25 +8,23 @@ import {
 import { generatePath, useNavigate } from "react-router";
 import { projectsApi } from "../../api";
 import { useCurrentProject } from "../../layouts/ProjectLayout";
+import { queryKeys } from "../../queries";
 import { ROUTES } from "../../routes";
-import type { ProjectSkill } from "../../types";
 
 export function ProjectInfoView() {
   const activeProject = useCurrentProject();
   const activeProjectId = activeProject.projectId;
   const navigate = useNavigate();
 
-  const [skills, setSkills] = useState<ProjectSkill[]>([]);
-  const [loadingSkills, setLoadingSkills] = useState(false);
+  const skillsQuery = useQuery({
+    queryKey: queryKeys.projectSkills(activeProjectId),
+    queryFn: () => projectsApi.listSkills(activeProjectId),
+    enabled: Boolean(activeProjectId),
+    staleTime: 60_000,
+  });
 
-  useEffect(() => {
-    if (!activeProjectId) return;
-    setLoadingSkills(true);
-    projectsApi.listSkills(activeProjectId)
-      .then(setSkills)
-      .catch((err) => console.error("Failed to fetch skills:", err))
-      .finally(() => setLoadingSkills(false));
-  }, [activeProjectId]);
+  const skills = skillsQuery.data ?? [];
+  const loadingSkills = skillsQuery.isPending;
 
   const handleEnterSessions = () => {
     navigate(generatePath(ROUTES.sessions, { projectId: activeProjectId }));

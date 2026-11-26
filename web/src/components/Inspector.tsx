@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { m } from "motion/react";
 import { toast } from "sonner";
 import {
@@ -13,11 +14,11 @@ import {
 } from "lucide-react";
 import { jobsApi, sessionsApi } from "../api";
 import { useConfirm } from "../context/ConfirmContext";
+import { queryKeys } from "../queries";
 import type {
   ArtifactRecord,
   ProjectRouting,
   RuntimeEvent,
-  ScheduledJobRecord,
   SessionRoute,
   SessionUsageSummary,
   TaskExecutionRecord,
@@ -50,10 +51,10 @@ export const Inspector: React.FC<InspectorProps> = ({
   taskExecution = null,
 }) => {
   const confirm = useConfirm();
+  const qc = useQueryClient();
   const [tab, setTab] = useState<"events" | "artifacts" | "jobs" | "info">("artifacts");
   const [expandedEvents, setExpandedEvents] = useState<Record<number, boolean>>({});
   const [filter, setFilter] = useState("");
-  const [jobs, setJobs] = useState<ScheduledJobRecord[]>([]);
   const [cancellingJobId, setCancellingJobId] = useState<string | null>(null);
 
   const visibleArtifacts = useMemo(
@@ -61,19 +62,29 @@ export const Inspector: React.FC<InspectorProps> = ({
     [artifacts],
   );
 
-  const loadSessionJobs = async () => {
-    if (!session) return;
-    try {
-      const list = await jobsApi.list({ sessionId: session.sessionId });
-      setJobs(list);
-    } catch (err) {
-      console.error("Failed to load session jobs in inspector:", err);
-    }
-  };
+  const sessionId = session?.sessionId ?? "";
+  const jobsQuery = useQuery({
+    queryKey: queryKeys.sessionJobs(sessionId),
+    queryFn: () => jobsApi.list({ sessionId }),
+    enabled: Boolean(sessionId),
+  });
+  const jobs = jobsQuery.data ?? [];
 
-  useEffect(() => {
-    loadSessionJobs();
-  }, [session?.sessionId]);
+  const cancelJobMutation = useMutation({
+    mutationFn: (jobId: string) => jobsApi.cancel(jobId),
+    onSuccess: async () => {
+      toast.success("Job cancelled successfully");
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: queryKeys.sessionJobs(sessionId) }),
+        project?.projectId
+          ? qc.invalidateQueries({ queryKey: queryKeys.scheduledJobsAll(project.projectId) })
+          : Promise.resolve(),
+      ]);
+    },
+    onError: (err: unknown) => {
+      toast.error(`Cancel failed: ${err instanceof Error ? err.message : String(err)}`);
+    },
+  });
 
   const toggleEvent = (idx: number) => {
     setExpandedEvents((prev) => ({ ...prev, [idx]: !prev[idx] }));
@@ -90,11 +101,9 @@ export const Inspector: React.FC<InspectorProps> = ({
 
     setCancellingJobId(jobId);
     try {
-      await jobsApi.cancel(jobId);
-      toast.success("Job cancelled successfully");
-      await loadSessionJobs();
-    } catch (err: any) {
-      toast.error(`Cancel failed: ${err.message || String(err)}`);
+      await cancelJobMutation.mutateAsync(jobId);
+    } catch {
+      /* toast handled by onError */
     } finally {
       setCancellingJobId(null);
     }

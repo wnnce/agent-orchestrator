@@ -58,7 +58,7 @@ function AnimatedOutlet({ project }: { project: ProjectRouting }) {
 
 export function ProjectLayout() {
   const { projectId } = useParams<{ projectId: string }>();
-  const { projects, projectsLoaded, refreshSessions } = useStudio();
+  const { projects, projectsLoaded, bindProjectSessions } = useStudio();
 
   const project = useMemo(
     () => projects.find((p) => p.projectId === projectId) ?? null,
@@ -72,8 +72,8 @@ export function ProjectLayout() {
     } catch {
       /* ignore */
     }
-    refreshSessions(project.projectId);
-  }, [project, refreshSessions]);
+    bindProjectSessions(project.projectId);
+  }, [project, bindProjectSessions]);
 
   if (!projectsLoaded) {
     return <div className="h-screen w-screen bg-[var(--bg-canvas)]" />;

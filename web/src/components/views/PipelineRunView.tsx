@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { generatePath, Link, useParams } from "react-router";
 import {
   AlertCircle,
@@ -17,11 +18,10 @@ import {
 import { toast } from "sonner";
 import { ApiError, pipelinesApi } from "../../api";
 import { useCurrentProject } from "../../layouts/ProjectLayout";
+import { queryKeys } from "../../queries";
 import { ROUTES } from "../../routes";
 import type {
-  PipelineActionRecord,
   PipelineNodeSnapshot,
-  PipelineRunDetail,
 } from "../../types";
 import { EmptyState } from "../common/EmptyState";
 import { ResizablePane } from "../common/ResizablePane";
@@ -48,11 +48,7 @@ type SelectedView =
 export function PipelineRunView() {
   const project = useCurrentProject();
   const { pipelineId, runId } = useParams<{ pipelineId: string; runId: string }>();
-
-  const [detail, setDetail] = useState<PipelineRunDetail | null>(null);
-  const [actions, setActions] = useState<PipelineActionRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const qc = useQueryClient();
 
   const [selectedView, setSelectedView] = useState<SelectedView | null>(null);
 
@@ -64,78 +60,81 @@ export function PipelineRunView() {
 
   const [sseConnected, setSseConnected] = useState(false);
   const [modalKind, setModalKind] = useState<PipelineActionModalKind | null>(null);
-  const [signaling, setSignaling] = useState(false);
 
   const prevActiveNodeRunIdRef = useRef<string | undefined>(undefined);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const loadRunData = useCallback(
-    async (opts?: { silent?: boolean }) => {
-      if (!runId) return;
-      if (!opts?.silent) setLoading(true);
-      setError(null);
-      try {
-        const [nextDetail, nextActions] = await Promise.all([
-          pipelinesApi.getRunDetail(runId),
-          pipelinesApi.listRunActions(runId, { limit: 500 }),
-        ]);
-        setDetail(nextDetail);
-        setActions(nextActions);
+  const detailQuery = useQuery({
+    queryKey: queryKeys.pipelineRun(runId ?? ""),
+    queryFn: () => pipelinesApi.getRunDetail(runId!),
+    enabled: Boolean(runId),
+  });
 
-        const nextActiveId = nextDetail.run.activeNodeRunId;
-        const isTerminal = isTerminalRunStatus(nextDetail.run.status);
+  const actionsQuery = useQuery({
+    queryKey: queryKeys.pipelineRunActions(runId ?? ""),
+    queryFn: () => pipelinesApi.listRunActions(runId!, { limit: 500 }),
+    enabled: Boolean(runId),
+  });
 
-        setSelectedView((prev) => {
-          // Initial load: completed/cancelled opens on Overview; active/failed opens on active stage
-          if (!prev) {
-            if (isTerminal || !nextActiveId) {
-              return { kind: "overview" };
-            }
-            return { kind: "nodeRun", nodeRunId: nextActiveId };
-          }
-          // Follow active stage progression when user was watching the previously active stage
-          if (
-            prev.kind === "nodeRun" &&
-            prev.nodeRunId === prevActiveNodeRunIdRef.current &&
-            nextActiveId &&
-            nextActiveId !== prev.nodeRunId
-          ) {
-            return { kind: "nodeRun", nodeRunId: nextActiveId };
-          }
-          // If the run just finished while user was watching the active stage, move to Overview
-          if (
-            prev.kind === "nodeRun" &&
-            prev.nodeRunId === prevActiveNodeRunIdRef.current &&
-            isTerminal
-          ) {
-            return { kind: "overview" };
-          }
-          return prev;
-        });
-        prevActiveNodeRunIdRef.current = nextActiveId;
-      } catch (err) {
-        const msg =
-          err instanceof ApiError
-            ? err.message
-            : err instanceof Error
-              ? err.message
-              : "Failed to load pipeline run";
-        setError(msg);
-      } finally {
-        if (!opts?.silent) setLoading(false);
-      }
-    },
-    [runId],
-  );
+  const detail = detailQuery.data ?? null;
+  const actions = actionsQuery.data ?? [];
+  const loading = detailQuery.isPending;
+  const error = detailQuery.error
+    ? detailQuery.error instanceof ApiError
+      ? detailQuery.error.message
+      : detailQuery.error instanceof Error
+        ? detailQuery.error.message
+        : "Failed to load pipeline run"
+    : null;
+
+  const loadRunData = useCallback(async () => {
+    if (!runId) return;
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: queryKeys.pipelineRun(runId) }),
+      qc.invalidateQueries({ queryKey: queryKeys.pipelineRunActions(runId) }),
+    ]);
+  }, [qc, runId]);
 
   useEffect(() => {
-    setDetail(null);
-    setActions([]);
     setSelectedView(null);
     setSessionInspectorData(null);
     prevActiveNodeRunIdRef.current = undefined;
-    void loadRunData();
-  }, [loadRunData]);
+  }, [runId]);
+
+  useEffect(() => {
+    if (!detail) return;
+    const nextActiveId = detail.run.activeNodeRunId;
+    const isTerminal = isTerminalRunStatus(detail.run.status);
+
+    setSelectedView((prev) => {
+      // Initial load: completed/cancelled opens on Overview; active/failed opens on active stage
+      if (!prev) {
+        if (isTerminal || !nextActiveId) {
+          return { kind: "overview" };
+        }
+        return { kind: "nodeRun", nodeRunId: nextActiveId };
+      }
+      // Follow active stage progression when user was watching the previously active stage
+      if (
+        prev.kind === "nodeRun" &&
+        prev.nodeRunId === prevActiveNodeRunIdRef.current &&
+        nextActiveId &&
+        nextActiveId !== prev.nodeRunId
+      ) {
+        return { kind: "nodeRun", nodeRunId: nextActiveId };
+      }
+      // If the run just finished while user was watching the active stage, move to Overview
+      if (
+        prev.kind === "nodeRun" &&
+        prev.nodeRunId === prevActiveNodeRunIdRef.current &&
+        isTerminal
+      ) {
+        return { kind: "overview" };
+      }
+      return prev;
+    });
+    prevActiveNodeRunIdRef.current = nextActiveId;
+  }, [detail]);
 
   // Live SSE stream scoped to this run
   useEffect(() => {
@@ -145,7 +144,13 @@ export function PipelineRunView() {
       () => {
         if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
         refreshTimerRef.current = setTimeout(() => {
-          void loadRunData({ silent: true });
+          void qc.invalidateQueries({ queryKey: queryKeys.pipelineRun(runId) });
+          void qc.invalidateQueries({ queryKey: queryKeys.pipelineRunActions(runId) });
+          if (pipelineId) {
+            void qc.invalidateQueries({
+              queryKey: queryKeys.pipelineRunsScope(project.projectId, pipelineId),
+            });
+          }
         }, 250);
       },
       { runId },
@@ -155,7 +160,7 @@ export function PipelineRunView() {
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
       unsubscribe();
     };
-  }, [project.projectId, runId, loadRunData]);
+  }, [project.projectId, pipelineId, runId, qc]);
 
   const nodes: PipelineNodeSnapshot[] = useMemo(() => {
     if (detail?.revision?.nodesSnapshot && detail.revision.nodesSnapshot.length > 0) {
@@ -228,20 +233,24 @@ export function PipelineRunView() {
     return actions[actions.length - 1];
   }, [actions, detail]);
 
-  const handleSignalNow = async () => {
-    if (!detail || signaling) return;
-    setSignaling(true);
-    try {
-      const res = await pipelinesApi.signalRun(detail.run.runId);
+  const signalMutation = useMutation({
+    mutationFn: () => pipelinesApi.signalRun(detail!.run.runId),
+    onSuccess: async (res) => {
       toast.success(
         res.woken ? "Signal sent — re-evaluating wait condition" : "Signal acknowledged",
       );
-      void loadRunData({ silent: true });
-    } catch (err) {
+      await loadRunData();
+    },
+    onError: (err: unknown) => {
       toast.error(err instanceof Error ? err.message : "Failed to signal waiting node");
-    } finally {
-      setSignaling(false);
-    }
+    },
+  });
+
+  const signaling = signalMutation.isPending;
+
+  const handleSignalNow = async () => {
+    if (!detail || signaling) return;
+    await signalMutation.mutateAsync().catch(() => {});
   };
 
   const baseBoardHref = generatePath(
@@ -616,7 +625,7 @@ export function PipelineRunView() {
         nodes={nodes}
         onClose={() => setModalKind(null)}
         onSuccess={() => {
-          void loadRunData({ silent: true });
+          void loadRunData();
         }}
       />
     </div>

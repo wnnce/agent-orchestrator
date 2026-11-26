@@ -1,51 +1,52 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  Timer,
   RotateCw,
-  Clock,
   ArrowRight,
-  Ban,
 } from "lucide-react";
 import { generatePath, useNavigate } from "react-router";
 import { jobsApi } from "../../api";
 import { useConfirm } from "../../context/ConfirmContext";
 import { useCurrentProject } from "../../layouts/ProjectLayout";
+import { queryKeys } from "../../queries";
 import { ROUTES } from "../../routes";
-import type { ScheduledJobRecord } from "../../types";
-import { formatDateTime, formatJobStatus, formatTimeAgo } from "../../utils/formatters";
+import { formatDateTime, formatJobStatus } from "../../utils/formatters";
 
 export function ScheduledJobsView() {
   const activeProject = useCurrentProject();
   const activeProjectId = activeProject.projectId;
   const navigate = useNavigate();
   const confirm = useConfirm();
-  const [jobs, setJobs] = useState<ScheduledJobRecord[]>([]);
-  const [loading, setLoading] = useState(false);
+  const qc = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<number | "all">("all");
   const [cancellingJobId, setCancellingJobId] = useState<string | null>(null);
 
-  const loadJobs = async () => {
-    setLoading(true);
-    try {
-      const list = await jobsApi.list({
+  const jobsQuery = useQuery({
+    queryKey: queryKeys.scheduledJobs(activeProjectId, statusFilter),
+    queryFn: () =>
+      jobsApi.list({
         projectId: activeProjectId || undefined,
         status: statusFilter === "all" ? undefined : statusFilter,
         limit: 50,
-      });
-      setJobs(list);
-    } catch (err) {
-      console.error("Failed to load scheduled jobs:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
+      }),
+    refetchInterval: 15_000,
+  });
 
-  useEffect(() => {
-    loadJobs();
-    const timer = setInterval(loadJobs, 15000);
-    return () => clearInterval(timer);
-  }, [activeProjectId, statusFilter]);
+  const jobs = jobsQuery.data ?? [];
+  const loading = jobsQuery.isFetching;
+
+  const cancelJobMutation = useMutation({
+    mutationFn: (jobId: string) => jobsApi.cancel(jobId),
+    onSuccess: async () => {
+      toast.success("Scheduled job cancelled");
+      await qc.invalidateQueries({ queryKey: queryKeys.scheduledJobsAll(activeProjectId) });
+    },
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(`Cancel job failed: ${msg}`);
+    },
+  });
 
   const handleCancel = async (jobId: string) => {
     const ok = await confirm({
@@ -58,14 +59,16 @@ export function ScheduledJobsView() {
 
     setCancellingJobId(jobId);
     try {
-      await jobsApi.cancel(jobId);
-      toast.success("Scheduled job cancelled");
-      await loadJobs();
-    } catch (err: any) {
-      toast.error(`Cancel job failed: ${err.message || String(err)}`);
+      await cancelJobMutation.mutateAsync(jobId);
+    } catch {
+      /* toast handled by onError */
     } finally {
       setCancellingJobId(null);
     }
+  };
+
+  const handleRefresh = () => {
+    void jobsQuery.refetch();
   };
 
   const handleJumpToSession = (sessionId: string) => {
@@ -86,7 +89,7 @@ export function ScheduledJobsView() {
             </p>
           </div>
           <button
-            onClick={loadJobs}
+            onClick={handleRefresh}
             disabled={loading}
             className="px-3 py-1.5 rounded-[var(--radius-sm)] border border-[var(--border-default)] hover:bg-[var(--bg-surface-hover)] text-xs font-mono text-[var(--text-primary)] transition-colors cursor-pointer flex items-center gap-1.5"
           >

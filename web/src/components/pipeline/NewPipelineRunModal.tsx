@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, m } from "motion/react";
 import { Loader2, Play, X } from "lucide-react";
 import { toast } from "sonner";
-import { ApiError, pipelinesApi } from "../../api";
+import { ApiError, pipelinesApi, type StartPipelineRunParams } from "../../api";
+import { queryKeys } from "../../queries";
 import type { PipelineRunRecord } from "../../types";
 import { EASE_OUT_EXPO } from "../../utils/motion";
 
@@ -25,6 +27,7 @@ export function NewPipelineRunModal({
   onClose,
   onCreated,
 }: NewPipelineRunModalProps) {
+  const qc = useQueryClient();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [externalKey, setExternalKey] = useState("");
@@ -33,7 +36,35 @@ export function NewPipelineRunModal({
   const [metadataJson, setMetadataJson] = useState("");
   const [dataError, setDataError] = useState<string | null>(null);
   const [metadataError, setMetadataError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+
+  const startRunMutation = useMutation({
+    mutationFn: (payload: StartPipelineRunParams) =>
+      pipelinesApi.startRun(projectId, pipelineId, payload),
+    onSuccess: async (result) => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: queryKeys.pipelineRunsScope(projectId, pipelineId) }),
+        qc.invalidateQueries({ queryKey: queryKeys.pipelines(projectId) }),
+      ]);
+      if (result.created) {
+        toast.success(`Started run "${result.run.title}"`);
+      } else {
+        toast.info(`Matched existing run by external key (${result.run.runId.slice(0, 12)})`);
+      }
+      resetForm();
+      onCreated(result.run, result.created);
+    },
+    onError: (err: unknown) => {
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Failed to start pipeline run";
+      toast.error(message);
+    },
+  });
+
+  const submitting = startRunMutation.isPending;
 
   const schemaProperties =
     entryInputSchema &&
@@ -110,35 +141,15 @@ export function NewPipelineRunModal({
     const parsedMetadata = parseJsonObject(metadataJson, "Metadata", setMetadataError);
     if (!parsedMetadata.ok) return;
 
-    setSubmitting(true);
-    try {
-      const result = await pipelinesApi.startRun(projectId, pipelineId, {
-        title: trimmedTitle,
-        description: description.trim() || undefined,
-        externalKey: externalKey.trim() || undefined,
-        externalUrl: externalUrl.trim() || undefined,
-        data: parsedData.value,
-        metadata: parsedMetadata.value,
-        createdBy: "studio-ui",
-      });
-      if (result.created) {
-        toast.success(`Started run "${result.run.title}"`);
-      } else {
-        toast.info(`Matched existing run by external key (${result.run.runId.slice(0, 12)})`);
-      }
-      resetForm();
-      onCreated(result.run, result.created);
-    } catch (err) {
-      const message =
-        err instanceof ApiError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : "Failed to start pipeline run";
-      toast.error(message);
-    } finally {
-      setSubmitting(false);
-    }
+    startRunMutation.mutate({
+      title: trimmedTitle,
+      description: description.trim() || undefined,
+      externalKey: externalKey.trim() || undefined,
+      externalUrl: externalUrl.trim() || undefined,
+      data: parsedData.value,
+      metadata: parsedMetadata.value,
+      createdBy: "studio-ui",
+    });
   };
 
   return (

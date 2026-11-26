@@ -1,10 +1,12 @@
 import React, { useMemo } from "react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { LazyMotion, MotionConfig, domAnimation } from "motion/react";
 import { RouterProvider } from "react-router";
 import { Toaster } from "sonner";
 import { ConfirmProvider } from "./context/ConfirmContext";
 import { StudioProvider } from "./context/StudioContext";
 import { ThemeProvider, useTheme } from "./context/ThemeContext";
+import { queryClient } from "./queries";
 import { createAppRouter } from "./router";
 
 function AppShell() {
@@ -35,17 +37,19 @@ function AppShell() {
 
 export function App() {
   return (
-    <MotionConfig reducedMotion="user">
-      <LazyMotion features={domAnimation} strict>
-        <ThemeProvider>
-          <ConfirmProvider>
-            <StudioProvider>
-              <AppShell />
-            </StudioProvider>
-          </ConfirmProvider>
-        </ThemeProvider>
-      </LazyMotion>
-    </MotionConfig>
+    <QueryClientProvider client={queryClient}>
+      <MotionConfig reducedMotion="user">
+        <LazyMotion features={domAnimation} strict>
+          <ThemeProvider>
+            <ConfirmProvider>
+              <StudioProvider>
+                <AppShell />
+              </StudioProvider>
+            </ConfirmProvider>
+          </ThemeProvider>
+        </LazyMotion>
+      </MotionConfig>
+    </QueryClientProvider>
   );
 }
 

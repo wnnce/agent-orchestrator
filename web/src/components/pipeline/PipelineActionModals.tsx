@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, m } from "motion/react";
 import {
   AlertTriangle,
@@ -11,6 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { ApiError, pipelinesApi } from "../../api";
+import { queryKeys } from "../../queries";
 import type {
   PipelineNodeRunRecord,
   PipelineNodeSnapshot,
@@ -39,15 +41,72 @@ export function PipelineActionModal({
   onClose,
   onSuccess,
 }: PipelineActionModalProps) {
+  const qc = useQueryClient();
   const [humanNote, setHumanNote] = useState("");
   const [reason, setReason] = useState("");
   const [feedback, setFeedback] = useState("");
   const [targetNodeId, setTargetNodeId] = useState("");
   const [preserveStepState, setPreserveStepState] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
 
   const prevTargets = currentNode?.prevTargets ?? [];
   const isTsNode = activeNodeRun?.executorType === "ts" || currentNode?.executor === "ts";
+
+  const actionMutation = useMutation({
+    mutationFn: async (actionKind: PipelineActionModalKind): Promise<PipelineRunRecord> => {
+      if (actionKind === "approve") {
+        return pipelinesApi.approveRun(run.runId, {
+          humanNote: humanNote.trim() || undefined,
+          actorId: "studio-ui",
+        });
+      }
+      if (actionKind === "reject") {
+        return pipelinesApi.rejectRun(run.runId, {
+          reason: reason.trim(),
+          feedback: feedback.trim(),
+          targetNodeId: targetNodeId || undefined,
+          actorId: "studio-ui",
+        });
+      }
+      if (actionKind === "retry") {
+        return pipelinesApi.retryRun(run.runId, {
+          preserveStepState: isTsNode ? preserveStepState : undefined,
+          actorId: "studio-ui",
+        });
+      }
+      return pipelinesApi.cancelRun(run.runId, {
+        reason: reason.trim() || undefined,
+        actorId: "studio-ui",
+      });
+    },
+    onSuccess: async (updated, actionKind) => {
+      if (actionKind === "approve") toast.success("Approved — advancing pipeline");
+      else if (actionKind === "reject") toast.success("Rejected — routed back for rework");
+      else if (actionKind === "retry") toast.success("Retry queued");
+      else toast.success("Pipeline run cancelled");
+
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: queryKeys.pipelineRun(run.runId) }),
+        qc.invalidateQueries({ queryKey: queryKeys.pipelineRunActions(run.runId) }),
+        qc.invalidateQueries({
+          queryKey: queryKeys.pipelineRunsScope(run.projectId, run.pipelineId),
+        }),
+        qc.invalidateQueries({ queryKey: queryKeys.pipelines(run.projectId) }),
+      ]);
+      onSuccess(updated);
+      onClose();
+    },
+    onError: (err: unknown) => {
+      const msg =
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Operation failed";
+      toast.error(msg);
+    },
+  });
+
+  const submitting = actionMutation.isPending;
 
   useEffect(() => {
     if (!kind) return;
@@ -69,58 +128,16 @@ export function PipelineActionModal({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [kind, submitting, onClose]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!kind) return;
+    if (!kind || submitting) return;
 
     if (kind === "reject" && (!reason.trim() || !feedback.trim())) {
       toast.error("Please provide both a rejection reason and feedback");
       return;
     }
 
-    setSubmitting(true);
-    try {
-      let updated: PipelineRunRecord;
-      if (kind === "approve") {
-        updated = await pipelinesApi.approveRun(run.runId, {
-          humanNote: humanNote.trim() || undefined,
-          actorId: "studio-ui",
-        });
-        toast.success("Approved — advancing pipeline");
-      } else if (kind === "reject") {
-        updated = await pipelinesApi.rejectRun(run.runId, {
-          reason: reason.trim(),
-          feedback: feedback.trim(),
-          targetNodeId: targetNodeId || undefined,
-          actorId: "studio-ui",
-        });
-        toast.success("Rejected — routed back for rework");
-      } else if (kind === "retry") {
-        updated = await pipelinesApi.retryRun(run.runId, {
-          preserveStepState: isTsNode ? preserveStepState : undefined,
-          actorId: "studio-ui",
-        });
-        toast.success("Retry queued");
-      } else {
-        updated = await pipelinesApi.cancelRun(run.runId, {
-          reason: reason.trim() || undefined,
-          actorId: "studio-ui",
-        });
-        toast.success("Pipeline run cancelled");
-      }
-      onSuccess(updated);
-      onClose();
-    } catch (err) {
-      const msg =
-        err instanceof ApiError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : "Operation failed";
-      toast.error(msg);
-    } finally {
-      setSubmitting(false);
-    }
+    actionMutation.mutate(kind);
   };
 
   const nodeNameById = (id: string) => nodes.find((n) => n.id === id)?.name ?? id;

@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { m } from "motion/react";
 import { toast } from "sonner";
 import {
@@ -10,6 +11,7 @@ import {
   Terminal,
 } from "lucide-react";
 import { tasksApi } from "../../api";
+import { queryKeys } from "../../queries";
 import type {
   TaskDefinition,
   TaskExecutionLogLevel,
@@ -28,15 +30,8 @@ export interface TaskExecutionDetailProps {
 
 export function TaskExecutionDetail({ execution, task }: TaskExecutionDetailProps) {
   const [activeTab, setActiveTab] = useState<"logs" | "state">("logs");
-  const [logs, setLogs] = useState<TaskExecutionLogRecord[]>([]);
-  const [hasMore, setHasMore] = useState(false);
-  const [nextAfterSeq, setNextAfterSeq] = useState(0);
   const [level, setLevel] = useState<TaskExecutionLogLevel | "all">("all");
-  const [loading, setLoading] = useState(false);
-  const [loadedExecutionId, setLoadedExecutionId] = useState<string | null>(null);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [copiedId, setCopiedId] = useState(false);
-  const loadReqIdRef = useRef(0);
 
   const taskType = (task?.type ?? "ts").toLowerCase();
   const summary = execution.actionsSummary ?? {};
@@ -47,60 +42,47 @@ export function TaskExecutionDetail({ execution, task }: TaskExecutionDetailProp
   const isActionOutput =
     taskType === "action" || (typeof summary.action === "string" && "result" in summary);
 
-  const isLoadingInitialLogs =
-    !isScriptOutput &&
-    !isActionOutput &&
-    (loading || loadedExecutionId !== execution.executionId);
-
-  const loadLogs = useCallback(
-    async (opts?: { level?: TaskExecutionLogLevel | "all"; append?: boolean; afterSeq?: number }) => {
-      const targetLevel = opts?.level ?? level;
-      const append = opts?.append ?? false;
-      const afterSeq = append ? (opts?.afterSeq ?? nextAfterSeq) : 0;
-      const reqId = ++loadReqIdRef.current;
-
-      if (append) {
-        setLoadingMore(true);
-      } else {
-        setLoading(true);
-      }
-
-      try {
-        const res = await tasksApi.listExecutionLogs(execution.executionId, {
-          ...(afterSeq > 0 ? { afterSeq } : {}),
-          ...(targetLevel !== "all" ? { level: targetLevel } : {}),
-          limit: 200,
-        });
-        if (reqId !== loadReqIdRef.current) return;
-        setLogs((prev) => (append ? [...prev, ...res.logs] : res.logs));
-        setHasMore(res.hasMore);
-        setNextAfterSeq(res.nextAfterSeq);
-        setLoadedExecutionId(execution.executionId);
-      } catch (err) {
-        if (reqId !== loadReqIdRef.current) return;
-        console.error("Failed to fetch execution logs:", err);
-        toast.error("加载任务日志失败");
-        setLoadedExecutionId(execution.executionId);
-      } finally {
-        if (reqId === loadReqIdRef.current) {
-          setLoading(false);
-          setLoadingMore(false);
-        }
-      }
-    },
-    [execution.executionId, level, nextAfterSeq],
-  );
-
   useEffect(() => {
-    setLogs([]);
-    setHasMore(false);
-    setNextAfterSeq(0);
     setLevel("all");
     setActiveTab("logs");
-    if (!isScriptOutput && !isActionOutput) {
-      void loadLogs({ level: "all", append: false, afterSeq: 0 });
+  }, [execution.executionId]);
+
+  const logsEnabled = !isScriptOutput && !isActionOutput;
+  const isFinishedExecution = execution.status === "success" || execution.status === "failed";
+
+  const logsQuery = useInfiniteQuery({
+    queryKey: queryKeys.taskExecutionLogsFiltered(execution.executionId, level),
+    queryFn: ({ pageParam }) =>
+      tasksApi.listExecutionLogs(execution.executionId, {
+        ...(pageParam > 0 ? { afterSeq: pageParam } : {}),
+        ...(level !== "all" ? { level } : {}),
+        limit: 200,
+      }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) => (lastPage.hasMore ? lastPage.nextAfterSeq : undefined),
+    enabled: logsEnabled,
+    staleTime: isFinishedExecution ? Infinity : 10_000,
+  });
+
+  useEffect(() => {
+    if (logsQuery.error) {
+      console.error("Failed to fetch execution logs:", logsQuery.error);
+      toast.error("加载任务日志失败");
     }
-  }, [execution.executionId, isScriptOutput, isActionOutput]);
+  }, [logsQuery.error]);
+
+  const logs = useMemo(() => {
+    const pages = logsQuery.data?.pages ?? [];
+    const merged: TaskExecutionLogRecord[] = [];
+    for (const page of pages) {
+      merged.push(...page.logs);
+    }
+    return merged;
+  }, [logsQuery.data]);
+
+  const hasMore = Boolean(logsQuery.hasNextPage);
+  const loadingMore = logsQuery.isFetchingNextPage;
+  const isLoadingInitialLogs = logsEnabled && logsQuery.isPending;
 
   const logEntries: LogEntry[] = useMemo(
     () =>
@@ -291,14 +273,11 @@ export function TaskExecutionDetail({ execution, task }: TaskExecutionDetailProp
                 loading={isLoadingInitialLogs}
                 emptyText="本次执行无日志输出"
                 level={level}
-                onLevelChange={(nextLevel) => {
-                  setLevel(nextLevel);
-                  void loadLogs({ level: nextLevel, append: false, afterSeq: 0 });
-                }}
-                onRefresh={() => void loadLogs({ level, append: false, afterSeq: 0 })}
+                onLevelChange={(nextLevel) => setLevel(nextLevel)}
+                onRefresh={() => void logsQuery.refetch()}
                 hasMore={hasMore}
                 loadingMore={loadingMore}
-                onLoadMore={() => void loadLogs({ level, append: true, afterSeq: nextAfterSeq })}
+                onLoadMore={() => void logsQuery.fetchNextPage()}
                 fillHeight
               />
             </div>

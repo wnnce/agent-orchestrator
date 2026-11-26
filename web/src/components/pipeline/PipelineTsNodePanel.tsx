@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Clock,
   Database,
@@ -9,7 +10,8 @@ import {
   Zap,
 } from "lucide-react";
 import { ApiError, pipelinesApi } from "../../api";
-import type { PipelineNodeLogRecord, PipelineNodeRunRecord } from "../../types";
+import { queryKeys } from "../../queries";
+import type { PipelineNodeRunRecord } from "../../types";
 import { formatDateTime, formatDuration } from "../../utils/formatters";
 import { LogViewer, type LogEntry } from "../common/LogViewer";
 import { formatRelativeCountdown, getPipelineStatusStyle } from "./pipelineStatus";
@@ -30,32 +32,42 @@ export function PipelineTsNodePanel({
   signaling = false,
 }: PipelineTsNodePanelProps) {
   const [activeTab, setActiveTab] = useState<TsTab>("logs");
-  const [logs, setLogs] = useState<PipelineNodeLogRecord[]>([]);
-  const [loadingLogs, setLoadingLogs] = useState(false);
-  const [logsError, setLogsError] = useState<string | null>(null);
+  const isTerminalNode =
+    nodeRun.status === "completed" ||
+    nodeRun.status === "failed" ||
+    nodeRun.status === "cancelled";
 
-  const loadLogs = useCallback(async () => {
-    setLoadingLogs(true);
-    setLogsError(null);
-    try {
-      const items = await pipelinesApi.listNodeRunLogs(nodeRun.nodeRunId, { limit: 500 });
-      setLogs(items);
-    } catch (err) {
-      setLogsError(
-        err instanceof ApiError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : "Failed to load node logs",
-      );
-    } finally {
-      setLoadingLogs(false);
-    }
-  }, [nodeRun.nodeRunId]);
+  const logsQuery = useQuery({
+    queryKey: queryKeys.pipelineNodeLogs(nodeRun.nodeRunId),
+    queryFn: () => pipelinesApi.listNodeRunLogs(nodeRun.nodeRunId, { limit: 500 }),
+    staleTime: isTerminalNode ? Infinity : 5_000,
+  });
 
+  // Refetch cached logs only when the node actually advances (status/poll/updatedAt changes)
+  const lastChangeSigRef = useRef(
+    `${nodeRun.nodeRunId}:${nodeRun.status}:${nodeRun.pollCount}:${nodeRun.updatedAt}`,
+  );
   useEffect(() => {
-    void loadLogs();
-  }, [loadLogs, nodeRun.status, nodeRun.pollCount, nodeRun.updatedAt]);
+    const nextSig = `${nodeRun.nodeRunId}:${nodeRun.status}:${nodeRun.pollCount}:${nodeRun.updatedAt}`;
+    if (nextSig !== lastChangeSigRef.current) {
+      const sameNode = lastChangeSigRef.current.startsWith(`${nodeRun.nodeRunId}:`);
+      lastChangeSigRef.current = nextSig;
+      if (sameNode) {
+        void logsQuery.refetch();
+      }
+    }
+  }, [nodeRun.nodeRunId, nodeRun.status, nodeRun.pollCount, nodeRun.updatedAt, logsQuery]);
+
+  const logs = logsQuery.data ?? [];
+  const loadingLogs = logsQuery.isFetching;
+  const logsError = logsQuery.error
+    ? logsQuery.error instanceof ApiError
+      ? logsQuery.error.message
+      : logsQuery.error instanceof Error
+        ? logsQuery.error.message
+        : "Failed to load node logs"
+    : null;
+  const loadLogs = () => logsQuery.refetch();
 
   const logEntries: LogEntry[] = useMemo(
     () =>

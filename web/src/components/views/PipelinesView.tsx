@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, m } from "motion/react";
 import { generatePath, useNavigate, useParams, useSearchParams } from "react-router";
 import {
@@ -20,12 +21,12 @@ import {
 import { toast } from "sonner";
 import { ApiError, pipelinesApi } from "../../api";
 import { useCurrentProject } from "../../layouts/ProjectLayout";
+import { queryKeys } from "../../queries";
 import { ROUTES } from "../../routes";
 import type {
   PipelineNodeExecutorType,
   PipelineNodeSnapshot,
   PipelineRunRecord,
-  PipelineSummaryWithVersions,
 } from "../../types";
 import { formatDateTime, formatTimeAgo } from "../../utils/formatters";
 import { EASE_OUT_EXPO } from "../../utils/motion";
@@ -61,15 +62,7 @@ export function PipelinesView() {
   const { pipelineId: routePipelineId } = useParams<{ pipelineId?: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
-
-  const [pipelines, setPipelines] = useState<PipelineSummaryWithVersions[]>([]);
-  const [loadingPipelines, setLoadingPipelines] = useState(true);
-  const [pipelinesError, setPipelinesError] = useState<string | null>(null);
-
-  const [runs, setRuns] = useState<PipelineRunRecord[]>([]);
-  const [loadingRuns, setLoadingRuns] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
+  const qc = useQueryClient();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -106,6 +99,21 @@ export function PipelinesView() {
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [pipelineDropdownOpen, versionDropdownOpen]);
+
+  const pipelinesQuery = useQuery({
+    queryKey: queryKeys.pipelines(project.projectId),
+    queryFn: () => pipelinesApi.listPipelines(project.projectId),
+  });
+
+  const pipelines = pipelinesQuery.data ?? [];
+  const loadingPipelines = pipelinesQuery.isPending;
+  const pipelinesError = pipelinesQuery.error
+    ? pipelinesQuery.error instanceof ApiError
+      ? pipelinesQuery.error.message
+      : pipelinesQuery.error instanceof Error
+        ? pipelinesQuery.error.message
+        : "Failed to load pipelines"
+    : null;
 
   const activePipeline = useMemo(() => {
     if (pipelines.length === 0) return null;
@@ -148,31 +156,6 @@ export function PipelinesView() {
     [activePipeline, searchParams, setSearchParams],
   );
 
-  const loadPipelines = useCallback(async () => {
-    setPipelinesError(null);
-    try {
-      const list = await pipelinesApi.listPipelines(project.projectId);
-      setPipelines(list);
-    } catch (err) {
-      const msg =
-        err instanceof ApiError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : "Failed to load pipelines";
-      setPipelinesError(msg);
-    } finally {
-      setLoadingPipelines(false);
-    }
-  }, [project.projectId]);
-
-  useEffect(() => {
-    setLoadingPipelines(true);
-    setPipelines([]);
-    setRuns([]);
-    void loadPipelines();
-  }, [loadPipelines]);
-
   // Redirect /:projectId/pipelines to /:projectId/pipelines/:firstId once loaded
   useEffect(() => {
     if (loadingPipelines || pipelines.length === 0) return;
@@ -187,65 +170,66 @@ export function PipelinesView() {
     }
   }, [loadingPipelines, pipelines, routePipelineId, navigate, project.projectId]);
 
-  const loadRuns = useCallback(
-    async (opts?: { silent?: boolean }) => {
-      if (!effectivePipelineId || selectedVersion === null) return;
-      if (!opts?.silent) setLoadingRuns(true);
-      try {
-        const list = await pipelinesApi.listRuns(project.projectId, effectivePipelineId, {
-          version: selectedVersion,
-          limit: PAGE_LIMIT,
-        });
-        setRuns(list);
-        setHasMore(list.length >= PAGE_LIMIT);
-      } catch (err) {
-        const msg =
-          err instanceof ApiError
-            ? err.message
-            : err instanceof Error
-              ? err.message
-              : "Failed to load pipeline runs";
-        toast.error(msg);
-      } finally {
-        if (!opts?.silent) setLoadingRuns(false);
-      }
+  const runsQuery = useInfiniteQuery({
+    queryKey: queryKeys.pipelineRuns(
+      project.projectId,
+      effectivePipelineId ?? "",
+      selectedVersion ?? 0,
+    ),
+    queryFn: ({ pageParam }) =>
+      pipelinesApi.listRuns(project.projectId, effectivePipelineId!, {
+        version: selectedVersion!,
+        limit: PAGE_LIMIT,
+        ...(pageParam !== undefined ? { beforeId: pageParam } : {}),
+      }),
+    initialPageParam: undefined as number | undefined,
+    getNextPageParam: (lastPage) => {
+      if (lastPage.length < PAGE_LIMIT) return undefined;
+      return lastPage.reduce<number | undefined>((acc, r) => {
+        if (typeof r.id !== "number") return acc;
+        return acc === undefined ? r.id : Math.min(acc, r.id);
+      }, undefined);
     },
-    [project.projectId, effectivePipelineId, selectedVersion],
-  );
+    enabled: Boolean(effectivePipelineId && selectedVersion !== null),
+  });
 
   useEffect(() => {
-    void loadRuns();
-  }, [loadRuns]);
+    if (runsQuery.error) {
+      const msg =
+        runsQuery.error instanceof ApiError
+          ? runsQuery.error.message
+          : runsQuery.error instanceof Error
+            ? runsQuery.error.message
+            : "Failed to load pipeline runs";
+      toast.error(msg);
+    }
+  }, [runsQuery.error]);
+
+  const runs = useMemo(() => {
+    const pages = runsQuery.data?.pages ?? [];
+    const seen = new Set<string>();
+    const merged: PipelineRunRecord[] = [];
+    for (const page of pages) {
+      for (const r of page) {
+        if (!seen.has(r.runId)) {
+          seen.add(r.runId);
+          merged.push(r);
+        }
+      }
+    }
+    return merged;
+  }, [runsQuery.data]);
+
+  const loadingRuns = runsQuery.isFetching && !runsQuery.isFetchingNextPage;
+  const loadingMore = runsQuery.isFetchingNextPage;
+  const hasMore = Boolean(runsQuery.hasNextPage);
+
+  const loadPipelines = useCallback(() => pipelinesQuery.refetch(), [pipelinesQuery]);
+  const loadRuns = useCallback(() => runsQuery.refetch(), [runsQuery]);
 
   const handleLoadMore = async () => {
-    if (!effectivePipelineId || selectedVersion === null || loadingMore || runs.length === 0) return;
-    const minId = runs.reduce<number | undefined>((acc, r) => {
-      if (typeof r.id !== "number") return acc;
-      return acc === undefined ? r.id : Math.min(acc, r.id);
-    }, undefined);
-    if (minId === undefined) return;
-
-    setLoadingMore(true);
-    try {
-      const older = await pipelinesApi.listRuns(project.projectId, effectivePipelineId, {
-        version: selectedVersion,
-        limit: PAGE_LIMIT,
-        beforeId: minId,
-      });
-      setRuns((prev) => {
-        const seen = new Set(prev.map((r) => r.runId));
-        const merged = [...prev];
-        for (const r of older) {
-          if (!seen.has(r.runId)) merged.push(r);
-        }
-        return merged;
-      });
-      setHasMore(older.length >= PAGE_LIMIT);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to load older runs");
-    } finally {
-      setLoadingMore(false);
-    }
+    if (!hasMore || loadingMore) return;
+    await runsQuery.fetchNextPage();
   };
 
   // Real-time SSE updates for this project's pipeline
@@ -256,8 +240,10 @@ export function PipelinesView() {
       () => {
         if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
         refreshTimerRef.current = setTimeout(() => {
-          void loadRuns({ silent: true });
-          void loadPipelines();
+          void qc.invalidateQueries({
+            queryKey: queryKeys.pipelineRunsScope(project.projectId, effectivePipelineId),
+          });
+          void qc.invalidateQueries({ queryKey: queryKeys.pipelines(project.projectId) });
         }, 250);
       },
       { pipelineId: effectivePipelineId },
@@ -267,7 +253,7 @@ export function PipelinesView() {
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
       unsubscribe();
     };
-  }, [project.projectId, effectivePipelineId, loadRuns, loadPipelines]);
+  }, [project.projectId, effectivePipelineId, qc]);
 
   // Active version topology nodes
   const boardNodes: PipelineNodeSnapshot[] = useMemo(() => {

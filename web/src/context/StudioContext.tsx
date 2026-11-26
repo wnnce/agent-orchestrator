@@ -1,5 +1,7 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
+import React, { createContext, useCallback, useContext, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { projectsApi, sessionsApi, systemApi } from "../api";
+import { queryKeys } from "../queries";
 import type { ProjectRouting, SessionRoute } from "../types";
 
 interface StudioContextType {
@@ -12,6 +14,8 @@ interface StudioContextType {
   setShowInspector: (show: boolean) => void;
   toggleInspector: () => void;
   refreshProjects: () => Promise<void>;
+  /** Bind active project for cached session queries (no forced refetch if cache is fresh). */
+  bindProjectSessions: (projectId: string) => void;
   refreshSessions: (projectId: string) => Promise<void>;
   resolveDefaultProjectId: () => string | undefined;
 }
@@ -19,11 +23,32 @@ interface StudioContextType {
 const StudioContext = createContext<StudioContextType | null>(null);
 
 export function StudioProvider({ children }: { children: React.ReactNode }) {
-  const [projects, setProjects] = useState<ProjectRouting[]>([]);
-  const [projectsLoaded, setProjectsLoaded] = useState(false);
-  const [sessions, setSessions] = useState<SessionRoute[]>([]);
-  const [isReady, setIsReady] = useState(false);
+  const qc = useQueryClient();
+  const [activeSessionsProjectId, setActiveSessionsProjectId] = useState<string>("");
   const [showInspector, setShowInspector] = useState(false);
+
+  const projectsQuery = useQuery({
+    queryKey: queryKeys.projects,
+    queryFn: projectsApi.list,
+    staleTime: 60_000,
+  });
+
+  const readyQuery = useQuery({
+    queryKey: queryKeys.systemReady,
+    queryFn: systemApi.checkReady,
+    staleTime: 60_000,
+  });
+
+  const sessionsQuery = useQuery({
+    queryKey: queryKeys.sessions(activeSessionsProjectId),
+    queryFn: () => sessionsApi.list(activeSessionsProjectId),
+    enabled: Boolean(activeSessionsProjectId),
+  });
+
+  const projects = projectsQuery.data ?? [];
+  const projectsLoaded = !projectsQuery.isPending;
+  const sessions = sessionsQuery.data ?? [];
+  const isReady = readyQuery.data ?? false;
 
   const resolveDefaultProjectId = useCallback((): string | undefined => {
     try {
@@ -38,30 +63,33 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
   }, [projects]);
 
   const refreshProjects = useCallback(async () => {
-    try {
-      const list = await projectsApi.list();
-      setProjects(list);
-    } catch (err) {
-      console.error("Failed to load projects:", err);
-    } finally {
-      setProjectsLoaded(true);
-    }
-  }, []);
+    await qc.invalidateQueries({ queryKey: queryKeys.projects });
+  }, [qc]);
 
-  const refreshSessions = useCallback(async (projectId: string) => {
+  const bindProjectSessions = useCallback((projectId: string) => {
     if (!projectId) return;
-    try {
-      const list = await sessionsApi.list(projectId);
-      setSessions(list);
-    } catch (err) {
-      console.error("Failed to load sessions:", err);
-    }
+    setActiveSessionsProjectId(projectId);
   }, []);
 
-  useEffect(() => {
-    systemApi.checkReady().then(setIsReady);
-    refreshProjects();
-  }, [refreshProjects]);
+  const refreshSessions = useCallback(
+    async (projectId: string) => {
+      if (!projectId) return;
+      setActiveSessionsProjectId(projectId);
+      await qc.invalidateQueries({ queryKey: queryKeys.sessions(projectId) });
+    },
+    [qc],
+  );
+
+  const setSessions: React.Dispatch<React.SetStateAction<SessionRoute[]>> = useCallback(
+    (updater) => {
+      if (!activeSessionsProjectId) return;
+      qc.setQueryData<SessionRoute[]>(queryKeys.sessions(activeSessionsProjectId), (prev) => {
+        const current = prev ?? [];
+        return typeof updater === "function" ? updater(current) : updater;
+      });
+    },
+    [activeSessionsProjectId, qc],
+  );
 
   const toggleInspector = useCallback(() => setShowInspector((prev) => !prev), []);
 
@@ -77,6 +105,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         setShowInspector,
         toggleInspector,
         refreshProjects,
+        bindProjectSessions,
         refreshSessions,
         resolveDefaultProjectId,
       }}

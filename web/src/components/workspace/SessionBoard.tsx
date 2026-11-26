@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { AnimatePresence, m } from "motion/react";
 import { toast } from "sonner";
 import {
@@ -25,6 +26,7 @@ import { runtimesApi, sessionsApi } from "../../api";
 import { useStudio } from "../../context/StudioContext";
 import { useConfirm } from "../../context/ConfirmContext";
 import { useCurrentProject } from "../../layouts/ProjectLayout";
+import { queryKeys } from "../../queries";
 import { ROUTES } from "../../routes";
 import type { RuntimeInfo, SessionRoute } from "../../types";
 import { formatTimeAgo, formatDateTime, formatTokenCount } from "../../utils/formatters";
@@ -299,16 +301,71 @@ export function SessionBoard() {
   };
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [isCreating, setIsCreating] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
-  const [runtimes, setRuntimes] = useState<RuntimeInfo[]>([]);
-  const [isLoadingRuntimes, setIsLoadingRuntimes] = useState(false);
   const [selectedRuntime, setSelectedRuntime] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
   const [selectedEffort, setSelectedEffort] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState<string>("");
+
+  const runtimesQuery = useQuery({
+    queryKey: queryKeys.runtimes,
+    queryFn: () => runtimesApi.list(),
+    enabled: createModalOpen,
+    staleTime: 5 * 60_000,
+  });
+
+  const runtimes = runtimesQuery.data ?? [];
+  const isLoadingRuntimes = runtimesQuery.isPending;
+
+  const createSessionMutation = useMutation({
+    mutationFn: () =>
+      sessionsApi.create({
+        projectId: activeProjectId || undefined,
+        ...(selectedRuntime ? { runtime: selectedRuntime } : {}),
+        ...(selectedModel ? { model: selectedModel } : {}),
+        ...(selectedEffort ? { reasoningEffort: selectedEffort } : {}),
+      }),
+    onSuccess: async (res) => {
+      setCreateModalOpen(false);
+      await refreshSessions(activeProjectId);
+      if (res?.session?.sessionId) {
+        openSession(res.session.sessionId);
+      }
+    },
+    onError: (err: unknown) => {
+      console.error("Failed to create session:", err);
+      toast.error(`创建会话失败: ${err instanceof Error ? err.message : String(err)}`);
+    },
+  });
+
+  const deleteSessionMutation = useMutation({
+    mutationFn: (sessionId: string) => sessionsApi.delete(sessionId),
+    onSuccess: (_data, sessionId) => {
+      setSessions((prev) => prev.filter((s) => s.sessionId !== sessionId));
+      toast.success("Session deleted successfully");
+    },
+    onError: (err: unknown) => {
+      console.error("Failed to delete session:", err);
+      toast.error(`Delete failed: ${err instanceof Error ? err.message : String(err)}`);
+    },
+  });
+
+  const renameSessionMutation = useMutation({
+    mutationFn: ({ sessionId, title }: { sessionId: string; title: string }) =>
+      sessionsApi.rename(sessionId, title),
+    onSuccess: (_data, { sessionId, title }) => {
+      setSessions((prev) => prev.map((s) => (s.sessionId === sessionId ? { ...s, title } : s)));
+      setEditingSessionId(null);
+      toast.success("Session renamed");
+    },
+    onError: (err: unknown) => {
+      toast.error(`Rename failed: ${err instanceof Error ? err.message : String(err)}`);
+    },
+  });
+
+  const isCreating = createSessionMutation.isPending;
 
   // 4 Git-Flow lifecycle columns
   const columns: ColumnDef[] = [
@@ -409,23 +466,27 @@ export function SessionBoard() {
     }
   };
 
-  const handleOpenCreateModal = async () => {
-    setCreateModalOpen(true);
-    setIsLoadingRuntimes(true);
-    try {
-      const list = await runtimesApi.list();
-      setRuntimes(list);
-      const preferredRuntime =
-        activeProject?.runtime?.type && list.some((r) => r.type === activeProject.runtime?.type)
-          ? activeProject.runtime.type
-          : (list[0]?.type ?? "");
-      applyRuntimeSelection(preferredRuntime, list);
-    } catch (err: any) {
-      console.error("Failed to load runtimes:", err);
-      toast.error(`加载 Runtime 列表失败: ${err.message || String(err)}`);
-    } finally {
-      setIsLoadingRuntimes(false);
+  useEffect(() => {
+    if (!createModalOpen || runtimes.length === 0) return;
+    const preferredRuntime =
+      activeProject?.runtime?.type && runtimes.some((r) => r.type === activeProject.runtime?.type)
+        ? activeProject.runtime.type
+        : (runtimes[0]?.type ?? "");
+    applyRuntimeSelection(preferredRuntime, runtimes);
+  }, [createModalOpen, runtimes, activeProject?.runtime?.type]);
+
+  useEffect(() => {
+    if (createModalOpen && runtimesQuery.error) {
+      const msg =
+        runtimesQuery.error instanceof Error
+          ? runtimesQuery.error.message
+          : String(runtimesQuery.error);
+      toast.error(`加载 Runtime 列表失败: ${msg}`);
     }
+  }, [createModalOpen, runtimesQuery.error]);
+
+  const handleOpenCreateModal = () => {
+    setCreateModalOpen(true);
   };
 
   const handleModelChange = (modelId: string) => {
@@ -447,25 +508,7 @@ export function SessionBoard() {
   const handleCreateSession = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (isCreating || isLoadingRuntimes) return;
-    try {
-      setIsCreating(true);
-      const res = await sessionsApi.create({
-        projectId: activeProjectId || undefined,
-        ...(selectedRuntime ? { runtime: selectedRuntime } : {}),
-        ...(selectedModel ? { model: selectedModel } : {}),
-        ...(selectedEffort ? { reasoningEffort: selectedEffort } : {}),
-      });
-      setCreateModalOpen(false);
-      await refreshSessions(activeProjectId);
-      if (res?.session?.sessionId) {
-        openSession(res.session.sessionId);
-      }
-    } catch (err: any) {
-      console.error("Failed to create session:", err);
-      toast.error(`创建会话失败: ${err.message || String(err)}`);
-    } finally {
-      setIsCreating(false);
-    }
+    createSessionMutation.mutate();
   };
 
   const handleDeleteSession = async (
@@ -481,14 +524,11 @@ export function SessionBoard() {
     });
     if (!ok) return;
 
+    setDeletingId(sessionId);
     try {
-      setDeletingId(sessionId);
-      await sessionsApi.delete(sessionId);
-      setSessions((prev) => prev.filter((s) => s.sessionId !== sessionId));
-      toast.success("Session deleted successfully");
-    } catch (err: any) {
-      console.error("Failed to delete session:", err);
-      toast.error(`Delete failed: ${err.message || String(err)}`);
+      await deleteSessionMutation.mutateAsync(sessionId);
+    } catch {
+      /* toast handled by onError */
     } finally {
       setDeletingId(null);
     }
@@ -508,16 +548,7 @@ export function SessionBoard() {
     if (e.type === "submit") e.preventDefault();
     const clean = editTitle.trim();
     if (!clean) return;
-    try {
-      await sessionsApi.rename(sessionId, clean);
-      setSessions((prev) =>
-        prev.map((s) => (s.sessionId === sessionId ? { ...s, title: clean } : s))
-      );
-      setEditingSessionId(null);
-      toast.success("Session renamed");
-    } catch (err: any) {
-      toast.error(`Rename failed: ${err.message || String(err)}`);
-    }
+    renameSessionMutation.mutate({ sessionId, title: clean });
   };
 
   const handleCancelRename = (e: React.MouseEvent) => {

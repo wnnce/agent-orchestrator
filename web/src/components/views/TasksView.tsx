@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, m } from "motion/react";
 import { toast } from "sonner";
 import {
@@ -16,6 +17,7 @@ import {
 import { generatePath, useNavigate, useParams } from "react-router";
 import { tasksApi } from "../../api";
 import { useCurrentProject } from "../../layouts/ProjectLayout";
+import { queryKeys } from "../../queries";
 import { ROUTES } from "../../routes";
 import type { ProjectRuntimeDefault, TaskDefinition, TaskExecutionRecord } from "../../types";
 import { formatDateTime, formatDuration, formatTimeAgo } from "../../utils/formatters";
@@ -241,18 +243,9 @@ export function TasksView() {
     [activeProjectId, navigate],
   );
 
-  const [tasks, setTasks] = useState<TaskDefinition[]>([]);
-  const [taskExecutions, setTaskExecutions] = useState<TaskExecutionRecord[]>([]);
-  const [hasMoreRuns, setHasMoreRuns] = useState(false);
-  const [nextBeforeId, setNextBeforeId] = useState<number | null>(null);
-  const [loadingTasks, setLoadingTasks] = useState(false);
-  const [loadingExecutions, setLoadingExecutions] = useState(false);
-  const [loadingMoreRuns, setLoadingMoreRuns] = useState(false);
-  const [loadedRunsQueryKey, setLoadedRunsQueryKey] = useState<string | null>(null);
+  const qc = useQueryClient();
   const [runningTaskId, setRunningTaskId] = useState<string | null>(null);
 
-  const runsReqIdRef = useRef(0);
-  const loadingMoreRef = useRef(false);
   const runsScrollRef = useRef<HTMLDivElement | null>(null);
   const runsSentinelRef = useRef<HTMLDivElement | null>(null);
 
@@ -263,23 +256,22 @@ export function TasksView() {
   // Right Runs panel filter (server-side filtered + cursor paginated)
   const [runStatusFilter, setRunStatusFilter] = useState<"all" | "success" | "failed">("all");
 
-  const loadTasks = useCallback(async () => {
-    if (!activeProjectId) return;
-    setLoadingTasks(true);
-    try {
-      const list = await tasksApi.listByProject(activeProjectId);
-      setTasks(list);
-    } catch (err) {
-      console.error("Failed to load project tasks:", err);
-      toast.error("加载项目任务失败");
-    } finally {
-      setLoadingTasks(false);
-    }
-  }, [activeProjectId]);
+  const tasksQuery = useQuery({
+    queryKey: queryKeys.tasks(activeProjectId),
+    queryFn: () => tasksApi.listByProject(activeProjectId),
+    enabled: Boolean(activeProjectId),
+  });
 
   useEffect(() => {
-    void loadTasks();
-  }, [loadTasks]);
+    if (tasksQuery.error) {
+      console.error("Failed to load project tasks:", tasksQuery.error);
+      toast.error("加载项目任务失败");
+    }
+  }, [tasksQuery.error]);
+
+  const tasks = tasksQuery.data ?? [];
+  const loadingTasks = tasksQuery.isFetching;
+  const loadTasks = useCallback(() => tasksQuery.refetch(), [tasksQuery]);
 
   const filteredTasks = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -303,106 +295,68 @@ export function TasksView() {
     return filteredTasks[0] ?? tasks[0] ?? null;
   }, [tasks, filteredTasks, activeTaskId]);
 
-  const loadTaskExecutions = useCallback(
-    async (taskId: string, statusFilter: "all" | "success" | "failed") => {
-      if (!activeProjectId) return;
-      const taskKey = `${activeProjectId}:${taskId}`;
-      const queryKey = `${taskKey}:${statusFilter}`;
-      const reqId = ++runsReqIdRef.current;
-      loadingMoreRef.current = false;
-      setLoadingMoreRuns(false);
-      setLoadingExecutions(true);
-      try {
-        const page = await tasksApi.listExecutions({
-          taskKey,
-          status: statusFilter === "all" ? undefined : statusFilter,
-          limit: RUNS_PAGE_SIZE,
-        });
-        if (reqId !== runsReqIdRef.current) return;
-        setTaskExecutions(page.executions);
-        setHasMoreRuns(page.hasMore);
-        setNextBeforeId(page.nextBeforeId);
-        setLoadedRunsQueryKey(queryKey);
-      } catch (err) {
-        if (reqId !== runsReqIdRef.current) return;
-        console.error("Failed to load task executions:", err);
-        setLoadedRunsQueryKey(queryKey);
-      } finally {
-        if (reqId === runsReqIdRef.current) {
-          setLoadingExecutions(false);
+  const executionsQuery = useInfiniteQuery({
+    queryKey: queryKeys.taskExecutionsFiltered(
+      activeProjectId,
+      selectedTask?.taskId ?? "",
+      runStatusFilter,
+    ),
+    queryFn: ({ pageParam }) =>
+      tasksApi.listExecutions({
+        taskKey: selectedTask!.taskKey,
+        status: runStatusFilter === "all" ? undefined : runStatusFilter,
+        ...(pageParam !== undefined ? { beforeId: pageParam } : {}),
+        limit: RUNS_PAGE_SIZE,
+      }),
+    initialPageParam: undefined as number | undefined,
+    getNextPageParam: (lastPage) =>
+      lastPage.hasMore && lastPage.nextBeforeId !== null ? lastPage.nextBeforeId : undefined,
+    enabled: Boolean(activeProjectId && selectedTask),
+  });
+
+  const taskExecutions = useMemo(() => {
+    const pages = executionsQuery.data?.pages ?? [];
+    const seen = new Set<string>();
+    const merged: TaskExecutionRecord[] = [];
+    for (const page of pages) {
+      for (const item of page.executions) {
+        if (!seen.has(item.executionId)) {
+          seen.add(item.executionId);
+          merged.push(item);
         }
       }
+    }
+    return merged;
+  }, [executionsQuery.data]);
+
+  const hasMoreRuns = Boolean(executionsQuery.hasNextPage);
+  const loadingExecutions = executionsQuery.isFetching && !executionsQuery.isFetchingNextPage;
+  const loadingMoreRuns = executionsQuery.isFetchingNextPage;
+  const isLoadingRuns = Boolean(selectedTask && executionsQuery.isPending);
+
+  const loadTaskExecutions = useCallback(
+    async (_taskId?: string, _status?: "all" | "success" | "failed") => {
+      await executionsQuery.refetch();
     },
-    [activeProjectId],
+    [executionsQuery],
   );
 
   const loadMoreRuns = useCallback(async () => {
-    if (
-      !activeProjectId ||
-      !selectedTask ||
-      !hasMoreRuns ||
-      nextBeforeId === null ||
-      loadingExecutions ||
-      loadingMoreRef.current
-    ) {
-      return;
-    }
-
-    const expectedReqId = runsReqIdRef.current;
-    loadingMoreRef.current = true;
-    setLoadingMoreRuns(true);
-    try {
-      const page = await tasksApi.listExecutions({
-        taskKey: selectedTask.taskKey,
-        status: runStatusFilter === "all" ? undefined : runStatusFilter,
-        beforeId: nextBeforeId,
-        limit: RUNS_PAGE_SIZE,
-      });
-      if (expectedReqId !== runsReqIdRef.current) return;
-      setTaskExecutions((prev) => {
-        if (page.executions.length === 0) return prev;
-        const seen = new Set(prev.map((item) => item.executionId));
-        const appended = page.executions.filter((item) => !seen.has(item.executionId));
-        return appended.length > 0 ? [...prev, ...appended] : prev;
-      });
-      setHasMoreRuns(page.hasMore);
-      setNextBeforeId(page.nextBeforeId);
-    } catch (err) {
-      if (expectedReqId !== runsReqIdRef.current) return;
-      console.error("Failed to load more task executions:", err);
-    } finally {
-      if (expectedReqId === runsReqIdRef.current) {
-        loadingMoreRef.current = false;
-        setLoadingMoreRuns(false);
-      }
-    }
-  }, [activeProjectId, selectedTask, hasMoreRuns, nextBeforeId, loadingExecutions, runStatusFilter]);
+    if (!hasMoreRuns || loadingMoreRuns || loadingExecutions) return;
+    await executionsQuery.fetchNextPage();
+  }, [hasMoreRuns, loadingMoreRuns, loadingExecutions, executionsQuery]);
 
   useEffect(() => {
-    if (!selectedTask) {
-      runsReqIdRef.current += 1;
-      loadingMoreRef.current = false;
-      setTaskExecutions([]);
-      setHasMoreRuns(false);
-      setNextBeforeId(null);
-      setLoadingMoreRuns(false);
-      setLoadedRunsQueryKey(null);
-      return;
-    }
-    setTaskExecutions([]);
-    setHasMoreRuns(false);
-    setNextBeforeId(null);
     if (runsScrollRef.current) {
       runsScrollRef.current.scrollTop = 0;
     }
-    void loadTaskExecutions(selectedTask.taskId, runStatusFilter);
-  }, [selectedTask?.taskKey, selectedTask?.taskId, runStatusFilter, loadTaskExecutions]);
+  }, [selectedTask?.taskKey, runStatusFilter]);
 
   // Threshold-triggered infinite scroll: prefetch next page when within 180px of the bottom
   useEffect(() => {
     const root = runsScrollRef.current;
     const sentinel = runsSentinelRef.current;
-    if (!root || !sentinel || !hasMoreRuns || nextBeforeId === null || loadingExecutions) {
+    if (!root || !sentinel || !hasMoreRuns || loadingExecutions) {
       return;
     }
 
@@ -421,19 +375,7 @@ export function TasksView() {
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [
-    selectedTask?.taskKey,
-    runStatusFilter,
-    hasMoreRuns,
-    nextBeforeId,
-    loadingExecutions,
-    loadMoreRuns,
-  ]);
-
-  const activeRunsQueryKey = selectedTask ? `${selectedTask.taskKey}:${runStatusFilter}` : null;
-  const isLoadingRuns = Boolean(
-    selectedTask && (loadingExecutions || loadedRunsQueryKey !== activeRunsQueryKey),
-  );
+  }, [selectedTask?.taskKey, runStatusFilter, hasMoreRuns, loadingExecutions, loadMoreRuns]);
 
   // Consistent selection rule:
   // - Clicking a Task sets URL to /:projectId/tasks/:taskId (no executionId) -> ALWAYS shows Task Info!
@@ -443,17 +385,26 @@ export function TasksView() {
     return taskExecutions.find((e) => e.executionId === activeExecutionId) ?? null;
   }, [taskExecutions, activeExecutionId]);
 
+  const runTaskMutation = useMutation({
+    mutationFn: (taskId: string) => tasksApi.run(activeProjectId, taskId),
+    onSuccess: async (res, taskId) => {
+      toast.success(`Task [${taskId}] triggered`, {
+        description: res.message || "Execution started in background",
+      });
+      await qc.invalidateQueries({ queryKey: queryKeys.taskExecutions(activeProjectId, taskId) });
+    },
+    onError: (err: unknown) => {
+      toast.error(`Trigger task failed: ${err instanceof Error ? err.message : String(err)}`);
+    },
+  });
+
   const handleRunNow = async (taskId: string) => {
     if (!activeProjectId || runningTaskId === taskId) return;
     setRunningTaskId(taskId);
     try {
-      const res = await tasksApi.run(activeProjectId, taskId);
-      toast.success(`Task [${taskId}] triggered`, {
-        description: res.message || "Execution started in background",
-      });
-      await loadTaskExecutions(taskId, runStatusFilter);
-    } catch (err: any) {
-      toast.error(`Trigger task failed: ${err.message || String(err)}`);
+      await runTaskMutation.mutateAsync(taskId);
+    } catch {
+      /* toast handled by onError */
     } finally {
       setRunningTaskId(null);
     }

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, m } from "motion/react";
 import { toast } from "sonner";
 import {
@@ -17,6 +18,7 @@ import {
 import { sessionsApi } from "../../api";
 import { useStudio } from "../../context/StudioContext";
 import { useCurrentProject } from "../../layouts/ProjectLayout";
+import { queryKeys } from "../../queries";
 import type {
   ArtifactRecord,
   ChatMessage,
@@ -86,22 +88,52 @@ export function SessionConversation({
 }: SessionConversationProps) {
   const activeProject = useCurrentProject();
   const activeProjectId = activeProject.projectId;
+  const qc = useQueryClient();
   const { sessions, setSessions, showInspector } = useStudio();
   const activeSession = useMemo(
     () => sessions.find((s) => s.sessionId === sessionId) ?? null,
     [sessions, sessionId],
   );
 
+  // React Query caches initial transcript, session metadata, and artifacts so re-entering
+  // a session or pipeline stage renders instantaneously without a loading flash.
+  const sessionInfoQuery = useQuery({
+    queryKey: queryKeys.sessionDetail(sessionId),
+    queryFn: () => sessionsApi.get(sessionId),
+    enabled: Boolean(sessionId),
+  });
+
+  const artifactsQuery = useQuery({
+    queryKey: queryKeys.sessionArtifacts(sessionId),
+    queryFn: () => sessionsApi.listArtifacts(sessionId),
+    enabled: Boolean(sessionId),
+  });
+
+  const historyEventsQuery = useQuery({
+    queryKey: queryKeys.sessionEvents(sessionId),
+    queryFn: () => sessionsApi.listEvents(sessionId),
+    enabled: Boolean(sessionId),
+  });
+
+  // Live SSE streaming state stays local to avoid high-frequency React Query cache churn
+  // on per-token deltas, and syncs back into the query cache when turns settle.
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [events, setEvents] = useState<RuntimeEvent[]>([]);
-  const [artifacts, setArtifacts] = useState<ArtifactRecord[]>([]);
   const [isRunning, setIsRunning] = useState<boolean>(false);
-  const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null);
-  const [sessionDetail, setSessionDetail] = useState<SessionRoute | null>(null);
-  const [sessionUsage, setSessionUsage] = useState<SessionUsageSummary | null>(null);
-  const [sessionNotFound, setSessionNotFound] = useState(false);
+  const [hydratedSessionId, setHydratedSessionId] = useState<string | null>(null);
+  const [liveStatusOverride, setLiveStatusOverride] = useState<SessionRoute["status"] | null>(null);
+  const [liveUsageOverride, setLiveUsageOverride] = useState<SessionUsageSummary | null>(null);
 
-  const isLoadingHistory = loadedSessionId !== sessionId;
+  const artifacts = artifactsQuery.data ?? [];
+  const sessionDetail: SessionRoute | null = useMemo(() => {
+    const base = sessionInfoQuery.data?.session ?? null;
+    if (!base) return null;
+    return liveStatusOverride ? { ...base, status: liveStatusOverride } : base;
+  }, [sessionInfoQuery.data?.session, liveStatusOverride]);
+  const sessionUsage = liveUsageOverride ?? sessionInfoQuery.data?.usage ?? null;
+  const sessionNotFound = Boolean(sessionInfoQuery.isError);
+
+  const isLoadingHistory = historyEventsQuery.isPending && hydratedSessionId !== sessionId;
 
   // Embedded mode sub-tab state
   const [embeddedTab, setEmbeddedTab] = useState<"chat" | "events" | "artifacts" | "info">("chat");
@@ -114,6 +146,12 @@ export function SessionConversation({
   const eventBufferRef = useRef<RuntimeEvent[]>([]);
   const throttleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSequenceRef = useRef<number>(0);
+  const eventsRef = useRef<RuntimeEvent[]>([]);
+  const historyDataRef = useRef<RuntimeEvent[] | undefined>(undefined);
+  historyDataRef.current = historyEventsQuery.data;
+  const hasHistory = historyEventsQuery.data !== undefined;
+  const baseUsageRef = useRef<SessionUsageSummary | null>(null);
+  baseUsageRef.current = sessionInfoQuery.data?.usage ?? null;
 
   const flushEventBuffer = useCallback(() => {
     if (throttleTimerRef.current) {
@@ -144,6 +182,8 @@ export function SessionConversation({
     setEmbeddedTab("chat");
     setEventFilter("");
     setExpandedEvents({});
+    setLiveStatusOverride(null);
+    setLiveUsageOverride(null);
     return () => {
       if (artifactDebounceTimerRef.current) {
         clearTimeout(artifactDebounceTimerRef.current);
@@ -153,28 +193,6 @@ export function SessionConversation({
         throttleTimerRef.current = null;
       }
       eventBufferRef.current = [];
-    };
-  }, [sessionId]);
-
-  useEffect(() => {
-    let active = true;
-    setSessionNotFound(false);
-    setSessionDetail(null);
-    setSessionUsage(null);
-    sessionsApi
-      .get(sessionId)
-      .then((data) => {
-        if (!active) return;
-        setSessionDetail(data.session);
-        setSessionUsage(data.usage ?? null);
-      })
-      .catch((err) => {
-        if (!active) return;
-        console.warn("Session not found or error loading session info:", err);
-        setSessionNotFound(true);
-      });
-    return () => {
-      active = false;
     };
   }, [sessionId]);
 
@@ -203,7 +221,8 @@ export function SessionConversation({
         lastSequenceRef.current = evt.sequence;
       }
 
-      setEvents((prev) => [...prev, evt]);
+      eventsRef.current = [...eventsRef.current, evt];
+      setEvents(eventsRef.current);
 
       if (evt.type === "turn.started") {
         flushEventBuffer();
@@ -246,19 +265,21 @@ export function SessionConversation({
         });
         const turnUsage = parseTurnUsage(evt.payload?.usage);
         if (turnUsage) {
-          setSessionUsage((prev) => mergeTurnUsageIntoSummary(prev, turnUsage));
+          setLiveUsageOverride((prev) =>
+            mergeTurnUsageIntoSummary(prev ?? baseUsageRef.current, turnUsage),
+          );
         }
-        sessionsApi.listArtifacts(sessionId).then(setArtifacts).catch(() => {});
-        if (!readOnly) {
-          sessionsApi
-            .list(activeProjectId || undefined)
-            .then(setSessions)
-            .catch(() => {});
+        qc.setQueryData<RuntimeEvent[]>(queryKeys.sessionEvents(sessionId), eventsRef.current);
+        void qc.invalidateQueries({ queryKey: queryKeys.sessionArtifacts(sessionId) });
+        void qc.invalidateQueries({ queryKey: queryKeys.sessionDetail(sessionId) });
+        if (!readOnly && activeProjectId) {
+          void qc.invalidateQueries({ queryKey: queryKeys.sessions(activeProjectId) });
         }
       } else if (evt.type === "session.closed" || evt.type === "session.archived") {
         flushEventBuffer();
         const nextStatus = evt.type === "session.closed" ? "closed" : "archived";
-        setSessionDetail((prev) => (prev ? { ...prev, status: nextStatus } : null));
+        setLiveStatusOverride(nextStatus);
+        void qc.invalidateQueries({ queryKey: queryKeys.sessionDetail(sessionId) });
         if (!readOnly) {
           setSessions((prev) =>
             prev.map((s) => (s.sessionId === sessionId ? { ...s, status: nextStatus } : s)),
@@ -269,7 +290,7 @@ export function SessionConversation({
       } else if (evt.type === "artifact.created") {
         if (artifactDebounceTimerRef.current) clearTimeout(artifactDebounceTimerRef.current);
         artifactDebounceTimerRef.current = setTimeout(() => {
-          sessionsApi.listArtifacts(sessionId).then(setArtifacts).catch(() => {});
+          void qc.invalidateQueries({ queryKey: queryKeys.sessionArtifacts(sessionId) });
         }, 150);
       } else if (evt.type === "session.runtime_reset" && !readOnly) {
         toast.warning("运行时会话已重置，Agent 不再保留之前的对话上下文");
@@ -288,12 +309,21 @@ export function SessionConversation({
         }
       }
     },
-    [sessionId, activeProjectId, readOnly, setSessions, flushEventBuffer],
+    [sessionId, activeProjectId, readOnly, setSessions, flushEventBuffer, qc],
   );
 
+  // Hydrate local streaming state once per sessionId from React Query cached history
+  // and attach SSE from maxSeq. Using `hasHistory` keeps the SSE connection stable across
+  // cache updates and background refetches.
   useEffect(() => {
-    let isMounted = true;
-    lastSequenceRef.current = 0;
+    const history = historyDataRef.current;
+    if (!hasHistory || !history) {
+      eventsRef.current = [];
+      setMessages([]);
+      setEvents([]);
+      setIsRunning(false);
+      return;
+    }
 
     if (unsubscribeRef.current) {
       unsubscribeRef.current();
@@ -305,52 +335,29 @@ export function SessionConversation({
       throttleTimerRef.current = null;
     }
 
-    setMessages([]);
-    setEvents([]);
-    setArtifacts([]);
-    setIsRunning(false);
+    eventsRef.current = history;
+    setEvents(history);
+    const { messages: parsed, isRunning: running } = reconstructMessagesFromEvents(history);
+    setMessages(parsed);
+    setIsRunning(running);
+    setHydratedSessionId(sessionId);
 
-    sessionsApi
-      .listArtifacts(sessionId)
-      .then((arts) => {
-        if (isMounted) setArtifacts(arts);
-      })
-      .catch(() => {});
+    const maxSeq = history.reduce((max, e) => Math.max(max, e.sequence ?? 0), 0);
+    lastSequenceRef.current = maxSeq;
 
-    sessionsApi
-      .listEvents(sessionId)
-      .then((history) => {
-        if (!isMounted) return;
-        setEvents(history);
-        const { messages: parsed, isRunning: running } =
-          reconstructMessagesFromEvents(history);
-        setMessages(parsed);
-        setIsRunning(running);
-        setLoadedSessionId(sessionId);
-
-        const maxSeq = history.reduce((max, e) => Math.max(max, e.sequence ?? 0), 0);
-        lastSequenceRef.current = maxSeq;
-
-        const alreadyEnded = history.some(
-          (e) => e.type === "session.closed" || e.type === "session.archived",
-        );
-        if (!alreadyEnded) {
-          unsubscribeRef.current = sessionsApi.subscribeEvents(
-            sessionId,
-            handleEvent,
-            (err) => console.warn("SSE connection state change / reconnecting:", err),
-            maxSeq,
-          );
-        }
-      })
-      .catch((err) => {
-        if (!isMounted) return;
-        console.error("Failed to load session events:", err);
-        setLoadedSessionId(sessionId);
-      });
+    const alreadyEnded = history.some(
+      (e) => e.type === "session.closed" || e.type === "session.archived",
+    );
+    if (!alreadyEnded) {
+      unsubscribeRef.current = sessionsApi.subscribeEvents(
+        sessionId,
+        handleEvent,
+        (err) => console.warn("SSE connection state change / reconnecting:", err),
+        maxSeq,
+      );
+    }
 
     return () => {
-      isMounted = false;
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
         unsubscribeRef.current = null;
@@ -360,8 +367,11 @@ export function SessionConversation({
         clearTimeout(throttleTimerRef.current);
         throttleTimerRef.current = null;
       }
+      if (eventsRef.current.length > 0) {
+        qc.setQueryData<RuntimeEvent[]>(queryKeys.sessionEvents(sessionId), eventsRef.current);
+      }
     };
-  }, [sessionId, handleEvent]);
+  }, [sessionId, hasHistory, handleEvent, qc]);
 
   const handleSendMessage = async (text: string): Promise<boolean> => {
     if (!text.trim() || isRunning) return false;
@@ -397,7 +407,8 @@ export function SessionConversation({
         errMsg.includes("read-only") ||
         errMsg.includes("session_not_found")
       ) {
-        setSessionDetail((prev) => (prev ? { ...prev, status: "archived" } : null));
+        setLiveStatusOverride("archived");
+        void qc.invalidateQueries({ queryKey: queryKeys.sessionDetail(sessionId) });
         setSessions((prev) =>
           prev.map((s) => (s.sessionId === sessionId ? { ...s, status: "archived" } : s)),
         );
