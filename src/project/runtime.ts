@@ -56,6 +56,7 @@ import {
 } from "../task/index.ts";
 import {
   builtinTools,
+  loadProjectTools,
   ToolRegistry,
   type PipelineOwner,
   type SessionTools,
@@ -475,6 +476,21 @@ export class ProjectRuntime {
         this.options.scheduledJobPollIntervalMs ?? 30_000,
       ),
     );
+
+    if (this.project.projectDir && this.project.id !== GLOBAL_PROJECT_ID && !this.options.tools) {
+      const customTools = await loadProjectTools(
+        this.project.projectDir,
+        this.project.id,
+        this.logger,
+      );
+      if (customTools.length > 0) {
+        this.tools.register(customTools, { override: true });
+        this.logger.info("project custom tools loaded", {
+          projectId: this.project.id,
+          tools: customTools.map((tool) => tool.name),
+        });
+      }
+    }
 
     if (this.project.projectDir) {
       await this.loadAndScheduleTasks().catch((err) => {

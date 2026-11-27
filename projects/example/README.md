@@ -1,6 +1,6 @@
 # Example Project Template
 
-This template provides reference configurations, tasks, pipelines (`pipelines/`), skills, environment files (`.env.example`), and lifecycle scripts for projects managed by Agent Orchestrator.
+This template provides reference configurations, custom tools (`tools/`), tasks (`tasks/`), pipelines (`pipelines/`), skills (`.skills/`), environment files (`.env.example`), and lifecycle scripts for projects managed by Agent Orchestrator.
 
 ## Default State
 - `project.enabled: false`: **Not scanned or loaded by the system by default**, not registered into the runtime.

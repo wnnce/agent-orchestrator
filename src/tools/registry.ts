@@ -23,8 +23,23 @@ export class ToolRegistry {
     private readonly logger: Logger,
     private readonly audit?: (record: ToolExecutionRecord) => Promise<void>,
   ) {
-    for (const tool of tools) {
-      if (this.tools.has(tool.name)) throw new Error(`duplicate tool: ${tool.name}`);
+    this.register(tools);
+  }
+
+  /**
+   * Registers one or more tools. Throws on duplicate names unless `options.override` is true,
+   * in which case the new definition replaces the existing one.
+   */
+  register(
+    tools: ToolDefinition | readonly ToolDefinition[],
+    options: { readonly override?: boolean | undefined } = {},
+  ): void {
+    const list: readonly ToolDefinition[] = Array.isArray(tools) ? tools : [tools];
+    for (const tool of list) {
+      if (this.tools.has(tool.name)) {
+        if (!options.override) throw new Error(`duplicate tool: ${tool.name}`);
+        this.logger.info("tool overridden", { tool: tool.name });
+      }
       this.tools.set(tool.name, tool);
     }
   }
