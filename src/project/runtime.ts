@@ -637,11 +637,12 @@ export class ProjectRuntime {
   }
 
   /** Renames a session at the user's request. */
-  async renameSession(sessionId: string, title: string): Promise<boolean> {
+  async renameSession(sessionId: string, title: string): Promise<void> {
     const cleanTitle = title.trim().slice(0, 255);
-    if (!(await this.store.updateSessionTitle(sessionId, cleanTitle))) return false;
+    if (!(await this.store.updateSessionTitle(sessionId, cleanTitle))) {
+      throw new NotFoundError(`Session ${sessionId} not found`, ErrorCode.SESSION_NOT_FOUND);
+    }
     await this.applyTitle(sessionId, cleanTitle);
-    return true;
   }
   /** Sets an automatically generated title unless the session got one in the meantime. */
   async setGeneratedTitle(sessionId: string, title: string): Promise<void> {
@@ -1072,16 +1073,26 @@ export class ProjectRuntime {
     await this.loadSession(sessionId);
     return this.store.listEvents(sessionId, after);
   }
-  async listArtifacts(sessionId: string): Promise<ArtifactRecord[]> {
+  /**
+   * Artifacts a session produced. Internal ones (`agent-message`, the agent's own message log)
+   * are left out unless `includeInternal` is set.
+   */
+  async listArtifacts(
+    sessionId: string,
+    options: { includeInternal?: boolean } = {},
+  ): Promise<ArtifactRecord[]> {
     await this.loadSession(sessionId);
-    return this.store.listArtifacts({ kind: "session", id: sessionId });
+    const artifacts = await this.store.listArtifacts({ kind: "session", id: sessionId });
+    return options.includeInternal
+      ? artifacts
+      : artifacts.filter((artifact) => artifact.kind !== "agent-message");
   }
 
   async artifact(
     sessionId: string,
     artifactId: string,
   ): Promise<ArtifactRecord> {
-    const artifacts = await this.listArtifacts(sessionId);
+    const artifacts = await this.listArtifacts(sessionId, { includeInternal: true });
     const artifact = artifacts.find((item) => item.id === artifactId);
     if (!artifact) {
       throw new NotFoundError(`artifact not found: ${artifactId}`, ErrorCode.ARTIFACT_NOT_FOUND);

@@ -158,12 +158,6 @@ export class GatewayService {
     return this.projects.get(route.projectId).turn(sessionId, input);
   }
 
-  async renameSession(sessionId: string, title: string): Promise<boolean> {
-    const route = await this.store.getSession(sessionId);
-    if (!route) return false;
-    return this.projects.get(route.projectId).renameSession(sessionId, title);
-  }
-
   /** Names the session after `query` in the background, unless it gets a title first. */
   generateSessionTitle(sessionId: string, query: string): void {
     void this.titles

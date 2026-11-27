@@ -1,8 +1,7 @@
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import type { Context, TypedResponse } from "hono";
 import { streamSSE } from "hono/streaming";
-import { ErrorCode, ForbiddenError, NotFoundError } from "../../domain/errors.ts";
-import type { SessionRoute } from "../../domain/types.ts";
+import { ErrorCode, ForbiddenError } from "../../domain/errors.ts";
 import type { EventHub } from "../../events/hub.ts";
 import type { Store } from "../../persistence/store.ts";
 import type { ProjectManager } from "../../project/manager.ts";
@@ -31,14 +30,6 @@ export interface SessionsRouteDeps {
   projects: ProjectManager;
   eventHub: EventHub;
   service: GatewayService;
-}
-
-async function requireSession(store: Store, sessionId: string): Promise<SessionRoute> {
-  const route = await store.getSession(sessionId);
-  if (!route) {
-    throw new NotFoundError(`Session ${sessionId} not found`, ErrorCode.SESSION_NOT_FOUND);
-  }
-  return route;
 }
 
 export function createSessionsRouter(deps: SessionsRouteDeps): OpenAPIHono {
@@ -74,16 +65,15 @@ export function createSessionsRouter(deps: SessionsRouteDeps): OpenAPIHono {
 
   router.openapi(getSessionRoute, async (c) => {
     const { sessionId } = c.req.valid("param");
-    const route = await requireSession(deps.store, sessionId);
-    const project = deps.projects.get(route.projectId);
+    const runtime = await deps.projects.runtimeForSession(sessionId);
+    const session = await runtime.getSession(sessionId);
     const usage = await deps.store.getSessionUsage(sessionId);
-    return c.json({ session: route, project: project.project.routing, usage }, 200);
+    return c.json({ session, project: runtime.project.routing, usage }, 200);
   });
 
   router.openapi(deleteSessionRoute, async (c) => {
     const { sessionId } = c.req.valid("param");
-    const route = await requireSession(deps.store, sessionId);
-    await deps.projects.get(route.projectId).cleanupSession(sessionId);
+    await (await deps.projects.runtimeForSession(sessionId)).cleanupSession(sessionId);
     return c.json({ status: "deleted" as const, sessionId }, 200);
   });
 
@@ -98,10 +88,7 @@ export function createSessionsRouter(deps: SessionsRouteDeps): OpenAPIHono {
     async (c) => {
       const { sessionId } = c.req.valid("param");
       const { title } = c.req.valid("json");
-      const ok = await deps.service.renameSession(sessionId, title);
-      if (!ok) {
-        throw new NotFoundError(`Session ${sessionId} not found`, ErrorCode.SESSION_NOT_FOUND);
-      }
+      await (await deps.projects.runtimeForSession(sessionId)).renameSession(sessionId, title);
       return c.json({ status: "ok" as const, sessionId, title }, 200);
     },
     renameValidationHook,
@@ -112,10 +99,7 @@ export function createSessionsRouter(deps: SessionsRouteDeps): OpenAPIHono {
     async (c) => {
       const { sessionId } = c.req.valid("param");
       const { title } = c.req.valid("json");
-      const ok = await deps.service.renameSession(sessionId, title);
-      if (!ok) {
-        throw new NotFoundError(`Session ${sessionId} not found`, ErrorCode.SESSION_NOT_FOUND);
-      }
+      await (await deps.projects.runtimeForSession(sessionId)).renameSession(sessionId, title);
       return c.json({ status: "ok" as const, sessionId, title }, 200);
     },
     renameValidationHook,
@@ -124,8 +108,7 @@ export function createSessionsRouter(deps: SessionsRouteDeps): OpenAPIHono {
   // 3. Events Stream & History
   router.openapi(sessionEventsRoute, async (c) => {
     const { sessionId } = c.req.valid("param");
-    const route = await requireSession(deps.store, sessionId);
-    const project = deps.projects.get(route.projectId);
+    const project = await deps.projects.runtimeForSession(sessionId);
     const query = c.req.valid("query");
 
     const headerAfter = Number(c.req.header("last-event-id") ?? 0);
@@ -171,19 +154,16 @@ export function createSessionsRouter(deps: SessionsRouteDeps): OpenAPIHono {
   router.openapi(listSessionArtifactsRoute, async (c) => {
     const { sessionId } = c.req.valid("param");
     const { includeInternal } = c.req.valid("query");
-    const route = await requireSession(deps.store, sessionId);
-    const allArtifacts = await deps.projects.get(route.projectId).listArtifacts(sessionId);
-    const artifacts =
-      includeInternal === "true"
-        ? allArtifacts
-        : allArtifacts.filter((a) => a.kind !== "agent-message");
+    const runtime = await deps.projects.runtimeForSession(sessionId);
+    const artifacts = await runtime.listArtifacts(sessionId, {
+      includeInternal: includeInternal === "true",
+    });
     return c.json({ artifacts }, 200);
   });
 
   router.openapi(downloadSessionArtifactRoute, async (c) => {
     const { sessionId, artifactId } = c.req.valid("param");
-    const route = await requireSession(deps.store, sessionId);
-    const project = deps.projects.get(route.projectId);
+    const project = await deps.projects.runtimeForSession(sessionId);
     const artifact = await project.artifact(sessionId, artifactId);
     const content = await project.readArtifact(artifact);
     return new Response(Buffer.from(content), {
@@ -197,7 +177,7 @@ export function createSessionsRouter(deps: SessionsRouteDeps): OpenAPIHono {
   // 5. Turns & Interaction (Protected with Task Session Read-Only Guard)
   router.openapi(submitTurnRoute, async (c) => {
     const { sessionId } = c.req.valid("param");
-    const route = await requireSession(deps.store, sessionId);
+    const route = await (await deps.projects.runtimeForSession(sessionId)).getSession(sessionId);
 
     if (route.source === "task") {
       throw new ForbiddenError(
@@ -213,23 +193,20 @@ export function createSessionsRouter(deps: SessionsRouteDeps): OpenAPIHono {
 
   router.openapi(steerSessionRoute, async (c) => {
     const { sessionId } = c.req.valid("param");
-    const route = await requireSession(deps.store, sessionId);
     const { input } = c.req.valid("json");
-    await deps.projects.get(route.projectId).steer(sessionId, input);
+    await (await deps.projects.runtimeForSession(sessionId)).steer(sessionId, input);
     return c.json({ status: "accepted" as const }, 202);
   });
 
   router.openapi(interruptSessionRoute, async (c) => {
     const { sessionId } = c.req.valid("param");
-    const route = await requireSession(deps.store, sessionId);
-    await deps.projects.get(route.projectId).interrupt(sessionId);
+    await (await deps.projects.runtimeForSession(sessionId)).interrupt(sessionId);
     return c.json({ status: "accepted" as const }, 202);
   });
 
   router.openapi(compactSessionRoute, async (c) => {
     const { sessionId } = c.req.valid("param");
-    const route = await requireSession(deps.store, sessionId);
-    await deps.projects.get(route.projectId).compact(sessionId);
+    await (await deps.projects.runtimeForSession(sessionId)).compact(sessionId);
     return c.json({ status: "accepted" as const }, 202);
   });
 
@@ -237,9 +214,10 @@ export function createSessionsRouter(deps: SessionsRouteDeps): OpenAPIHono {
     approveSessionToolRoute,
     async (c) => {
       const { sessionId } = c.req.valid("param");
-      const route = await requireSession(deps.store, sessionId);
       const { requestId, decision } = c.req.valid("json");
-      await deps.projects.get(route.projectId).approve(sessionId, requestId, decision);
+      await (
+        await deps.projects.runtimeForSession(sessionId)
+      ).approve(sessionId, requestId, decision);
       return c.json({ status: "accepted" as const }, 202);
     },
     (result, c) => {

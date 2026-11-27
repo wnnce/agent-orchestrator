@@ -1,4 +1,5 @@
 import type { OpenAPIHono } from "@hono/zod-openapi";
+import { fetchPage } from "../../persistence/pagination.ts";
 import type { Store } from "../../persistence/store.ts";
 import type { ProjectManager } from "../../project/manager.ts";
 import {
@@ -21,15 +22,13 @@ export function createTasksRouter(deps: TasksRouteDeps): OpenAPIHono {
   router.openapi(listProjectTasksRoute, async (c) => {
     const { projectId } = c.req.valid("param");
     const runtime = deps.projects.get(projectId);
-    const tasks = await runtime.listTasks();
-    const scheduled = runtime.taskScheduler.getScheduledTasks();
-    const scheduledMap = new Map(scheduled.map((s) => [s.taskKey, s]));
-    const result = tasks.map((t) => ({
-      ...t,
-      isScheduled: runtime.taskScheduler.isScheduled(t.taskKey),
-      nextRun: scheduledMap.get(t.taskKey)?.nextRun?.toISOString() ?? null,
+    const scheduler = runtime.taskScheduler;
+    const tasks = (await runtime.listTasks()).map((task) => ({
+      ...task,
+      isScheduled: scheduler.isScheduled(task.taskKey),
+      nextRun: scheduler.getNextRun(task.taskKey)?.toISOString() ?? null,
     }));
-    return c.json({ projectId, tasks: result }, 200);
+    return c.json({ projectId, tasks }, 200);
   });
 
   router.openapi(runProjectTaskRoute, async (c) => {
@@ -52,51 +51,37 @@ export function createTasksRouter(deps: TasksRouteDeps): OpenAPIHono {
   router.openapi(listTaskExecutionsRoute, async (c) => {
     const { projectId, taskId } = c.req.valid("param");
     const query = c.req.valid("query");
-    const effectiveLimit = query.limit ?? 20;
-    const beforeId = query.beforeId ?? query.cursor;
     const taskKey = `${projectId}:${taskId}`;
-    const rows = await deps.store.listTaskExecutions(taskKey, effectiveLimit + 1, undefined, {
-      beforeId,
-      status: query.status,
-    });
-    const hasMore = rows.length > effectiveLimit;
-    const executions = hasMore ? rows.slice(0, effectiveLimit) : rows;
-    const lastId = executions.length > 0 ? executions[executions.length - 1]?.id : undefined;
-    const nextBeforeId = hasMore && typeof lastId === "number" ? lastId : null;
+    const { items: executions, hasMore } = await fetchPage(query.limit ?? 20, (limit) =>
+      deps.store.listTaskExecutions(taskKey, limit, undefined, {
+        beforeId: query.beforeId ?? query.cursor,
+        status: query.status,
+      }),
+    );
+    const nextBeforeId = hasMore ? (executions.at(-1)?.id ?? null) : null;
     return c.json({ taskKey, executions, hasMore, nextBeforeId }, 200);
   });
 
   router.openapi(listGlobalTaskExecutionsRoute, async (c) => {
     const query = c.req.valid("query");
-    const effectiveLimit = query.limit ?? 50;
-    const beforeId = query.beforeId ?? query.cursor;
-    const rows = await deps.store.listTaskExecutions(
-      query.taskKey,
-      effectiveLimit + 1,
-      query.projectId,
-      { beforeId, status: query.status },
+    const { items: executions, hasMore } = await fetchPage(query.limit ?? 50, (limit) =>
+      deps.store.listTaskExecutions(query.taskKey, limit, query.projectId, {
+        beforeId: query.beforeId ?? query.cursor,
+        status: query.status,
+      }),
     );
-    const hasMore = rows.length > effectiveLimit;
-    const executions = hasMore ? rows.slice(0, effectiveLimit) : rows;
-    const lastId = executions.length > 0 ? executions[executions.length - 1]?.id : undefined;
-    const nextBeforeId = hasMore && typeof lastId === "number" ? lastId : null;
+    const nextBeforeId = hasMore ? (executions.at(-1)?.id ?? null) : null;
     return c.json({ executions, hasMore, nextBeforeId }, 200);
   });
 
   router.openapi(listTaskExecutionLogsRoute, async (c) => {
     const { executionId } = c.req.valid("param");
     const query = c.req.valid("query");
-    const effectiveLimit = query.limit ?? 200;
     const afterSequence = query.afterSeq && query.afterSeq > 0 ? query.afterSeq : undefined;
-
-    const rows = await deps.store.listTaskExecutionLogs(executionId, {
-      afterSequence,
-      level: query.level,
-      limit: effectiveLimit + 1,
-    });
-    const hasMore = rows.length > effectiveLimit;
-    const logs = hasMore ? rows.slice(0, effectiveLimit) : rows;
-    const nextAfterSeq = logs.length > 0 ? logs[logs.length - 1]!.sequence : (afterSequence ?? 0);
+    const { items: logs, hasMore } = await fetchPage(query.limit ?? 200, (limit) =>
+      deps.store.listTaskExecutionLogs(executionId, { afterSequence, level: query.level, limit }),
+    );
+    const nextAfterSeq = logs.at(-1)?.sequence ?? afterSequence ?? 0;
 
     return c.json({ executionId, logs, hasMore, nextAfterSeq }, 200);
   });

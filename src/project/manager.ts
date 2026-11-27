@@ -94,6 +94,26 @@ export class ProjectManager {
     }
     return runtime;
   }
+  /** The runtime of the project that owns `sessionId`. */
+  async runtimeForSession(sessionId: string): Promise<ProjectRuntime> {
+    const route = await this.store.getSession(sessionId);
+    if (!route) {
+      throw new NotFoundError(`Session ${sessionId} not found`, ErrorCode.SESSION_NOT_FOUND);
+    }
+    return this.get(route.projectId);
+  }
+  /** The runtime of the project that owns pipeline run `runId`. */
+  async runtimeForPipelineRun(runId: string): Promise<ProjectRuntime> {
+    const run = await this.store.pipelines.getRun(runId);
+    if (!run) throw new NotFoundError(`pipeline run not found: ${runId}`);
+    return this.get(run.projectId);
+  }
+  /** The runtime of the project that owns pipeline node run `nodeRunId`. */
+  async runtimeForNodeRun(nodeRunId: string): Promise<ProjectRuntime> {
+    const nodeRun = await this.store.pipelines.getNodeRun(nodeRunId);
+    if (!nodeRun) throw new NotFoundError(`pipeline node run not found: ${nodeRunId}`);
+    return this.get(nodeRun.projectId);
+  }
   getGlobalProject(): ProjectConfig {
     return this.globalProject;
   }

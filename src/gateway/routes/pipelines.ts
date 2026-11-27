@@ -1,10 +1,7 @@
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import type { TypedResponse } from "hono";
 import { streamSSE } from "hono/streaming";
-import { NotFoundError } from "../../domain/errors.ts";
-import type { Store } from "../../persistence/store.ts";
 import type { ProjectManager } from "../../project/manager.ts";
-import type { ProjectRuntime } from "../../project/runtime.ts";
 import {
   approvePipelineRunRoute,
   cancelPipelineRunRoute,
@@ -23,29 +20,6 @@ import { createOpenAPIApp } from "../openapi.ts";
 
 export interface PipelinesRouteDeps {
   readonly projects: ProjectManager;
-  readonly store: Store;
-}
-
-async function requireRuntimeForRun(
-  deps: PipelinesRouteDeps,
-  runId: string,
-): Promise<ProjectRuntime> {
-  const run = await deps.store.pipelines.getRun(runId);
-  if (!run) {
-    throw new NotFoundError(`pipeline run not found: ${runId}`);
-  }
-  return deps.projects.get(run.projectId);
-}
-
-async function requireRuntimeForNodeRun(
-  deps: PipelinesRouteDeps,
-  nodeRunId: string,
-): Promise<ProjectRuntime> {
-  const nodeRun = await deps.store.pipelines.getNodeRun(nodeRunId);
-  if (!nodeRun) {
-    throw new NotFoundError(`pipeline node run not found: ${nodeRunId}`);
-  }
-  return deps.projects.get(nodeRun.projectId);
 }
 
 export function createPipelinesRouter(deps: PipelinesRouteDeps): OpenAPIHono {
@@ -115,14 +89,14 @@ export function createPipelinesRouter(deps: PipelinesRouteDeps): OpenAPIHono {
   // 2. Pipeline Run Resources (addressed by globally unique runId)
   router.openapi(getPipelineRunDetailRoute, async (c) => {
     const { runId } = c.req.valid("param");
-    const runtime = await requireRuntimeForRun(deps, runId);
+    const runtime = await deps.projects.runtimeForPipelineRun(runId);
     const detail = await runtime.pipelineEngine.getRunDetail(runId);
     return c.json(detail, 200);
   });
 
   router.openapi(listPipelineRunActionsRoute, async (c) => {
     const { runId } = c.req.valid("param");
-    const runtime = await requireRuntimeForRun(deps, runId);
+    const runtime = await deps.projects.runtimeForPipelineRun(runId);
     const { afterSeq, ...query } = c.req.valid("query");
     const actions = await runtime.pipelineEngine.listRunActions(runId, {
       ...query,
@@ -133,35 +107,35 @@ export function createPipelinesRouter(deps: PipelinesRouteDeps): OpenAPIHono {
 
   router.openapi(approvePipelineRunRoute, async (c) => {
     const { runId } = c.req.valid("param");
-    const runtime = await requireRuntimeForRun(deps, runId);
+    const runtime = await deps.projects.runtimeForPipelineRun(runId);
     const run = await runtime.pipelineEngine.approveRun(runId, c.req.valid("json"));
     return c.json({ run }, 200);
   });
 
   router.openapi(rejectPipelineRunRoute, async (c) => {
     const { runId } = c.req.valid("param");
-    const runtime = await requireRuntimeForRun(deps, runId);
+    const runtime = await deps.projects.runtimeForPipelineRun(runId);
     const run = await runtime.pipelineEngine.rejectRun(runId, c.req.valid("json"));
     return c.json({ run }, 200);
   });
 
   router.openapi(retryPipelineRunRoute, async (c) => {
     const { runId } = c.req.valid("param");
-    const runtime = await requireRuntimeForRun(deps, runId);
+    const runtime = await deps.projects.runtimeForPipelineRun(runId);
     const run = await runtime.pipelineEngine.retryRun(runId, c.req.valid("json"));
     return c.json({ run }, 200);
   });
 
   router.openapi(cancelPipelineRunRoute, async (c) => {
     const { runId } = c.req.valid("param");
-    const runtime = await requireRuntimeForRun(deps, runId);
+    const runtime = await deps.projects.runtimeForPipelineRun(runId);
     const run = await runtime.pipelineEngine.cancelRun(runId, c.req.valid("json"));
     return c.json({ run }, 200);
   });
 
   router.openapi(signalPipelineRunRoute, async (c) => {
     const { runId } = c.req.valid("param");
-    const runtime = await requireRuntimeForRun(deps, runId);
+    const runtime = await deps.projects.runtimeForPipelineRun(runId);
     const result = await runtime.pipelineEngine.signalRun(runId);
     return c.json(result, 200);
   });
@@ -169,7 +143,7 @@ export function createPipelinesRouter(deps: PipelinesRouteDeps): OpenAPIHono {
   // 3. Pipeline Node Run Resources (addressed by globally unique nodeRunId)
   router.openapi(listPipelineNodeLogsRoute, async (c) => {
     const { nodeRunId } = c.req.valid("param");
-    const runtime = await requireRuntimeForNodeRun(deps, nodeRunId);
+    const runtime = await deps.projects.runtimeForNodeRun(nodeRunId);
     const { afterSeq, ...query } = c.req.valid("query");
     const logs = await runtime.pipelineEngine.listNodeRunLogs(nodeRunId, {
       ...query,
