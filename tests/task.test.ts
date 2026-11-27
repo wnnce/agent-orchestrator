@@ -21,7 +21,7 @@ import { ArtifactStore } from "../src/artifacts/store.ts";
 import type { ProjectConfig } from "../src/domain/types.ts";
 import type { AppConfig } from "../src/config/config.ts";
 import { ProjectManager } from "../src/project/manager.ts";
-import { Gateway } from "../src/gateway/server.ts";
+import { createGateway } from "./helpers/gateway.ts";
 import { Logger } from "../src/observability/logger.ts";
 
 describe("TaskLoader", () => {
@@ -644,7 +644,7 @@ Sync daily updates.
     const projectManager = new ProjectManager([project], store, config, logger);
     await projectManager.start();
 
-    const gateway = new Gateway(config, store, projectManager, logger);
+    const gateway = createGateway(config, store, projectManager, logger);
 
     try {
       // 1. GET /api/v1/projects/:projectId/tasks

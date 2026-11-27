@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { Gateway } from "../src/gateway/server.ts";
+import { createGateway } from "./helpers/gateway.ts";
 import { MemoryStore } from "../src/persistence/store.ts";
 import { ProjectManager } from "../src/project/manager.ts";
 import { Logger } from "../src/observability/logger.ts";
@@ -39,7 +39,7 @@ function createTestGateway(customConfig?: Partial<AppConfig>) {
   const store = new MemoryStore();
   const logger = new Logger();
   const projectManager = new ProjectManager([sampleProject], store, config, logger);
-  const gateway = new Gateway(config, store, projectManager, logger);
+  const gateway = createGateway(config, store, projectManager, logger);
   return { gateway, projectManager, store };
 }
 
@@ -309,7 +309,6 @@ describe("Gateway with Hono", () => {
         await replayReader.cancel();
       }
     } finally {
-      await gateway.stop();
       await projectManager.stop();
     }
   });
@@ -346,7 +345,6 @@ describe("Gateway with Hono", () => {
       expect(((await duplicate.json()) as any).duplicate).toBe(true);
       expect(attempts).toBe(2);
     } finally {
-      await gateway.stop();
       await projectManager.stop();
     }
   });
@@ -375,7 +373,6 @@ describe("Gateway with Hono", () => {
         expect(((await response.json()) as { error: string }).error).toBe("task_session_read_only");
       }
     } finally {
-      await gateway.stop();
       await projectManager.stop();
     }
   });

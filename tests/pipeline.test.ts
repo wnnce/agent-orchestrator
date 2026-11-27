@@ -6,7 +6,7 @@ import path from "node:path";
 import { ArtifactStore } from "../src/artifacts/store.ts";
 import type { AppConfig } from "../src/config/config.ts";
 import type { ProjectConfig } from "../src/domain/types.ts";
-import { Gateway } from "../src/gateway/server.ts";
+import { createGateway } from "./helpers/gateway.ts";
 import { Logger } from "../src/observability/logger.ts";
 import { MemoryStore } from "../src/persistence/store.ts";
 import {
@@ -1589,7 +1589,7 @@ export default definePipeline({
     const logger = new Logger({ level: "error" });
     const projectManager = new ProjectManager([project], store, config, logger);
     await projectManager.start();
-    const gateway = new Gateway(config, store, projectManager, logger);
+    const gateway = createGateway(config, store, projectManager, logger);
 
     try {
       // 1. GET /api/v1/projects/:projectId/pipelines
@@ -1757,7 +1757,6 @@ export default definePipeline({
       const paged = (await pagedRes.json()) as { actions: Array<{ sequence: number }> };
       expect(paged.actions.map((a) => a.sequence)).toEqual([3, 4]);
     } finally {
-      await gateway.stop();
       await projectManager.stop();
     }
   });

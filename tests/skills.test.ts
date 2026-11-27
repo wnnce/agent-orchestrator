@@ -7,7 +7,7 @@ import type { ProjectConfig } from "../src/domain/types.ts";
 import { ProjectManager } from "../src/project/manager.ts";
 import { MemoryStore } from "../src/persistence/store.ts";
 import { Logger } from "../src/observability/logger.ts";
-import { Gateway } from "../src/gateway/server.ts";
+import { createGateway } from "./helpers/gateway.ts";
 
 const testBaseDir = path.resolve("/tmp/orchestrator-skills-test-" + Date.now());
 
@@ -136,7 +136,7 @@ Be careful.`;
     } as any;
 
     const projectManager = new ProjectManager([project], store, appConfig, logger);
-    const gateway = new Gateway(appConfig, store, projectManager, logger);
+    const gateway = createGateway(appConfig, store, projectManager, logger);
 
     const res = await gateway.handle(new Request("http://localhost/api/v1/projects/proj-api/skills"));
     expect(res.status).toBe(200);

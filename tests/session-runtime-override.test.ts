@@ -4,7 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import type { AppConfig } from "../src/config/config.ts";
 import type { ProjectConfig } from "../src/domain/types.ts";
-import { Gateway } from "../src/gateway/server.ts";
+import type { Gateway } from "../src/gateway/server.ts";
+import { createGateway } from "./helpers/gateway.ts";
 import { Logger } from "../src/observability/logger.ts";
 import { MemoryStore } from "../src/persistence/store.ts";
 import { ProjectManager } from "../src/project/manager.ts";
@@ -134,11 +135,10 @@ describe("dynamic session runtime, model, and reasoningEffort selection", () => 
 
     manager = new ProjectManager([project], store, config, logger, undefined, undefined, registry);
     await manager.start();
-    gateway = new Gateway(config, store, manager, logger);
+    gateway = createGateway(config, store, manager, logger);
   });
 
   afterEach(async () => {
-    await gateway.stop();
     await manager.stop();
     await rm(root, { recursive: true, force: true });
   });

@@ -18,7 +18,8 @@ import { ArtifactStore } from "../src/artifacts/store.ts";
 import type { AppConfig } from "../src/config/config.ts";
 import { loadConfig } from "../src/config/service.ts";
 import type { ProjectConfig } from "../src/domain/types.ts";
-import { Gateway } from "../src/gateway/server.ts";
+import type { Gateway } from "../src/gateway/server.ts";
+import { createGateway } from "./helpers/gateway.ts";
 import { Logger } from "../src/observability/logger.ts";
 import {
   activeTraceIds,
@@ -185,7 +186,7 @@ describe("tracing setup", () => {
 });
 
 describe("HTTP tracing", () => {
-  function createGateway(lines: string[]): Gateway {
+  function createLoggedGateway(lines: string[]): Gateway {
     const config: AppConfig = {
       port: 7070,
       host: "127.0.0.1",
@@ -199,13 +200,13 @@ describe("HTTP tracing", () => {
     };
     const store = new MemoryStore();
     const logger = new Logger({ sink: (line) => lines.push(line) });
-    return new Gateway(config, store, new ProjectManager([], store, config, logger), logger);
+    return createGateway(config, store, new ProjectManager([], store, config, logger), logger);
   }
 
   test("continues the caller's trace and names the span after the route", async () => {
     enableTracing();
     const lines: string[] = [];
-    const gateway = createGateway(lines);
+    const gateway = createLoggedGateway(lines);
     const callerTraceId = "4bf92f3577b34da6a3ce929d0e0e4736";
 
     const res = await gateway.handle(
@@ -232,7 +233,7 @@ describe("HTTP tracing", () => {
 
   test("leaves health checks and other non-API paths untraced", async () => {
     enableTracing();
-    const gateway = createGateway([]);
+    const gateway = createLoggedGateway([]);
 
     await gateway.handle(new Request("http://localhost/healthz"));
 

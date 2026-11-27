@@ -5,19 +5,14 @@ import { randomUUID } from "node:crypto";
 import type { AppConfig } from "../config/config.ts";
 import { UnauthorizedError } from "../domain/errors.ts";
 import type { Store } from "../persistence/store.ts";
-import { ProjectManager } from "../project/manager.ts";
+import type { ProjectManager } from "../project/manager.ts";
 import { ProjectStats } from "../project/stats.ts";
 import type { Logger } from "../observability/logger.ts";
 import { createOpenAPIApp } from "./openapi.ts";
-import { createAppServices } from "../app/index.ts";
 import type { InboundService } from "../app/inbound.ts";
 import type { SessionService } from "../app/sessions.ts";
 import { httpTracing } from "./tracing.ts";
-import { createChannels } from "../channels/index.ts";
-import type { Channel } from "../channels/types.ts";
-import type { EventHub } from "../events/hub.ts";
 import { RuntimeModelCatalog } from "../runtime/catalog.ts";
-import type { SessionManager } from "../session/index.ts";
 import {
   createHealthRouter,
   createRuntimesRouter,
@@ -33,36 +28,32 @@ import {
 
 export const API_V1_PREFIX = "/api/v1";
 
+export interface GatewayDeps {
+  readonly config: AppConfig;
+  readonly logger: Logger;
+  readonly store: Store;
+  readonly projects: ProjectManager;
+  readonly sessions: SessionService;
+  readonly inbound: InboundService;
+}
+
+/** The HTTP API, its event streams and the web UI. */
 export class Gateway {
   readonly app: OpenAPIHono;
+  private readonly config: AppConfig;
+  private readonly logger: Logger;
+  private readonly store: Store;
+  private readonly projects: ProjectManager;
   private readonly sessions: SessionService;
   private readonly inbound: InboundService;
-  private readonly channels: Channel[];
-  private readonly eventHub: EventHub;
 
-  constructor(
-    private readonly config: AppConfig,
-    private readonly store: Store,
-    private readonly projects: ProjectManager,
-    private readonly logger: Logger,
-    eventHub?: EventHub,
-    readonly sessionManager?: SessionManager,
-  ) {
-    this.eventHub = eventHub ?? projects.eventHub;
-    this.channels = createChannels(config, {
-      eventHub: this.eventHub,
-      sessionManager: sessionManager ?? projects.sessionManager,
-      logger,
-    });
-    const services = createAppServices({
-      config,
-      store,
-      projects,
-      logger,
-      channels: this.channels,
-    });
-    this.sessions = services.sessions;
-    this.inbound = services.inbound;
+  constructor(deps: GatewayDeps) {
+    this.config = deps.config;
+    this.logger = deps.logger;
+    this.store = deps.store;
+    this.projects = deps.projects;
+    this.sessions = deps.sessions;
+    this.inbound = deps.inbound;
     this.app = this.createApp();
   }
 
@@ -129,7 +120,7 @@ export class Gateway {
       createSessionsRouter({
         store: this.store,
         projects: this.projects,
-        eventHub: this.eventHub,
+        eventHub: this.projects.eventHub,
         sessions: this.sessions,
       }),
     );
@@ -168,17 +159,6 @@ export class Gateway {
 
   async handle(request: Request): Promise<Response> {
     return this.app.fetch(request);
-  }
-
-  async start(): Promise<void> {
-    for (const channel of this.channels) {
-      await channel.start((envelope) => this.inbound.accept(envelope));
-    }
-  }
-
-  async stop(): Promise<void> {
-    await this.inbound.stop();
-    for (const channel of this.channels) await channel.stop();
   }
 
   listen(): Bun.Server<undefined> {

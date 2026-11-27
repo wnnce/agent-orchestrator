@@ -6,6 +6,8 @@ import {
 } from "./config/config.ts";
 import { MemoryStore, PostgresStore, type Store } from "./persistence/store.ts";
 import { ProjectManager } from "./project/manager.ts";
+import { createAppServices } from "./app/index.ts";
+import { createChannels } from "./channels/index.ts";
 import { Gateway } from "./gateway/server.ts";
 import { Logger } from "./observability/logger.ts";
 import { setupTracing } from "./observability/tracing-setup.ts";
@@ -37,14 +39,25 @@ const projectManager = new ProjectManager(
   sessionManager,
 );
 await projectManager.start();
-const gateway = new Gateway(config, store, projectManager, logger, eventHub, sessionManager);
-await gateway.start();
+const channels = createChannels(config, { eventHub, sessionManager, logger });
+const { sessions, inbound } = createAppServices({
+  config,
+  store,
+  projects: projectManager,
+  logger,
+  channels,
+});
+const gateway = new Gateway({ config, logger, store, projects: projectManager, sessions, inbound });
 const server = gateway.listen();
 logger.info("gateway listening", { host: config.host, port: config.port });
+for (const channel of channels) await channel.start((envelope) => inbound.accept(envelope));
+
 const shutdown = async () => {
   logger.info("service shutdown started");
-  await gateway.stop();
   server.stop(true);
+  // Draining the inbox may still stream replies, so channels stop after it.
+  await inbound.stop();
+  await Promise.all(channels.map((channel) => channel.stop()));
   await projectManager.stop();
   await store.close();
   await tracing.shutdown();

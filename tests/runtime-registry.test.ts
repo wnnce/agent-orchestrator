@@ -17,7 +17,7 @@ import { MemoryStore } from "../src/persistence/store.ts";
 import { Logger } from "../src/observability/logger.ts";
 import type { AppConfig } from "../src/config/config.ts";
 import type { ProjectConfig } from "../src/domain/types.ts";
-import { Gateway } from "../src/gateway/server.ts";
+import { createGateway } from "./helpers/gateway.ts";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
@@ -344,7 +344,7 @@ describe("Gateway /runtimes API", () => {
     const config = createSampleConfig("/tmp/gw-data", "/tmp/gw-artifacts");
     const logger = new Logger();
     const projectManager = new ProjectManager([project], store, config, logger);
-    const gateway = new Gateway(config, store, projectManager, logger);
+    const gateway = createGateway(config, store, projectManager, logger);
 
     const res = await gateway.app.request("/api/v1/runtimes");
     expect(res.status).toBe(200);
