@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { MemoryInbox } from "../src/gateway/inbox.ts";
+import { MemoryInbox } from "../src/app/inbox.ts";
 import { newSessionRoute } from "../src/persistence/store.ts";
 import type { InboundEnvelope } from "../src/channels/types.ts";
 const msg = (id: string, text = id): InboundEnvelope => ({

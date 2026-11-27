@@ -772,35 +772,46 @@ describe("Feishu /close Command", () => {
 
     const { Logger } = await import("../src/observability/logger.ts");
     const { ProjectManager } = await import("../src/project/manager.ts");
-    const { GatewayService } = await import("../src/gateway/service.ts");
+    const { createAppServices } = await import("../src/app/index.ts");
+    const { FeishuChannel } = await import("../src/channels/feishu/channel.ts");
 
     const logger = new Logger();
     const projectManager = new ProjectManager([project], store, config, logger, hub);
     await projectManager.start();
 
     try {
-      const gatewayService = new GatewayService(config, store, projectManager, logger, hub, client);
+      const feishu = new FeishuChannel(
+        { appId: "cli_app", appSecret: "sec_secret" },
+        { eventHub: hub, sessionManager: projectManager.sessionManager, logger },
+        client,
+      );
+      const { inbound } = createAppServices({
+        config,
+        store,
+        projects: projectManager,
+        logger,
+        channels: [feishu],
+      });
 
       // 1. Initial message creating session
-      const res1 = await gatewayService.handleInbound({
+      const res1 = await inbound.handle({
         messageId: "msg-1",
         conversation: { channel: "feishu", conversationId: "chat-feishu-100" },
         text: "close-test first question",
         receivedAt: new Date().toISOString(),
       });
-      expect(res1.session).toBeDefined();
-      const firstSessionId = res1.session.sessionId;
+      const firstSessionId = res1.session!.sessionId;
       expect(await store.getSession(firstSessionId)).toBeDefined();
 
       // 2. Send /close command
-      const resClose = await gatewayService.handleInbound({
+      const resClose = await inbound.handle({
         messageId: "msg-2",
         conversation: { channel: "feishu", conversationId: "chat-feishu-100" },
         text: "/close",
         receivedAt: new Date().toISOString(),
       });
       expect(resClose.command).toBe("close");
-      expect(resClose.session.sessionId).toBe(firstSessionId);
+      expect(resClose.session?.sessionId).toBe(firstSessionId);
 
       // Verify session was cleaned up
       expect(await store.getSession(firstSessionId)).toBeNull();
@@ -811,13 +822,13 @@ describe("Feishu /close Command", () => {
       expect(closeCard.header.title.content).toContain("会话已关闭");
 
       // 3. Subsequent message creates a brand new session!
-      const res3 = await gatewayService.handleInbound({
+      const res3 = await inbound.handle({
         messageId: "msg-3",
         conversation: { channel: "feishu", conversationId: "chat-feishu-100" },
         text: "close-test second new session",
         receivedAt: new Date().toISOString(),
       });
-      expect(res3.session.sessionId).not.toBe(firstSessionId);
+      expect(res3.session?.sessionId).not.toBe(firstSessionId);
     } finally {
       await projectManager.stop();
     }

@@ -3,11 +3,11 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import { ingestWebhookRoute } from "../contracts/webhooks.ts";
 import { createOpenAPIApp } from "../openapi.ts";
 import type { SessionService } from "../../app/sessions.ts";
-import type { GatewayService } from "../service.ts";
+import type { InboundService } from "../../app/inbound.ts";
 
 export interface WebhooksRouteDeps {
-  sessions: SessionService;
-  service: GatewayService;
+  readonly sessions: SessionService;
+  readonly inbound: InboundService;
 }
 
 export function createWebhooksRouter(deps: WebhooksRouteDeps): OpenAPIHono {
@@ -23,7 +23,7 @@ export function createWebhooksRouter(deps: WebhooksRouteDeps): OpenAPIHono {
       return c.json({ sessionId: body.sessionId, turn } as Record<string, unknown>, 202);
     }
 
-    const result = await deps.service.handleInbound({
+    const result = await deps.inbound.handle({
       messageId: body.messageId ?? `http_${randomUUID()}`,
       conversation: {
         channel: "http",

@@ -76,7 +76,7 @@ export class MemoryInbox {
                 candidate.status = "canceled";
           }
           const response = await this.dispatch(record.envelope);
-          record.sessionId = response.session.sessionId;
+          if (response.session) record.sessionId = response.session.sessionId;
           if (response.turn) record.turnId = response.turn.id;
           record.status = "completed";
           return response;

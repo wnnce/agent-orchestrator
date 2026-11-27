@@ -9,10 +9,12 @@ import { ProjectManager } from "../project/manager.ts";
 import { ProjectStats } from "../project/stats.ts";
 import type { Logger } from "../observability/logger.ts";
 import { createOpenAPIApp } from "./openapi.ts";
-import { GatewayService } from "./service.ts";
+import { createAppServices } from "../app/index.ts";
+import type { InboundService } from "../app/inbound.ts";
+import type { SessionService } from "../app/sessions.ts";
 import { httpTracing } from "./tracing.ts";
-import { FeishuWSAdapter } from "../channels/feishu.ts";
-import { WeComClient, WeComWSAdapter } from "../channels/wecom.ts";
+import { createChannels } from "../channels/index.ts";
+import type { Channel } from "../channels/types.ts";
 import type { EventHub } from "../events/hub.ts";
 import { RuntimeModelCatalog } from "../runtime/catalog.ts";
 import type { SessionManager } from "../session/index.ts";
@@ -33,9 +35,9 @@ export const API_V1_PREFIX = "/api/v1";
 
 export class Gateway {
   readonly app: OpenAPIHono;
-  private readonly service: GatewayService;
-  private readonly feishuWs?: FeishuWSAdapter;
-  private readonly wecomWs?: WeComWSAdapter;
+  private readonly sessions: SessionService;
+  private readonly inbound: InboundService;
+  private readonly channels: Channel[];
   private readonly eventHub: EventHub;
 
   constructor(
@@ -47,48 +49,20 @@ export class Gateway {
     readonly sessionManager?: SessionManager,
   ) {
     this.eventHub = eventHub ?? projects.eventHub;
-
-    const wecomConfig = config.wecom ?? { enabled: false };
-    let wecomClient: WeComClient | undefined;
-    if (wecomConfig.enabled && wecomConfig.botId && wecomConfig.secret) {
-      wecomClient = new WeComClient(
-        {
-          botId: wecomConfig.botId,
-          secret: wecomConfig.secret,
-          ...(wecomConfig.wsUrl ? { wsUrl: wecomConfig.wsUrl } : {}),
-        },
-        logger,
-      );
-    }
-
-    this.service = new GatewayService(
+    this.channels = createChannels(config, {
+      eventHub: this.eventHub,
+      sessionManager: sessionManager ?? projects.sessionManager,
+      logger,
+    });
+    const services = createAppServices({
       config,
       store,
       projects,
       logger,
-      this.eventHub,
-      undefined,
-      sessionManager ?? projects.sessionManager,
-      wecomClient,
-    );
-    const feishuConfig = config.feishu ?? { enabled: false };
-    if (feishuConfig.enabled && feishuConfig.appId && feishuConfig.appSecret) {
-      this.feishuWs = new FeishuWSAdapter(
-        {
-          appId: feishuConfig.appId,
-          appSecret: feishuConfig.appSecret,
-        },
-        (envelope) => this.service.acceptInbound(envelope),
-        logger,
-      );
-    }
-    if (wecomClient) {
-      this.wecomWs = new WeComWSAdapter(
-        wecomClient,
-        (envelope) => this.service.acceptInbound(envelope),
-        logger,
-      );
-    }
+      channels: this.channels,
+    });
+    this.sessions = services.sessions;
+    this.inbound = services.inbound;
     this.app = this.createApp();
   }
 
@@ -156,14 +130,11 @@ export class Gateway {
         store: this.store,
         projects: this.projects,
         eventHub: this.eventHub,
-        sessions: this.service.sessions,
+        sessions: this.sessions,
       }),
     );
     apiV1.route("/", createPipelinesRouter({ projects: this.projects }));
-    apiV1.route(
-      "/",
-      createWebhooksRouter({ sessions: this.service.sessions, service: this.service }),
-    );
+    apiV1.route("/", createWebhooksRouter({ sessions: this.sessions, inbound: this.inbound }));
 
     app.route(API_V1_PREFIX, apiV1);
 
@@ -200,22 +171,14 @@ export class Gateway {
   }
 
   async start(): Promise<void> {
-    if (this.feishuWs) {
-      await this.feishuWs.start();
-    }
-    if (this.wecomWs) {
-      await this.wecomWs.start();
+    for (const channel of this.channels) {
+      await channel.start((envelope) => this.inbound.accept(envelope));
     }
   }
 
   async stop(): Promise<void> {
-    if (this.feishuWs) {
-      this.feishuWs.stop();
-    }
-    if (this.wecomWs) {
-      this.wecomWs.stop();
-    }
-    await this.service.stop();
+    await this.inbound.stop();
+    for (const channel of this.channels) await channel.stop();
   }
 
   listen(): Bun.Server<undefined> {
