@@ -1,13 +1,7 @@
 import type { z } from "zod";
-import type { McpToolCallOptions, McpToolInfo, McpToolResult } from "../mcp/index.ts";
-import type { NotificationMessage, NotificationOptions } from "../notifications/index.ts";
-import type { Logger } from "../observability/logger.ts";
-import type {
-  ArtifactRecord,
-  ProjectVarValue,
-  ReasoningEffort,
-  TaskExecutionLogLevel,
-} from "../domain/types.ts";
+import type { ProjectContext } from "../context/types.ts";
+import type { PipelineOrigin } from "../domain/origin.ts";
+import type { ReasoningEffort, TaskExecutionLogLevel } from "../domain/types.ts";
 
 export type PipelineInputSchema = z.ZodObject<z.ZodRawShape>;
 
@@ -487,25 +481,30 @@ export type PipelineTsResult =
       readonly metadata?: Record<string, unknown> | undefined;
     };
 
-export interface PipelineTsRunContext<TData = Readonly<Record<string, unknown>>> {
-  readonly projectId: string;
-  readonly pipelineId: string;
-  readonly runId: string;
-  readonly nodeId: string;
-  readonly nodeRunId: string;
-  readonly attempt: number;
-  readonly workdir: string;
-  readonly branchName?: string | undefined;
+/**
+ * What a pipeline code node's handler receives: the project context acting as this node run, the
+ * node's typed input, and durable steps and waits that survive suspension and restarts.
+ */
+export interface NodeContext<TData = Readonly<Record<string, unknown>>> extends ProjectContext {
+  readonly origin: PipelineOrigin;
+  readonly run: {
+    readonly id: string;
+    readonly pipelineId: string;
+    readonly branchName?: string | undefined;
+  };
+  readonly node: {
+    readonly id: string;
+    readonly runId: string;
+    readonly attempt: number;
+  };
   /** Validated strong-typed `data` for this node (strictly `{}` if no `input` schema declared). */
   readonly data: TData;
   /** Free-form metadata passed into this node (from upstream handoff or initial run metadata). */
   readonly metadata: Readonly<Record<string, unknown>>;
   /** Present when this attempt was triggered by an upstream rejection/rework. */
   readonly rework?: PipelineReworkInfo | undefined;
-  readonly env: Readonly<Record<string, string>>;
-  readonly vars: Readonly<Record<string, ProjectVarValue>>;
-  readonly logger: Logger;
-  readonly signal: AbortSignal;
+  /** The run's Git worktree. */
+  readonly workspace: string;
 
   /** Durable step cache: runs `fn` once, persists result in `stepState.steps[key]`, returns cached value on replay. */
   step<T>(key: string, fn: () => Promise<T> | T): Promise<T>;
@@ -521,47 +520,24 @@ export interface PipelineTsRunContext<TData = Readonly<Record<string, unknown>>>
     check: () => Promise<T | false> | T | false,
   ): Promise<T>;
 
-  /** Read global pipeline overview + upstream handoff + latest node summaries. */
-  getContext(): Promise<PipelineGlobalContextView>;
-
-  /** List historical action records for this run. */
-  listHistory(filter?: {
-    readonly nodeId?: string | undefined;
-    readonly action?: PipelineActionName | undefined;
-  }): Promise<readonly PipelineHistoryEntrySummary[]>;
-
-  /** Read complete saved context and engine result for a specific historical record. */
-  getHistoryDetail(query: {
-    readonly recordId?: string | undefined;
-    readonly sequence?: number | undefined;
-    readonly nodeId?: string | undefined;
-    readonly attempt?: number | undefined;
-  }): Promise<PipelineActionRecord | null>;
-
-  /** Send notification via project NotificationOutbox. */
-  notify(message: NotificationMessage, options?: NotificationOptions): Promise<void>;
-
-  /** Persist an artifact to ArtifactStore. */
-  createArtifact(params: {
-    readonly kind: string;
-    readonly content: string | Uint8Array;
-    readonly contentType?: string | undefined;
-  }): Promise<ArtifactRecord>;
-
-  /** Call a tool on a project-configured MCP server (reuses ProjectMcpClientPool). */
-  callMcpTool<T = unknown>(
-    serverName: string,
-    toolName: string,
-    args?: Record<string, unknown>,
-    options?: McpToolCallOptions,
-  ): Promise<McpToolResult<T>>;
-
-  /** List tools on a project-configured MCP server. */
-  listMcpTools(serverName: string, options?: McpToolCallOptions): Promise<readonly McpToolInfo[]>;
+  /** What happened in this run so far. Reads only. */
+  readonly history: {
+    /** Global pipeline overview, upstream handoff and latest node summaries. */
+    context(): Promise<PipelineGlobalContextView>;
+    /** Historical action records for this run. */
+    list(filter?: PipelineHistoryFilter): Promise<readonly PipelineHistoryEntrySummary[]>;
+    /** Complete saved context and engine result for one historical record. */
+    get(query: {
+      readonly recordId?: string | undefined;
+      readonly sequence?: number | undefined;
+      readonly nodeId?: string | undefined;
+      readonly attempt?: number | undefined;
+    }): Promise<PipelineActionRecord | null>;
+  };
 }
 
 export type PipelineTsHandler<TData = Readonly<Record<string, unknown>>> = (
-  ctx: PipelineTsRunContext<TData>,
+  ctx: NodeContext<TData>,
 ) => Promise<PipelineTsResult> | PipelineTsResult;
 
 // =====================================================================

@@ -1,10 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { z } from "zod";
 import { pipelineNextInput } from "../tools/builtin/pipeline-node.ts";
-import type { ArtifactStore } from "../artifacts/store.ts";
 import type { PipelineOrigin } from "../domain/origin.ts";
 import type { ProjectConfig, SessionRoute } from "../domain/types.ts";
-import type { McpClientFactory } from "../mcp/index.ts";
+import type { ContextOptions, ScopedContext } from "../context/index.ts";
 import type { NotificationOutbox } from "../notifications/index.ts";
 import type { Logger } from "../observability/logger.ts";
 import { activeTraceparent, detached, linksTo, withSpan } from "../observability/tracing.ts";
@@ -78,12 +77,13 @@ export interface PipelineEngineDeps {
   readonly project: ProjectConfig;
   readonly store: PipelineStore;
   readonly workspaces: WorkspaceManager;
-  readonly artifacts: ArtifactStore;
+  /** Sends the run's own notifications (completion, failure). */
   readonly notifications: NotificationOutbox;
   readonly hub: PipelineEventHub;
   readonly logger: Logger;
   readonly sessions: PipelineSessionPort;
-  readonly mcpClientFactory?: McpClientFactory | undefined;
+  /** The project's capabilities acting as one node run, for code nodes. */
+  readonly createContext: (origin: PipelineOrigin, options: ContextOptions) => ScopedContext;
   /** Polls of waiting TS nodes are aligned to this window so nearby polls run together. */
   readonly minPollCoalesceMs?: number | undefined;
 }
@@ -843,7 +843,6 @@ export class PipelineEngine {
     try {
       const outcome = await runTsNode({
         store: this.deps.store,
-        project: this.deps.project,
         run,
         nodes: state.nodes,
         nodeRun: state.nodeRun,
@@ -851,9 +850,7 @@ export class PipelineEngine {
         workspacePath: run.workspacePath!,
         signal: controller.signal,
         logger: this.deps.logger,
-        artifacts: this.deps.artifacts,
-        notifications: this.deps.notifications,
-        mcpClientFactory: this.deps.mcpClientFactory,
+        createContext: this.deps.createContext,
       });
       switch (outcome.kind) {
         case "result":

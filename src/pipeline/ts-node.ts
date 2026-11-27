@@ -1,10 +1,8 @@
-import type { ArtifactStore } from "../artifacts/store.ts";
-import type { ProjectConfig } from "../domain/types.ts";
-import { ProjectMcpClientPool, type McpClientFactory } from "../mcp/index.ts";
-import type { NotificationOutbox } from "../notifications/index.ts";
+import type { ContextOptions, ScopedContext } from "../context/index.ts";
+import type { PipelineOrigin } from "../domain/origin.ts";
 import type { Logger } from "../observability/logger.ts";
 import type { PipelineStore } from "../persistence/types.ts";
-import { buildGlobalContext, getHistoryDetail, listHistory } from "./context.ts";
+import { buildGlobalContext, getHistoryDetail, listHistory, nodePromptScopes } from "./context.ts";
 import { PipelineNodeLogBuffer } from "./log-buffer.ts";
 import type {
   PipelineNodeConfig,
@@ -15,7 +13,7 @@ import type {
   PipelineStepCacheEntry,
   PipelineStepState,
   PipelineTsResult,
-  PipelineTsRunContext,
+  NodeContext,
   PipelineWaitStateEntry,
   PipelineWaitUntilOptions,
 } from "./types.ts";
@@ -35,7 +33,6 @@ export type TsNodeOutcome =
 
 export interface TsNodeExecution {
   readonly store: PipelineStore;
-  readonly project: ProjectConfig;
   readonly run: PipelineRunRecord;
   readonly nodes: readonly PipelineNodeSnapshot[];
   readonly nodeRun: PipelineNodeRunRecord;
@@ -43,9 +40,8 @@ export interface TsNodeExecution {
   readonly workspacePath: string;
   readonly signal: AbortSignal;
   readonly logger: Logger;
-  readonly artifacts: ArtifactStore;
-  readonly notifications: NotificationOutbox;
-  readonly mcpClientFactory?: McpClientFactory | undefined;
+  /** The project's capabilities acting as this node run. */
+  readonly createContext: (origin: PipelineOrigin, options: ContextOptions) => ScopedContext;
 }
 
 class SuspendSignal extends Error {
@@ -63,7 +59,7 @@ class SuspendSignal extends Error {
  * that suspends, or restarts after a crash, replays its handler without repeating finished steps.
  */
 export async function runTsNode(execution: TsNodeExecution): Promise<TsNodeOutcome> {
-  const { store, project, run, nodeRun, node } = execution;
+  const { store, run, nodeRun, node } = execution;
 
   const controller = new AbortController();
   const forwardAbort = () => controller.abort(execution.signal.reason);
@@ -90,14 +86,17 @@ export async function runTsNode(execution: TsNodeExecution): Promise<TsNodeOutco
     (entry) => logBuffer.push(entry),
     { captureAllLevels: true },
   );
-  const env = Object.freeze({ ...(project.env ?? {}) });
-  const mcpPool = new ProjectMcpClientPool({
-    servers: project.runtime?.mcpServers ?? [],
-    workdir: execution.workspacePath,
-    env,
+  const origin: PipelineOrigin = {
+    kind: "pipeline",
+    pipelineId: run.pipelineId,
+    runId: run.runId,
+    nodeId: node.id,
+    nodeRunId: nodeRun.nodeRunId,
+  };
+  const scoped = execution.createContext(origin, {
     signal: controller.signal,
     logger,
-    ...(execution.mcpClientFactory ? { clientFactory: execution.mcpClientFactory } : {}),
+    renderScopes: () => nodePromptScopes(run, node, nodeRun, data, metadata),
   });
 
   const steps: Record<string, PipelineStepCacheEntry> = { ...nodeRun.stepState.steps };
@@ -126,22 +125,19 @@ export async function runTsNode(execution: TsNodeExecution): Promise<TsNodeOutco
         })
       : undefined;
 
-  const ctx: PipelineTsRunContext = {
-    projectId: run.projectId,
-    pipelineId: run.pipelineId,
-    runId: run.runId,
-    nodeId: node.id,
-    nodeRunId: nodeRun.nodeRunId,
-    attempt: nodeRun.attempt,
-    workdir: execution.workspacePath,
-    ...(run.branchName ? { branchName: run.branchName } : {}),
+  const ctx: NodeContext = {
+    ...scoped.context,
+    origin,
+    run: {
+      id: run.runId,
+      pipelineId: run.pipelineId,
+      ...(run.branchName ? { branchName: run.branchName } : {}),
+    },
+    node: { id: node.id, runId: nodeRun.nodeRunId, attempt: nodeRun.attempt },
     data,
     metadata,
     ...(rework ? { rework } : {}),
-    env,
-    vars: Object.freeze({ ...(project.vars ?? {}) }),
-    logger,
-    signal: controller.signal,
+    workspace: execution.workspacePath,
 
     step: async <T>(key: string, fn: () => Promise<T> | T): Promise<T> => {
       throwIfAborted();
@@ -185,31 +181,12 @@ export async function runTsNode(execution: TsNodeExecution): Promise<TsNodeOutco
       return result;
     },
 
-    getContext: async () =>
-      buildGlobalContext(store, (await store.getRun(run.runId)) ?? run, execution.nodes, nodeRun),
-    listHistory: (filter) => listHistory(store, run.runId, filter),
-    getHistoryDetail: (query) => getHistoryDetail(store, run.runId, query),
-    notify: async (message, options) => {
-      await execution.notifications.queue(
-        run.projectId,
-        { kind: "pipeline", id: nodeRun.nodeRunId },
-        project.notifications,
-        message,
-        options,
-      );
+    history: {
+      context: async () =>
+        buildGlobalContext(store, (await store.getRun(run.runId)) ?? run, execution.nodes, nodeRun),
+      list: (filter) => listHistory(store, run.runId, filter),
+      get: (query) => getHistoryDetail(store, run.runId, query),
     },
-    createArtifact: (params) =>
-      execution.artifacts.write(
-        run.projectId,
-        { kind: "pipeline", id: nodeRun.nodeRunId },
-        undefined,
-        params.kind,
-        params.content,
-        params.contentType ?? "text/plain",
-      ),
-    callMcpTool: (serverName, toolName, args, options) =>
-      mcpPool.callTool(serverName, toolName, args, options),
-    listMcpTools: (serverName, options) => mcpPool.listTools(serverName, options),
   };
 
   let outcome: TsNodeOutcome;
@@ -232,7 +209,7 @@ export async function runTsNode(execution: TsNodeExecution): Promise<TsNodeOutco
   } finally {
     if (timer) clearTimeout(timer);
     execution.signal.removeEventListener("abort", forwardAbort);
-    await mcpPool.close();
+    await scoped.dispose();
     await logBuffer.flush();
   }
 

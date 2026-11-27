@@ -143,6 +143,22 @@ node.code({
 > [!NOTE]
 > Mixing `handler` with `input` or `run` on the same `node.code(...)` call is forbidden at both compile time and runtime — declare `input` inside `defineHandler(...)` so the handler remains the single source of truth for its contract.
 
+### The handler's `ctx` (`NodeContext`)
+
+`ctx` is the project context acting as this node run (see [design 16](../designs/16-project-context-and-tools/README.md)), plus what belongs to the node:
+
+| Member | Purpose |
+| --- | --- |
+| `ctx.data`, `ctx.metadata`, `ctx.rework` | The node's typed input, free-form metadata, and the rejection that caused this attempt |
+| `ctx.run` (`id`, `pipelineId`, `branchName`), `ctx.node` (`id`, `runId`, `attempt`) | Where the handler runs |
+| `ctx.workspace` | The run's Git worktree |
+| `ctx.step(key, fn)`, `ctx.waitUntil(key, options, check)` | Durable steps and zero-token waits |
+| `ctx.history.context()`, `ctx.history.list(filter)`, `ctx.history.get(query)` | Read the run's overview and recorded actions |
+| `ctx.project` (`id`, `dir`, `env`, `vars`), `ctx.logger`, `ctx.signal` | Project configuration, a logger whose lines are kept with the node run, cancellation |
+| `ctx.notify`, `ctx.artifacts.create`, `ctx.mcp.call` / `ctx.mcp.list` | Notifications, artifacts and MCP tools, attributed to this node run |
+| `ctx.sessions.start`, `ctx.pipelines.start` / `find` / `signal` | Start agent sessions and other pipeline runs (created by `pipeline:<runId>`) |
+| `ctx.render(template, extra?)` | Render a template with the same variables as agent prompts (`project`, `vars`, `now`, `data`, `metadata`, `pipeline`) |
+
 ## 6. Rework (`pipeline_prev` / `rejectRun`) Data Inheritance
 
 When a downstream node rejects work back to an upstream node (e.g. `pr_watch` -> `implement`), the rejecting node does **not** need to reconstruct the upstream node's original input schema:

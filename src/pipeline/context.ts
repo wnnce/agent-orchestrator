@@ -19,6 +19,38 @@ import type {
 
 /** What agents and TS handlers can read about their run. Reads only; never changes state. */
 
+/**
+ * The template variables of a node: `data`, `metadata` and `pipeline`. Agent prompts and code
+ * nodes' `ctx.render` see the same ones.
+ */
+export function nodePromptScopes(
+  run: PipelineRunRecord,
+  node: Pick<PipelineNodeConfig, "id" | "name">,
+  nodeRun: Pick<PipelineNodeRunRecord, "attempt">,
+  data: Readonly<Record<string, unknown>>,
+  metadata: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  return {
+    data,
+    metadata,
+    pipeline: {
+      id: run.pipelineId,
+      version: run.pipelineVersion,
+      runId: run.runId,
+      title: run.title,
+      description: run.description ?? "",
+      externalKey: run.externalKey ?? "",
+      externalUrl: run.externalUrl ?? "",
+      branchName: run.branchName ?? "",
+      nodeId: node.id,
+      nodeName: node.name,
+      attempt: nodeRun.attempt,
+      data,
+      metadata,
+    },
+  };
+}
+
 export interface PipelineHistoryQuery {
   readonly recordId?: string | undefined;
   readonly sequence?: number | undefined;
@@ -172,23 +204,7 @@ export async function buildAgentNodePrompt(params: {
     project: buildProjectPromptScope(project),
     vars: project.vars ?? {},
     now: buildNowPromptScope(),
-    data: nodeData,
-    metadata: nodeMetadata,
-    pipeline: {
-      id: run.pipelineId,
-      version: run.pipelineVersion,
-      runId: run.runId,
-      title: run.title,
-      description: run.description ?? "",
-      externalKey: run.externalKey ?? "",
-      externalUrl: run.externalUrl ?? "",
-      branchName: run.branchName ?? "",
-      nodeId: node.id,
-      nodeName: node.name,
-      attempt: nodeRun.attempt,
-      data: nodeData,
-      metadata: nodeMetadata,
-    },
+    ...nodePromptScopes(run, node, nodeRun, nodeData, nodeMetadata),
   }).rendered;
 
   return [

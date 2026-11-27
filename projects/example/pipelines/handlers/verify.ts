@@ -14,8 +14,8 @@ export const verifyHandler = defineHandler({
   }),
   async run(ctx) {
     const info = await ctx.step("collect-info", () => ({
-      runId: ctx.runId,
-      branch: ctx.branchName ?? "unknown",
+      runId: ctx.run.id,
+      branch: ctx.run.branchName ?? "unknown",
       changedFileCount: ctx.data.changedFiles.length,
       checkedAt: new Date().toISOString(),
     }));

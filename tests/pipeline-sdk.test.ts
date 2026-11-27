@@ -349,15 +349,15 @@ const watchPr = defineHandler({
   async run(ctx) {
     const log = JSON.parse(await readFile(observedFile, "utf8").catch(() => "[]"));
     log.push({
-      node: ctx.nodeId,
-      attempt: ctx.attempt,
+      node: ctx.node.id,
+      attempt: ctx.node.attempt,
       data: ctx.data,
       metadata: ctx.metadata,
       rework: ctx.rework ?? null,
     });
     await writeFile(observedFile, JSON.stringify(log), "utf8");
 
-    if (ctx.attempt === 1) {
+    if (ctx.node.attempt === 1) {
       return {
         action: "prev",
         targetNodeId: "implement",
@@ -405,8 +405,8 @@ export default definePipeline({
       async run(ctx) {
         const log = JSON.parse(await readFile(observedFile, "utf8").catch(() => "[]"));
         log.push({
-          node: ctx.nodeId,
-          attempt: ctx.attempt,
+          node: ctx.node.id,
+          attempt: ctx.node.attempt,
           data: ctx.data,
           metadata: ctx.metadata,
         });

@@ -516,8 +516,8 @@ import { defineHandler } from ${JSON.stringify(PIPELINE_SDK_PATH)};
 
 export const ciHandler = defineHandler({
   async run(ctx) {
-    ctx.logger.info("ci handler invoked", { attempt: ctx.attempt });
-    const artifactFromImpl = await readFile(path.join(ctx.workdir, "feature.txt"), "utf8");
+    ctx.logger.info("ci handler invoked", { attempt: ctx.node.attempt });
+    const artifactFromImpl = await readFile(path.join(ctx.workspace, "feature.txt"), "utf8");
 
     const triggered = await ctx.step("trigger-ci", async () => {
       const raw = JSON.parse(await readFile(${JSON.stringify(ciStateFile)}, "utf8"));
@@ -929,8 +929,8 @@ export default definePipeline({
         project: env.project,
         store: env.store.pipelines,
         workspaces: env.workspaces,
-        artifacts: new ArtifactStore(path.join(env.rootDir, "artifacts"), env.store),
         notifications: env.projectRuntime["notifications"],
+        createContext: (origin, options) => env.projectRuntime.createContext(origin, options),
         hub: env.pipelineHub,
         logger: new Logger({ level: "error" }),
         minPollCoalesceMs: 10,
@@ -1046,6 +1046,59 @@ export default defineTask({
         sameRun: true,
         foundRun: true,
         createdBy: "task:scan",
+      });
+    } finally {
+      await env.projectRuntime.stop();
+    }
+  });
+
+  it("gives code nodes the project context, acting as their node run", async () => {
+    const pipelineCode = `
+import { definePipeline, node } from ${JSON.stringify(PIPELINE_SDK_PATH)};
+export default definePipeline({
+  name: "Context Flow",
+  nodes: [
+    node.code({
+      id: "report",
+      name: "Report",
+      async run(ctx) {
+        const text = ctx.render("{{ pipeline.title }} on {{ project.id }} by {{ pipeline.nodeId }}");
+        const artifact = await ctx.artifacts.create({ kind: "report", content: text });
+        const started = await ctx.sessions.start({ title: "Follow up", prompt: text });
+        return {
+          action: "next",
+          summary: text,
+          content: artifact.originKind + ":" + artifact.originId,
+          metadata: { sessionId: started.sessionId, nodeRunId: ctx.node.runId },
+        };
+      },
+    }),
+    node.end({ id: "done", name: "Done" }),
+  ],
+});
+`;
+    const env = await createTestProjectRuntime({ pipelineCode, pipelineId: "context-flow" });
+    try {
+      const { run } = await env.projectRuntime.pipelineEngine.startRun({
+        pipelineId: "context-flow",
+        title: "Weekly",
+      });
+      const done = await waitFor(async () => {
+        const latest = await env.store.pipelines.getRun(run.runId);
+        return latest?.status === "completed" ? latest : undefined;
+      });
+      const [record] = (
+        await env.projectRuntime.pipelineEngine.listRunActions(done.runId, {})
+      ).filter((r) => r.action === "pipeline_next");
+      expect(record?.context.summary).toBe("Weekly on demo by report");
+      const nodeRunId = record?.context.metadata?.nodeRunId as string;
+      expect(record?.context.content).toBe(`pipeline:${nodeRunId}`);
+
+      const sessionId = record?.context.metadata?.sessionId as string;
+      const session = await env.store.getSession(sessionId);
+      expect(session?.metadata).toMatchObject({
+        sourcePipelineRunId: run.runId,
+        sourcePipelineNodeId: "report",
       });
     } finally {
       await env.projectRuntime.stop();

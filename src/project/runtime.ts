@@ -207,10 +207,10 @@ export class ProjectRuntime {
       project: this.project,
       store: this.store.pipelines,
       workspaces: this.workspaces,
-      artifacts: this.artifactStore,
       notifications: this.notifications,
       hub: this.pipelineEventHub,
       logger: this.logger,
+      createContext: (origin, options) => this.createContext(origin, options),
       sessions: {
         create: ({ workspacePath, title, owner, runtimeOverride }) =>
           this.createSession({ title }, "pipeline", toSessionRuntimeOverride(runtimeOverride), {
