@@ -14,6 +14,7 @@ export const ErrorCode = {
   PROJECT_NOT_FOUND: "project_not_found",
   SESSION_NOT_FOUND: "session_not_found",
   TASK_NOT_FOUND: "task_not_found",
+  HOOK_NOT_FOUND: "hook_not_found",
   ARTIFACT_NOT_FOUND: "artifact_not_found",
   RUNTIME_NOT_FOUND: "runtime_not_found",
   TASK_SESSION_READ_ONLY: "task_session_read_only",

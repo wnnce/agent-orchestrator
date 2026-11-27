@@ -1,3 +1,4 @@
+import { untilAborted } from "../../context/abort.ts";
 import type { ContextOptions, ScopedContext } from "../../context/index.ts";
 import type { TaskOrigin } from "../../domain/origin.ts";
 import type { TaskExecutionLogRecord } from "../../domain/types.ts";
@@ -151,7 +152,7 @@ export class TsTaskExecutor implements ITaskExecutor {
         projectId: task.projectId,
       });
 
-      const summary = await runWithAbort(
+      const summary = await untilAborted(
         Promise.resolve().then(() => handler(taskContext)),
         signal,
       );
@@ -194,27 +195,4 @@ export class TsTaskExecutor implements ITaskExecutor {
       }
     }
   }
-}
-
-async function runWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) {
-    throw toAbortError(signal.reason);
-  }
-  let onAbort: (() => void) | undefined;
-  const abortPromise = new Promise<never>((_, reject) => {
-    onAbort = () => reject(toAbortError(signal.reason));
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-  try {
-    return await Promise.race([promise, abortPromise]);
-  } finally {
-    if (onAbort) {
-      signal.removeEventListener("abort", onAbort);
-    }
-  }
-}
-
-function toAbortError(reason: unknown): Error {
-  if (reason instanceof Error) return reason;
-  return new Error(typeof reason === "string" && reason ? reason : "TS task execution aborted");
 }

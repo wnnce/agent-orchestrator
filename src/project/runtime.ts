@@ -86,6 +86,8 @@ import {
 } from "../context/index.ts";
 import type { Origin, SessionOrigin, SessionOwner } from "../domain/origin.ts";
 import type { McpClientFactory } from "../mcp/index.ts";
+import { deliverHook } from "../hooks/deliver.ts";
+import { loadProjectHooks, type LoadedHook } from "../hooks/loader.ts";
 
 interface QueuedTurn {
   readonly turn: TurnRecord;
@@ -171,6 +173,8 @@ export class ProjectRuntime {
   readonly taskLoader: TaskLoader;
   /** The tools this project's agents are offered. */
   readonly tools: ToolRegistry;
+  /** HTTP hooks from `hooks/`, by id; loaded at start. */
+  private hooks = new Map<string, LoadedHook>();
   readonly pipelineEventHub: PipelineEventHub;
   readonly pipelineEngine: PipelineEngine;
 
@@ -492,6 +496,16 @@ export class ProjectRuntime {
       }
     }
 
+    if (this.project.projectDir && this.project.id !== GLOBAL_PROJECT_ID) {
+      this.hooks = await loadProjectHooks(this.project.projectDir, this.project.id, this.logger);
+      if (this.hooks.size > 0) {
+        this.logger.info("project hooks loaded", {
+          projectId: this.project.id,
+          hooks: [...this.hooks.keys()],
+        });
+      }
+    }
+
     if (this.project.projectDir) {
       await this.loadAndScheduleTasks().catch((err) => {
         this.logger.warn("failed to load and schedule project tasks on start", {
@@ -546,6 +560,27 @@ export class ProjectRuntime {
       });
       await this.cleanupSession(session.sessionId, { deleteFromStore: false });
     }
+  }
+
+  /** Hands an HTTP request to hook `hookId` and returns its response. */
+  async handleHook(hookId: string, request: Request): Promise<Response> {
+    const hook = this.hooks.get(hookId);
+    if (!hook) {
+      throw new NotFoundError(
+        `hook ${hookId} not found in project ${this.project.id}`,
+        ErrorCode.HOOK_NOT_FOUND,
+      );
+    }
+    return deliverHook(hook, request, (origin, options) => this.createContext(origin, options));
+  }
+
+  /** The project's loaded hooks. */
+  listHooks(): Array<{ id: string; name: string; description?: string }> {
+    return [...this.hooks.values()].map((hook) => ({
+      id: hook.id,
+      name: hook.name,
+      ...(hook.description ? { description: hook.description } : {}),
+    }));
   }
 
   async listSkills(): Promise<ProjectSkill[]> {

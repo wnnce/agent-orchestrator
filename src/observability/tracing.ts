@@ -122,6 +122,11 @@ export function linksTo(traceparent: string | undefined): Link[] {
   return spanContext && isSpanContextValid(spanContext) ? [{ context: spanContext }] : [];
 }
 
+/** Adds attributes to the active span, such as the request span a handler runs in. */
+export function annotateActiveSpan(attributes: Attributes): void {
+  trace.getActiveSpan()?.setAttributes(attributes);
+}
+
 /** IDs of the active span, for correlating log lines with traces. */
 export function activeTraceIds():
   { readonly traceId: string; readonly spanId: string } | undefined {
