@@ -20,8 +20,6 @@ export const ErrorCode = {
   SESSION_ARCHIVED: "session_archived",
   SESSION_CLOSING: "session_closing",
   QUEUE_FULL: "queue_full",
-  TITLE_REQUIRED: "title_required",
-  INVALID_APPROVAL: "invalid_approval",
 } as const;
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode];

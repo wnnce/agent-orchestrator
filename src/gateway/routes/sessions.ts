@@ -1,7 +1,6 @@
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import type { Context, TypedResponse } from "hono";
+import type { TypedResponse } from "hono";
 import { streamSSE } from "hono/streaming";
-import { ErrorCode } from "../../domain/errors.ts";
 import type { EventHub } from "../../events/hub.ts";
 import type { Store } from "../../persistence/store.ts";
 import type { ProjectManager } from "../../project/manager.ts";
@@ -77,33 +76,19 @@ export function createSessionsRouter(deps: SessionsRouteDeps): OpenAPIHono {
     return c.json({ status: "deleted" as const, sessionId }, 200);
   });
 
-  const renameValidationHook = (result: { success: boolean }, c: Context) => {
-    if (!result.success) {
-      return c.json({ error: ErrorCode.TITLE_REQUIRED, message: "title is required" }, 400);
-    }
-  };
+  router.openapi(renameSessionPatchRoute, async (c) => {
+    const { sessionId } = c.req.valid("param");
+    const { title } = c.req.valid("json");
+    await (await deps.projects.runtimeForSession(sessionId)).renameSession(sessionId, title);
+    return c.json({ status: "ok" as const, sessionId, title }, 200);
+  });
 
-  router.openapi(
-    renameSessionPatchRoute,
-    async (c) => {
-      const { sessionId } = c.req.valid("param");
-      const { title } = c.req.valid("json");
-      await (await deps.projects.runtimeForSession(sessionId)).renameSession(sessionId, title);
-      return c.json({ status: "ok" as const, sessionId, title }, 200);
-    },
-    renameValidationHook,
-  );
-
-  router.openapi(
-    renameSessionPostRoute,
-    async (c) => {
-      const { sessionId } = c.req.valid("param");
-      const { title } = c.req.valid("json");
-      await (await deps.projects.runtimeForSession(sessionId)).renameSession(sessionId, title);
-      return c.json({ status: "ok" as const, sessionId, title }, 200);
-    },
-    renameValidationHook,
-  );
+  router.openapi(renameSessionPostRoute, async (c) => {
+    const { sessionId } = c.req.valid("param");
+    const { title } = c.req.valid("json");
+    await (await deps.projects.runtimeForSession(sessionId)).renameSession(sessionId, title);
+    return c.json({ status: "ok" as const, sessionId, title }, 200);
+  });
 
   // 3. Events Stream & History
   router.openapi(sessionEventsRoute, async (c) => {
@@ -201,28 +186,14 @@ export function createSessionsRouter(deps: SessionsRouteDeps): OpenAPIHono {
     return c.json({ status: "accepted" as const }, 202);
   });
 
-  router.openapi(
-    approveSessionToolRoute,
-    async (c) => {
-      const { sessionId } = c.req.valid("param");
-      const { requestId, decision } = c.req.valid("json");
-      await (
-        await deps.projects.runtimeForSession(sessionId)
-      ).approve(sessionId, requestId, decision);
-      return c.json({ status: "accepted" as const }, 202);
-    },
-    (result, c) => {
-      if (!result.success) {
-        return c.json(
-          {
-            error: ErrorCode.INVALID_APPROVAL,
-            message: 'Expected { requestId, decision: "approved" | "rejected" }',
-          },
-          400,
-        );
-      }
-    },
-  );
+  router.openapi(approveSessionToolRoute, async (c) => {
+    const { sessionId } = c.req.valid("param");
+    const { requestId, decision } = c.req.valid("json");
+    await (
+      await deps.projects.runtimeForSession(sessionId)
+    ).approve(sessionId, requestId, decision);
+    return c.json({ status: "accepted" as const }, 202);
+  });
 
   return router;
 }
