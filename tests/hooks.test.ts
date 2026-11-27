@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { createHmac } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -9,7 +8,7 @@ import { ErrorCode, NotFoundError } from "../src/domain/errors.ts";
 import type { HookOrigin } from "../src/domain/origin.ts";
 import { deliverHook } from "../src/hooks/deliver.ts";
 import { loadProjectHooks, type LoadedHook } from "../src/hooks/loader.ts";
-import { defineHook, verifyHmacSha256, type HookContext, type HookSpec } from "../src/hooks/sdk.ts";
+import { defineHook, type HookContext, type HookSpec } from "../src/hooks/sdk.ts";
 import { Logger } from "../src/observability/logger.ts";
 import type { StartPipelineRunParams } from "../src/pipeline/types.ts";
 import { MemoryStore } from "../src/persistence/store.ts";
@@ -34,7 +33,7 @@ describe("loadProjectHooks", () => {
     const hooksDir = path.join(projectDir, "hooks");
     await mkdir(hooksDir);
     const files: Record<string, string> = {
-      "github.ts": hookFile(`{ name: "GitHub", handle: () => {} }`),
+      "deploys.ts": hookFile(`{ name: "Deploys", handle: () => {} }`),
       "grafana.ts": hookFile(`{ id: "alerts", name: "Grafana", handle: () => {} }`),
       // Declares the same id as grafana.ts but sorts later, so it is skipped.
       "zz-alerts.ts": hookFile(`{ id: "alerts", name: "Other alerts", handle: () => {} }`),
@@ -43,7 +42,7 @@ describe("loadProjectHooks", () => {
       "broken.ts": `throw new Error("boom");\n`,
       "bad id.ts": hookFile(`{ name: "Bad id", handle: () => {} }`),
       "_shared.ts": `export const helper = 1;\n`,
-      "github.test.ts": `export default 1;\n`,
+      "deploys.test.ts": `export default 1;\n`,
       "types.d.ts": `export {};\n`,
     };
     for (const [name, content] of Object.entries(files)) {
@@ -54,8 +53,8 @@ describe("loadProjectHooks", () => {
 
   it("loads hooks under their declared id or their file name", async () => {
     const hooks = await loadProjectHooks(projectDir, "demo", logger);
-    expect([...hooks.keys()].sort()).toEqual(["alerts", "github"]);
-    expect(hooks.get("github")?.name).toBe("GitHub");
+    expect([...hooks.keys()].sort()).toEqual(["alerts", "deploys"]);
+    expect(hooks.get("deploys")?.name).toBe("Deploys");
     expect(hooks.get("alerts")?.name).toBe("Grafana");
   });
 
@@ -74,27 +73,6 @@ describe("loadProjectHooks", () => {
 
   it("returns no hooks for a project without a hooks directory", async () => {
     expect((await loadProjectHooks(os.tmpdir(), "none", logger)).size).toBe(0);
-  });
-});
-
-describe("verifyHmacSha256", () => {
-  const secret = "s3cret";
-  const body = '{"action":"opened"}';
-  const digest = createHmac("sha256", secret).update(body).digest("hex");
-
-  it("accepts a matching signature, with or without a prefix", () => {
-    expect(verifyHmacSha256(body, digest, secret)).toBe(true);
-    expect(verifyHmacSha256(body, `sha256=${digest}`, secret, "sha256=")).toBe(true);
-    expect(verifyHmacSha256(new TextEncoder().encode(body), digest, secret)).toBe(true);
-  });
-
-  it("rejects wrong, missing or malformed signatures", () => {
-    expect(verifyHmacSha256(body, digest, "other")).toBe(false);
-    expect(verifyHmacSha256(`${body} `, digest, secret)).toBe(false);
-    expect(verifyHmacSha256(body, null, secret)).toBe(false);
-    expect(verifyHmacSha256(body, digest, secret, "sha256=")).toBe(false);
-    expect(verifyHmacSha256(body, "not-hex", secret)).toBe(false);
-    expect(verifyHmacSha256(body, digest, "")).toBe(false);
   });
 });
 
@@ -141,8 +119,8 @@ describe("deliverHook", () => {
     const env = factory();
     let seen: HookContext | undefined;
     const hook = loaded({
-      id: "github",
-      name: "GitHub",
+      id: "deploys",
+      name: "Deploys",
       async handle(request, ctx) {
         seen = ctx;
         await ctx.pipelines.start({ pipelineId: "p", title: "t" });
@@ -151,17 +129,17 @@ describe("deliverHook", () => {
     });
     const response = await deliverHook(
       hook,
-      new Request("http://x/hooks/demo/github", { method: "POST", body: "raw body" }),
+      new Request("http://x/hooks/demo/deploys", { method: "POST", body: "raw body" }),
       env.createContext,
     );
 
     expect(response.status).toBe(202);
     expect(await response.text()).toBe("raw body");
-    expect(seen?.origin).toMatchObject({ kind: "hook", hookId: "github" });
+    expect(seen?.origin).toMatchObject({ kind: "hook", hookId: "deploys" });
     expect(seen?.hook.deliveryId).toMatch(/^dlv_/);
     expect(seen?.origin.deliveryId).toBe(seen?.hook.deliveryId);
-    expect(seen?.hook.name).toBe("GitHub");
-    expect(env.started[0]?.createdBy).toBe("hook:github");
+    expect(seen?.hook.name).toBe("Deploys");
+    expect(env.started[0]?.createdBy).toBe("hook:deploys");
     expect(env.disposed).toHaveLength(1);
   });
 

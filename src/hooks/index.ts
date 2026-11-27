@@ -1,6 +1,5 @@
 export {
   defineHook,
-  verifyHmacSha256,
   type DefinedHook,
   type HookContext,
   type HookHandle,

@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { untilAborted } from "../context/abort.ts";
 import type { ContextOptions, ScopedContext } from "../context/index.ts";
 import { originSpanAttributes, type HookOrigin } from "../domain/origin.ts";
@@ -21,7 +20,7 @@ export async function deliverHook(
   request: Request,
   createContext: HookContextFactory,
 ): Promise<Response> {
-  const deliveryId = `dlv_${randomUUID()}`;
+  const deliveryId = `dlv_${crypto.randomUUID()}`;
   const origin: HookOrigin = { kind: "hook", hookId: hook.id, deliveryId };
   const signal = AbortSignal.timeout(hook.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   const scoped = createContext(origin, { signal });
