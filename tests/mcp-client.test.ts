@@ -274,23 +274,21 @@ describe("createSdkMcpClient + TsTaskExecutor integration", () => {
       const executor = new TsTaskExecutor({
         createContext: contextFactory(services),
         resolveHandler: async () => async (ctx) => {
-          const tools = await ctx.listMcpTools("mock");
-          const first = await ctx.callMcpTool<{ callIndex: number; args: { page: number } }>(
+          const tools = await ctx.mcp.list("mock");
+          const first = await ctx.mcp.call<{ callIndex: number; args: { page: number } }>(
             "mock",
             "echo",
             { page: 1 },
           );
-          const second = await ctx.callMcpTool<{ callIndex: number; args: { page: number } }>(
+          const second = await ctx.mcp.call<{ callIndex: number; args: { page: number } }>(
             "mock",
             "echo",
             { page: 2 },
           );
           return {
-            summary: {
-              toolNames: tools.map((t) => t.name),
-              firstIndex: first.data.callIndex,
-              secondIndex: second.data.callIndex,
-            },
+            toolNames: tools.map((t) => t.name),
+            firstIndex: first.data.callIndex,
+            secondIndex: second.data.callIndex,
           };
         },
       });

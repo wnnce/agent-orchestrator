@@ -243,8 +243,9 @@ describe("TS task execution logs end-to-end persistence and API", () => {
     await writeFile(
       path.join(projectDir, "tasks", "loggy.ts"),
       `
-export default function (api) {
-  api.registerTask({
+import { defineTask } from ${JSON.stringify(path.resolve(import.meta.dir, "../src/task/sdk.ts"))};
+export default [
+  defineTask({
     id: "bulk-log",
     name: "Bulk Log Task",
     cron: "0 0 * * *",
@@ -260,9 +261,8 @@ export default function (api) {
       }
       ctx.logger.error("non-fatal error sample", { code: "E_SAMPLE" });
     },
-  });
-
-  api.registerTask({
+  }),
+  defineTask({
     id: "fail-with-logs",
     name: "Fail With Logs",
     cron: "0 0 * * *",
@@ -272,8 +272,8 @@ export default function (api) {
       ctx.logger.warn("step 2 unstable", { retry: 1 });
       throw new Error("boom in step 3");
     },
-  });
-}
+  }),
+];
 `,
     );
 

@@ -7,7 +7,6 @@ import { MemoryStore } from "../src/persistence/store.ts";
 import {
   TaskEngine,
   TaskExecutorRegistry,
-  ScriptTaskExecutor,
   AgentTaskExecutor,
   type AgentSessionRunner,
   type TaskDefinition,
@@ -31,6 +30,7 @@ describe("Task Real-World Scenarios Simulation", () => {
     cron: "*/5 * * * *",
     enabled: true,
     promptTemplate: "Run analysis for {{project.id}} with state: {{state.cursor}}",
+    type: "agent",
     filePath: "/sim-proj/tasks/demo-task.md",
   };
 
@@ -396,119 +396,11 @@ describe("Task Real-World Scenarios Simulation", () => {
       expect(executions[0]?.errorMessage).toContain("timed out after 30ms");
     });
 
-    it("ScriptTaskExecutor terminates child process on timeout", async () => {
-      const executor = new ScriptTaskExecutor();
-      const task: TaskDefinition = {
-        ...baseTask,
-        type: "script",
-        command: "sleep 10",
-        timeoutMs: 40,
-      };
-
-      const result = await executor.execute({
-        executionId: "exec_test",
-        task,
-        stateBefore: {},
-      });
-
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("timed out after 40ms");
-      const summary = result.actionsSummary as Record<string, unknown> | undefined;
-      expect(summary?.["timedOut"]).toBe(true);
-    });
   });
 
   // --------------------------------------------------------------------------
   // Scenario 5: Script Task Edge Cases
   // --------------------------------------------------------------------------
-  describe("Scenario 5: ScriptTaskExecutor Real-World Parsing & Edge Cases", () => {
-    it("parses JSON state from the last line of multi-line console output", async () => {
-      const executor = new ScriptTaskExecutor();
-      const task: TaskDefinition = {
-        ...baseTask,
-        type: "script",
-        command: `
-          echo "[2026-11-13 23:25:00] [INFO] Starting synchronization..."
-          echo "[2026-11-13 23:25:01] [INFO] Processed 50 records from database"
-          echo '{"syncedCount": 50, "lastSeen": 9999}'
-        `,
-      };
-
-      const result = await executor.execute({
-        executionId: "exec_test",
-        task,
-        stateBefore: { initialSetup: true },
-      });
-
-      expect(result.success).toBe(true);
-      expect(result.stateAfter).toEqual({
-        initialSetup: true,
-        syncedCount: 50,
-        lastSeen: 9999,
-      });
-    });
-
-    it("handles plain text output gracefully without changing state", async () => {
-      const executor = new ScriptTaskExecutor();
-      const task: TaskDefinition = {
-        ...baseTask,
-        type: "script",
-        command: 'echo "System check passed: All services nominal"',
-      };
-
-      const result = await executor.execute({
-        executionId: "exec_test",
-        task,
-        stateBefore: { count: 1 },
-      });
-
-      expect(result.success).toBe(true);
-      expect(result.stateAfter).toEqual({ count: 1 });
-      const summary = result.actionsSummary as Record<string, unknown> | undefined;
-      expect(String(summary?.["stdout"])).toContain("System check passed");
-    });
-
-    it("handles command not found (exit code 127) cleanly", async () => {
-      const executor = new ScriptTaskExecutor();
-      const task: TaskDefinition = {
-        ...baseTask,
-        type: "script",
-        command: "non_existent_binary_xyz_12345 --foo",
-      };
-
-      const result = await executor.execute({
-        executionId: "exec_test",
-        task,
-        stateBefore: {},
-      });
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBeDefined();
-      const summary = result.actionsSummary as Record<string, unknown> | undefined;
-      expect(summary?.["exitCode"]).toBe(127);
-    });
-
-    it("injects task context into process environment variables", async () => {
-      const executor = new ScriptTaskExecutor();
-      const task: TaskDefinition = {
-        ...baseTask,
-        type: "script",
-        command:
-          'printf \'{"envKey":"%s","envProject":"%s"}\' "$TASK_KEY" "$PROJECT_ID"',
-      };
-
-      const result = await executor.execute({
-        executionId: "exec_test",
-        task,
-        stateBefore: {},
-      });
-
-      expect(result.success).toBe(true);
-      expect(result.stateAfter["envKey"]).toBe("sim-proj:demo-task");
-      expect(result.stateAfter["envProject"]).toBe("sim-proj");
-    });
-  });
-
   // --------------------------------------------------------------------------
   // Scenario 6: Action Task Invocations & Fault Injections
   // --------------------------------------------------------------------------
@@ -612,7 +504,7 @@ describe("Task Real-World Scenarios Simulation", () => {
   // Scenario 8: Hybrid Project Runtime with Multiple Task Types
   // --------------------------------------------------------------------------
   describe("Scenario 8: Multi-Type Hybrid Project Runtime Integration", () => {
-    it("dispatches and executes script and agent tasks side-by-side in one project", async () => {
+    it("runs TypeScript and agent tasks side by side in one project", async () => {
       const tmpDir = await mkdtemp(path.join(os.tmpdir(), "hybrid-task-"));
       const store = new MemoryStore();
       const logger = new Logger({ level: "error" });
@@ -636,16 +528,19 @@ describe("Task Real-World Scenarios Simulation", () => {
       const tasksDir = path.join(tmpDir, "tasks");
       await mkdir(tasksDir, { recursive: true });
 
-      // Task 1: script task
+      // Task 1: TypeScript task
       await writeFile(
-        path.join(tasksDir, "sync-script.md"),
-        `---
-id: sync-script
-name: Shell Sync Task
-cron: "0 * * * *"
-type: script
-command: 'echo "{\\"synced\\": 100}"'
----
+        path.join(tasksDir, "sync.ts"),
+        `import { defineTask } from ${JSON.stringify(path.resolve(import.meta.dir, "../src/task/sdk.ts"))};
+export default defineTask({
+  id: "sync",
+  name: "TS Sync Task",
+  cron: "0 * * * *",
+  run(ctx) {
+    ctx.state.merge({ synced: 100 });
+    return { project: ctx.project.id, origin: ctx.origin.kind };
+  },
+});
 `,
       );
 
@@ -678,15 +573,16 @@ Analyze system status.
         const loadedTasks = await runtime.listTasks();
         expect(loadedTasks).toHaveLength(2);
 
-        // 1. Run Script Task
-        const ranScript = await runtime.runTask("sync-script");
+        // 1. Run the TypeScript task
+        const ranScript = await runtime.runTask("sync");
         expect(ranScript).toBe(true);
         await runtime.taskEngine.drain();
 
-        const scriptExecs = await store.listTaskExecutions("hybrid-proj:sync-script");
+        const scriptExecs = await store.listTaskExecutions("hybrid-proj:sync");
         expect(scriptExecs).toHaveLength(1);
         expect(scriptExecs[0]?.status).toBe("success");
         expect(scriptExecs[0]?.stateAfter).toEqual({ synced: 100 });
+        expect(scriptExecs[0]?.actionsSummary).toEqual({ project: "hybrid-proj", origin: "task" });
 
         // 2. Run Agent Task (runs through FakeRuntime)
         const ranAgent = await runtime.runTask("analyze-agent");
@@ -702,99 +598,5 @@ Analyze system status.
       }
     });
 
-    it("auto-discovers and registers custom executor from project executors directory", async () => {
-      const tmpDir = await mkdtemp(path.join(os.tmpdir(), "custom-exec-proj-"));
-      const store = new MemoryStore();
-      const logger = new Logger({ level: "error" });
-
-      const projectConfig: ProjectConfig = {
-        id: "custom-exec-proj",
-        displayName: "Custom Executor Project",
-        description: "Tests project-level custom executor auto-discovery",
-        routing: { projectId: "custom-exec-proj" },
-        repository: { url: "", baseBranch: "main" },
-        projectDir: tmpDir,
-      };
-
-      const workspaceManager = new WorkspaceManager(
-        path.join(tmpDir, "workspaces"),
-        path.join(tmpDir, "bases"),
-      );
-      const artifactStore = new ArtifactStore(path.join(tmpDir, "artifacts"), store);
-
-      // 1. Create a custom executor file in <projectDir>/executors/pipeline.ts
-      const executorsDir = path.join(tmpDir, "executors");
-      await mkdir(executorsDir, { recursive: true });
-      await writeFile(
-        path.join(executorsDir, "pipeline.ts"),
-        `export default {
-          type: "custom-pipeline",
-          canHandle(task) {
-            return task.executor === "custom-pipeline" || task.type === "custom-pipeline";
-          },
-          async execute(ctx) {
-            return {
-              success: true,
-              durationMs: 8,
-              stateBefore: ctx.stateBefore,
-              stateAfter: { pipelineResult: "transformed_records_42" },
-              actionsSummary: { customPluginExecuted: true },
-            };
-          },
-        };`,
-      );
-
-      // 2. Create a task specifying executor: "custom-pipeline"
-      const tasksDir = path.join(tmpDir, "tasks");
-      await mkdir(tasksDir, { recursive: true });
-      await writeFile(
-        path.join(tasksDir, "etl-task.md"),
-        `---
-id: etl-task
-name: Custom Pipeline ETL
-cron: "0 * * * *"
-executor: custom-pipeline
----
-Perform custom data transformation.
-`,
-      );
-
-      const runtime = new ProjectRuntime(
-        projectConfig,
-        store,
-        new FakeRuntime(),
-        workspaceManager,
-        artifactStore,
-        undefined,
-        logger,
-      );
-
-      await runtime.start();
-
-      try {
-        // Verify custom executor was auto-discovered and registered
-        const registry = runtime.getTaskExecutorRegistry();
-        expect(registry?.has("custom-pipeline")).toBe(true);
-
-        const tasks = await runtime.listTasks();
-        expect(tasks).toHaveLength(1);
-        expect(tasks[0]?.executor).toBe("custom-pipeline");
-
-        // Run the task
-        const enqueued = await runtime.runTask("etl-task");
-        expect(enqueued).toBe(true);
-        await runtime.taskEngine.drain();
-
-        // Verify task executed via custom executor from project directory
-        const execs = await store.listTaskExecutions("custom-exec-proj:etl-task");
-        expect(execs).toHaveLength(1);
-        expect(execs[0]?.status).toBe("success");
-        expect(execs[0]?.stateAfter).toEqual({ pipelineResult: "transformed_records_42" });
-        expect(execs[0]?.actionsSummary).toEqual({ customPluginExecuted: true });
-      } finally {
-        await runtime.stop();
-        await rm(tmpDir, { recursive: true, force: true });
-      }
-    });
   });
 });

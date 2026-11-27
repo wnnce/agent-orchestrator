@@ -3,7 +3,7 @@ import type { TaskOrigin } from "../../domain/origin.ts";
 import type { TaskExecutionLogRecord } from "../../domain/types.ts";
 import { Logger } from "../../observability/logger.ts";
 import { TaskLogBuffer } from "../log-buffer.ts";
-import type { TaskRunContext, TsTaskHandler, TsTaskResult } from "../sdk.ts";
+import type { TaskContext, TaskRun } from "../sdk.ts";
 import type {
   ITaskExecutor,
   TaskDefinition,
@@ -12,7 +12,7 @@ import type {
 } from "../types.ts";
 
 export interface TsTaskExecutorOptions {
-  readonly resolveHandler: (task: TaskDefinition) => Promise<TsTaskHandler>;
+  readonly resolveHandler: (task: TaskDefinition) => Promise<TaskRun>;
   /** The project's capabilities acting for one task execution. */
   readonly createContext: (origin: TaskOrigin, options: ContextOptions) => ScopedContext;
   readonly appendLogs?: ((logs: readonly TaskExecutionLogRecord[]) => Promise<void>) | undefined;
@@ -27,8 +27,8 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * TypeScript task executor (`type: "ts"`).
- * Dynamically injects a Pi-style capability context (`TaskRunContext`) into the task's `run(ctx)` handler.
+ * Runs TypeScript tasks (`type: "ts"`): calls the task's `run` with a `TaskContext` acting as this
+ * execution, and saves the task state it leaves when the execution succeeds.
  */
 export class TsTaskExecutor implements ITaskExecutor {
   readonly type = "ts";
@@ -39,7 +39,7 @@ export class TsTaskExecutor implements ITaskExecutor {
   ) {}
 
   canHandle(task: TaskDefinition): boolean {
-    return task.type === "ts" || task.sourceFormat === "typescript";
+    return task.type === "ts";
   }
 
   async execute(context: TaskExecutionContext): Promise<TaskRunResult> {
@@ -70,15 +70,10 @@ export class TsTaskExecutor implements ITaskExecutor {
     const signal = abortController.signal;
     const effectiveContext: TaskExecutionContext = { ...context, signal };
 
-    let localState: Record<string, unknown> = { ...context.stateBefore };
-    const getState = async (): Promise<Record<string, unknown>> => ({ ...localState });
-    const updateState = async (
-      delta: Record<string, unknown>,
-      opts?: { merge?: boolean | undefined },
-    ): Promise<Record<string, unknown>> => {
-      localState = opts?.merge === false ? { ...delta } : { ...localState, ...delta };
-      context.updateState?.(localState);
-      return { ...localState };
+    let state: Record<string, unknown> = { ...context.stateBefore };
+    const setState = (next: Record<string, unknown>): void => {
+      state = { ...next };
+      context.updateState?.(state);
     };
 
     const logBuffer = this.options.appendLogs
@@ -121,33 +116,29 @@ export class TsTaskExecutor implements ITaskExecutor {
             cron: task.cron,
             timezone: task.timezone ?? "",
           },
-          state: localState,
+          state,
         }),
       },
     );
-    const project = scoped.context;
-
-    const runContext: TaskRunContext = {
-      projectId: task.projectId,
-      taskId: task.taskId,
-      taskKey: task.taskKey,
-      taskName: task.name,
-      workdir: project.project.dir,
-      env: project.project.env,
-      vars: project.project.vars,
-      logger: project.logger,
-      signal,
-      state: Object.freeze({ ...context.stateBefore }),
-      renderPrompt: (template, extraScopes) => project.render(template, extraScopes),
-      getState,
-      updateState,
-      notify: (message, options) => project.notify(message, options),
-      createArtifact: (params) => project.artifacts.create(params),
-      dispatchTask: (params) => project.sessions.start(params),
-      callMcpTool: (serverName, toolName, args, callOptions) =>
-        project.mcp.call(serverName, toolName, args, callOptions),
-      listMcpTools: (serverName, callOptions) => project.mcp.list(serverName, callOptions),
-      startPipelineRun: (params) => project.pipelines.start(params),
+    const taskContext: TaskContext = {
+      ...scoped.context,
+      origin: {
+        kind: "task",
+        taskId: task.taskId,
+        taskKey: task.taskKey,
+        executionId: context.executionId,
+      },
+      task: {
+        id: task.taskId,
+        name: task.name,
+        cron: task.cron,
+        ...(task.timezone ? { timezone: task.timezone } : {}),
+      },
+      state: {
+        get: () => state,
+        set: (next) => setState(next),
+        merge: (patch) => setState({ ...state, ...patch }),
+      },
     };
 
     try {
@@ -160,32 +151,21 @@ export class TsTaskExecutor implements ITaskExecutor {
         projectId: task.projectId,
       });
 
-      const output = await runWithAbort(Promise.resolve().then(() => handler(runContext)), signal);
-
-      if (output !== undefined && !isPlainRecord(output)) {
+      const summary = await runWithAbort(
+        Promise.resolve().then(() => handler(taskContext)),
+        signal,
+      );
+      if (summary !== undefined && !isPlainRecord(summary)) {
         throw new Error(
-          `TS task "${task.taskKey}" returned an invalid value: expected void or a plain result object`,
+          `TS task "${task.taskKey}" returned an invalid value: expected nothing or a summary object`,
         );
       }
-
-      const typedOutput = output as TsTaskResult | undefined;
-      if (typedOutput?.state !== undefined) {
-        if (!isPlainRecord(typedOutput.state)) {
-          throw new Error(
-            `TS task "${task.taskKey}" returned an invalid "state" field: expected a plain object`,
-          );
-        }
-        await updateState(typedOutput.state, { merge: typedOutput.mergeState });
-      }
-
-      const stateAfter = await getState();
-      const summary = isPlainRecord(typedOutput?.summary) ? typedOutput.summary : undefined;
 
       return {
         success: true,
         durationMs: Date.now() - started,
         stateBefore: context.stateBefore,
-        stateAfter,
+        stateAfter: { ...state },
         ...(summary !== undefined ? { actionsSummary: summary } : {}),
       };
     } catch (err) {

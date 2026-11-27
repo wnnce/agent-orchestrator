@@ -449,6 +449,7 @@ describe("tool and task tracing", () => {
       cron: "* * * * *",
       enabled: true,
       promptTemplate: "",
+      type: "agent",
       filePath: `${taskId}.yaml`,
     });
 

@@ -32,12 +32,12 @@ export class TaskExecutorRegistry {
 
   /**
    * Resolves the appropriate executor for a task:
-   * 1. Match explicitly by task.type or task.executor
+   * 1. Match explicitly by task.type
    * 2. Fall back to scanning registered executors via canHandle
    */
   resolve(task: TaskDefinition): ITaskExecutor {
-    // 1. Direct match by task.executor or task.type
-    const taskType = task.executor ?? task.type ?? "agent";
+    // 1. Direct match by task.type
+    const taskType = task.type;
     const direct = this.executors.get(taskType);
     if (direct && direct.canHandle(task)) {
       return direct;
@@ -51,7 +51,7 @@ export class TaskExecutorRegistry {
     }
 
     throw new Error(
-      `No task executor found capable of handling task "${task.taskKey}" (executor/type: "${taskType}")`,
+      `No task executor found capable of handling task "${task.taskKey}" (type: "${taskType}")`,
     );
   }
 }

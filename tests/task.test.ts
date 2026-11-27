@@ -9,7 +9,6 @@ import {
   TaskLoader,
   TaskScheduler,
   TaskExecutorRegistry,
-  ScriptTaskExecutor,
   AgentTaskExecutor,
   type AgentSessionRunner,
   type TaskDefinition,
@@ -217,6 +216,7 @@ describe("TaskEngine", () => {
     cron: "*/5 * * * *",
     enabled: true,
     promptTemplate: "Sync issues",
+    type: "agent",
     filePath: "/dummy/path.md",
   };
 
@@ -280,6 +280,7 @@ describe("TaskEngine", () => {
       cron: "* * * * *",
       enabled: true,
       promptTemplate: "Run",
+      type: "agent",
       filePath: `/p1/task-${i}.md`,
     }));
 
@@ -354,6 +355,7 @@ describe("TaskScheduler", () => {
       cron: "* * * * *",
       enabled: true,
       promptTemplate: "Do something",
+      type: "agent",
       filePath: "/tasks/minutely.md",
     };
 
@@ -389,6 +391,7 @@ describe("TaskScheduler", () => {
       cron: "* * * * *",
       enabled: false,
       promptTemplate: "Do nothing",
+      type: "agent",
       filePath: "/tasks/disabled.md",
     };
     expect(scheduler.scheduleTask(disabledTask)).toBe(false);
@@ -402,6 +405,7 @@ describe("TaskScheduler", () => {
       cron: "invalid cron expression",
       enabled: true,
       promptTemplate: "Fail",
+      type: "agent",
       filePath: "/tasks/invalid.md",
     };
     expect(scheduler.scheduleTask(invalidCronTask)).toBe(false);
@@ -422,6 +426,7 @@ describe("TaskScheduler", () => {
       cron: "0 * * * *",
       enabled: true,
       promptTemplate: "A",
+      type: "agent",
       filePath: "/tasks/a.md",
     };
 
@@ -433,6 +438,7 @@ describe("TaskScheduler", () => {
       cron: "0 0 * * *",
       enabled: true,
       promptTemplate: "B",
+      type: "agent",
       filePath: "/tasks/b.md",
     };
 
@@ -453,6 +459,7 @@ describe("TaskScheduler", () => {
       cron: "0 12 * * *",
       enabled: true,
       promptTemplate: "C",
+      type: "agent",
       filePath: "/tasks/c.md",
     };
 
@@ -687,6 +694,7 @@ Sync daily updates.
       cron: "* * * * *",
       enabled: true,
       promptTemplate: "Hello",
+      type: "agent",
       filePath: "/tasks/t1.md",
     };
 
@@ -770,70 +778,6 @@ Sync daily updates.
       expect(executions).toHaveLength(1);
       expect(executions[0]?.status).toBe("failed");
       expect(executions[0]?.errorMessage).toBe("Simulated database connection failure");
-    });
-
-    it("ScriptTaskExecutor executes shell commands and parses JSON output into state", async () => {
-      const executor = new ScriptTaskExecutor();
-      const task: TaskDefinition = {
-        ...dummyTask,
-        taskKey: "p1:script-run",
-        taskId: "script-run",
-        type: "script",
-        command: 'echo \'{"processed": 42, "status": "ok"}\'',
-      };
-
-      const result = await executor.execute({
-        executionId: "exec_test",
-        task,
-        stateBefore: { initial: true },
-      });
-
-      expect(result.success).toBe(true);
-      expect(result.stateAfter).toEqual({ initial: true, processed: 42, status: "ok" });
-      expect(result.actionsSummary).toBeDefined();
-      const summary = result.actionsSummary as Record<string, unknown> | undefined;
-      expect(summary?.["exitCode"]).toBe(0);
-    });
-
-    it("ScriptTaskExecutor handles script failure with non-zero exit code", async () => {
-      const executor = new ScriptTaskExecutor();
-      const task: TaskDefinition = {
-        ...dummyTask,
-        taskKey: "p1:script-err",
-        taskId: "script-err",
-        type: "script",
-        command: "exit 7",
-      };
-
-      const result = await executor.execute({
-        executionId: "exec_test",
-        task,
-        stateBefore: {},
-      });
-
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("7");
-    });
-
-    it("ScriptTaskExecutor handles command timeout cleanly", async () => {
-      const executor = new ScriptTaskExecutor();
-      const task: TaskDefinition = {
-        ...dummyTask,
-        taskKey: "p1:script-timeout",
-        taskId: "script-timeout",
-        type: "script",
-        command: "sleep 5",
-        timeoutMs: 50,
-      };
-
-      const result = await executor.execute({
-        executionId: "exec_test",
-        task,
-        stateBefore: {},
-      });
-
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("timed out");
     });
 
     it("AgentTaskExecutor orchestrates session lifecycle and guarantees cleanup", async () => {

@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { access, readdir } from "node:fs/promises";
+import { access } from "node:fs/promises";
 import { constants } from "node:fs";
-import path from "node:path";
 import {
   ConflictError,
   ErrorCode,
@@ -50,10 +49,8 @@ import {
   TaskScheduler,
   TaskExecutorRegistry,
   AgentTaskExecutor,
-  ScriptTaskExecutor,
   TsTaskExecutor,
   type AgentSessionRunner,
-  type ITaskExecutor,
   type TaskDefinition,
   type TaskRunResult,
 } from "../task/index.ts";
@@ -268,23 +265,9 @@ export class ProjectRuntime {
 
     taskRegistry.register(new AgentTaskExecutor(agentRunner, logger));
     taskRegistry.register(
-      new ScriptTaskExecutor(
-        {
-          ...(this.project.projectDir
-            ? { getWorkdir: () => this.project.projectDir }
-            : {}),
-        },
-        logger,
-      ),
-    );
-    taskRegistry.register(
       new TsTaskExecutor(
         {
-          resolveHandler: (task) =>
-            this.taskLoader.resolveTsHandler(task, {
-              env: this.project.env,
-              workdir: this.project.projectDir,
-            }),
+          resolveHandler: (task) => this.taskLoader.resolveTsHandler(task),
           createContext: (origin, options) => this.createContext(origin, options),
           appendLogs: (logs) => this.store.appendTaskExecutionLogs(logs),
         },
@@ -494,12 +477,6 @@ export class ProjectRuntime {
     );
 
     if (this.project.projectDir) {
-      await this.loadProjectCustomExecutors().catch((err) => {
-        this.logger.warn("failed to load custom project executors", {
-          projectId: this.project.id,
-          error: (err as Error).message,
-        });
-      });
       await this.loadAndScheduleTasks().catch((err) => {
         this.logger.warn("failed to load and schedule project tasks on start", {
           projectId: this.project.id,
@@ -1668,87 +1645,13 @@ export class ProjectRuntime {
   }
 
   /**
-   * Discover and load custom project executors (projects/<projectId>/executors/*.ts)
-   */
-  async loadProjectCustomExecutors(): Promise<void> {
-    if (!this.project.projectDir) return;
-    const executorsDir = path.resolve(this.project.projectDir, "executors");
-    try {
-      await access(executorsDir, constants.R_OK);
-    } catch {
-      return; // Skip if directory does not exist
-    }
-
-    const registry = this.taskEngine.getRegistry();
-    if (!registry) return;
-
-    try {
-      const files = await readdir(executorsDir);
-      for (const file of files) {
-        if (!file.endsWith(".ts") && !file.endsWith(".js")) continue;
-        const fullPath = path.join(executorsDir, file);
-        try {
-          const mod = (await import(fullPath)) as Record<string, unknown>;
-          const candidate =
-            mod.default ?? mod.executor ?? Object.values(mod)[0];
-          if (
-            candidate &&
-            typeof candidate === "object" &&
-            "type" in candidate &&
-            typeof (candidate as { execute?: unknown }).execute === "function"
-          ) {
-            registry.register(candidate as ITaskExecutor);
-            this.logger.info("loaded custom task executor", {
-              projectId: this.project.id,
-              type: (candidate as ITaskExecutor).type,
-              file,
-            });
-          } else if (
-            typeof candidate === "function" &&
-            candidate.prototype &&
-            "execute" in candidate.prototype
-          ) {
-            const instance = new (candidate as new () => ITaskExecutor)();
-            registry.register(instance);
-            this.logger.info("instantiated and loaded custom task executor", {
-              projectId: this.project.id,
-              type: instance.type,
-              file,
-            });
-          }
-        } catch (fileErr) {
-          const msg =
-            fileErr instanceof Error ? fileErr.message : String(fileErr);
-          this.logger.warn("failed to load custom executor file", {
-            projectId: this.project.id,
-            file,
-            error: msg,
-          });
-        }
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.warn("failed to scan project executors directory", {
-        projectId: this.project.id,
-        error: msg,
-      });
-    }
-  }
-
-  /**
    * Scan and reload all static tasks for the current project
    */
   async loadAndScheduleTasks(): Promise<TaskDefinition[]> {
     if (!this.project.projectDir) return [];
-    const tasks = await this.taskLoader.loadProjectTasks(
-      this.project.projectDir,
-      this.project.id,
-      {
-        env: this.project.env,
-        vars: this.project.vars,
-        workdir: this.project.projectDir,
-      },
-    );
+    const tasks = await this.taskLoader.loadProjectTasks(this.project.projectDir, this.project.id, {
+      vars: this.project.vars,
+    });
     this.taskScheduler.reloadTasks(tasks);
     this.logger.info("project tasks loaded and scheduled", {
       projectId: this.project.id,
@@ -1762,15 +1665,9 @@ export class ProjectRuntime {
    */
   async listTasks(): Promise<TaskDefinition[]> {
     if (!this.project.projectDir) return [];
-    return this.taskLoader.loadProjectTasks(
-      this.project.projectDir,
-      this.project.id,
-      {
-        env: this.project.env,
-        vars: this.project.vars,
-        workdir: this.project.projectDir,
-      },
-    );
+    return this.taskLoader.loadProjectTasks(this.project.projectDir, this.project.id, {
+      vars: this.project.vars,
+    });
   }
 
   /**

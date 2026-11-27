@@ -5,30 +5,25 @@ import { parse as parseYaml } from "yaml";
 import type { ProjectConfig, ProjectVars } from "../domain/types.ts";
 import { Logger } from "../observability/logger.ts";
 import { findMissingProjectVars } from "../prompt/template.ts";
-import {
-  type TaskExtensionAPI,
-  type TsTaskHandler,
-  tsTaskRegistrationSchema,
-} from "./sdk.ts";
+import { isDefinedTask, type TaskRun, taskSpecSchema } from "./sdk.ts";
 import { taskFrontmatterSchema, type TaskDefinition } from "./types.ts";
 
 export interface LoadTasksOptions {
-  readonly env?: Record<string, string> | undefined;
+  /** Project vars, to warn about prompts that reference undefined ones. */
   readonly vars?: ProjectVars | undefined;
-  readonly workdir?: string | undefined;
   readonly initTimeoutMs?: number | undefined;
 }
 
 interface LoadedTsModule {
   readonly tasks: TaskDefinition[];
-  readonly handlers: Map<string, TsTaskHandler>;
+  readonly handlers: Map<string, TaskRun>;
   readonly mtimeMs: number;
 }
 
 interface CachedTsHandler {
   readonly filePath: string;
   readonly mtimeMs: number;
-  readonly handler: TsTaskHandler;
+  readonly handler: TaskRun;
 }
 
 const DEFAULT_TS_INIT_TIMEOUT_MS = 10_000;
@@ -85,7 +80,6 @@ export function parseTaskMarkdown(
   const baseName = path.basename(filePath, ".md");
   const taskId = result.data.id || baseName;
   const taskKey = `${projectId}:${taskId}`;
-  const executorType = result.data.executor ?? result.data.type ?? "agent";
   const rawRuntime = result.data.runtime;
   const taskRuntime =
     rawRuntime && (rawRuntime.type || rawRuntime.model || rawRuntime.reasoningEffort)
@@ -108,23 +102,20 @@ export function parseTaskMarkdown(
     promptTemplate,
     filePath,
     sourceFormat: "markdown",
-    type: executorType,
-    ...(result.data.executor !== undefined ? { executor: result.data.executor } : {}),
-    ...(result.data.command !== undefined ? { command: result.data.command } : {}),
+    type: "agent",
     ...(result.data.timeoutMs !== undefined ? { timeoutMs: result.data.timeoutMs } : {}),
     ...(taskRuntime ? { runtime: taskRuntime } : {}),
   };
 }
 
 /**
- * Dynamically imports and validates a Pi-style TypeScript task module:
- * `export default function (api: TaskExtensionAPI) { api.registerTask({ ... }); }`
+ * Imports a TypeScript task module: its default export is a `defineTask(...)` task, or an array
+ * of them that each have an `id`.
  */
 export async function loadTsTaskModule(
   filePath: string,
   projectId: string,
   options: LoadTasksOptions = {},
-  logger = new Logger(),
 ): Promise<LoadedTsModule> {
   const absPath = path.resolve(filePath);
   const fileStat = await stat(absPath);
@@ -149,73 +140,35 @@ export async function loadTsTaskModule(
     mod && typeof mod === "object" && "default" in mod
       ? (mod as { default?: unknown }).default
       : undefined;
-
-  if (typeof defaultExport !== "function") {
+  const exported = Array.isArray(defaultExport) ? defaultExport : [defaultExport];
+  if (exported.length === 0 || !exported.every(isDefinedTask)) {
     throw new Error(
-      `Invalid TS task module ${absPath}: must default-export a factory function (export default function (api) { ... })`,
-    );
-  }
-
-  const rawRegistrations: unknown[] = [];
-  let registrationOpen = true;
-  const workdir = options.workdir ?? path.dirname(path.dirname(absPath));
-  const env = Object.freeze({ ...(options.env ?? {}) });
-
-  const api: TaskExtensionAPI = {
-    projectId,
-    workdir,
-    env,
-    logger: logger.child({ projectId, filePath: absPath }),
-    registerTask(task) {
-      if (!registrationOpen) {
-        throw new Error(
-          `api.registerTask() in ${absPath} can only be called during module initialization`,
-        );
-      }
-      rawRegistrations.push(task);
-    },
-  };
-
-  try {
-    await withTimeout(
-      Promise.resolve().then(() => (defaultExport as (api: TaskExtensionAPI) => unknown)(api)),
-      initTimeoutMs,
-      `Timed out initializing TS task module ${absPath} after ${initTimeoutMs}ms`,
-    );
-  } finally {
-    registrationOpen = false;
-  }
-
-  if (rawRegistrations.length === 0) {
-    throw new Error(
-      `Invalid TS task module ${absPath}: factory did not register any task via api.registerTask(...)`,
+      `Invalid TS task module ${absPath}: must default-export defineTask(...) or an array of them`,
     );
   }
 
   const baseName = path.basename(absPath, ".ts");
-  const isMultiTask = rawRegistrations.length > 1;
+  const isMultiTask = exported.length > 1;
   const tasks: TaskDefinition[] = [];
-  const handlers = new Map<string, TsTaskHandler>();
+  const handlers = new Map<string, TaskRun>();
   const fileTaskIds = new Set<string>();
 
-  for (let idx = 0; idx < rawRegistrations.length; idx++) {
-    const parsed = tsTaskRegistrationSchema.safeParse(rawRegistrations[idx]);
+  for (let idx = 0; idx < exported.length; idx++) {
+    const parsed = taskSpecSchema.safeParse(exported[idx]);
     if (!parsed.success) {
-      throw new Error(
-        `Invalid TS task registration #${idx + 1} in ${absPath}: ${parsed.error.message}`,
-      );
+      throw new Error(`Invalid task #${idx + 1} in ${absPath}: ${parsed.error.message}`);
     }
 
     const data = parsed.data;
     if (isMultiTask && !data.id) {
       throw new Error(
-        `Invalid TS task module ${absPath}: registered ${rawRegistrations.length} tasks, so every task must specify an explicit "id"`,
+        `Invalid TS task module ${absPath}: it exports ${exported.length} tasks, so every task must specify an explicit "id"`,
       );
     }
 
     const taskId = data.id ?? baseName;
     if (fileTaskIds.has(taskId)) {
-      throw new Error(`Duplicate task id "${taskId}" registered in ${absPath}`);
+      throw new Error(`Duplicate task id "${taskId}" in ${absPath}`);
     }
     fileTaskIds.add(taskId);
 
@@ -269,10 +222,6 @@ export class TaskLoader {
     const tasks: TaskDefinition[] = [];
     const seenTaskKeys = new Set<string>();
     const activeTsTaskKeys = new Set<string>();
-    const effectiveOptions: LoadTasksOptions = {
-      ...options,
-      workdir: options.workdir ?? projectDir,
-    };
 
     for (const entry of entries) {
       if (!entry.isFile()) continue;
@@ -310,7 +259,7 @@ export class TaskLoader {
 
       if (isTsTaskFile(entry.name)) {
         try {
-          const loaded = await loadTsTaskModule(filePath, projectId, effectiveOptions, this.logger);
+          const loaded = await loadTsTaskModule(filePath, projectId, options);
           for (const task of loaded.tasks) {
             if (seenTaskKeys.has(task.taskKey)) {
               this.logger.error("duplicate task id detected; skipping ts task", {
@@ -352,10 +301,7 @@ export class TaskLoader {
    * Resolves the executable handler for a TypeScript task, hot-reloading the module
    * automatically if the file's mtime changed on disk.
    */
-  async resolveTsHandler(
-    task: TaskDefinition,
-    options: LoadTasksOptions = {},
-  ): Promise<TsTaskHandler> {
+  async resolveTsHandler(task: TaskDefinition, options: LoadTasksOptions = {}): Promise<TaskRun> {
     const absPath = path.resolve(task.filePath);
     const currentStat = await stat(absPath);
     const cached = this.tsHandlers.get(task.taskKey);
@@ -364,7 +310,7 @@ export class TaskLoader {
       return cached.handler;
     }
 
-    const loaded = await loadTsTaskModule(absPath, task.projectId, options, this.logger);
+    const loaded = await loadTsTaskModule(absPath, task.projectId, options);
 
     // Replace cached entries for this file with the freshly loaded handlers
     for (const [key, entry] of Array.from(this.tsHandlers.entries())) {
@@ -397,9 +343,7 @@ export class TaskLoader {
     for (const project of projects) {
       if (!project.projectDir) continue;
       const tasks = await this.loadProjectTasks(project.projectDir, project.id, {
-        env: project.env,
         vars: project.vars,
-        workdir: project.projectDir,
       });
       allTasks.push(...tasks);
     }

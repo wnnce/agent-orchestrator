@@ -1,97 +1,32 @@
 import { z } from "zod";
-import type { CreateArtifactParams, StartSessionParams, StartedSession } from "../context/types.ts";
-import type { ArtifactRecord, ProjectVarValue } from "../domain/types.ts";
-import type { McpToolCallOptions, McpToolInfo, McpToolResult } from "../mcp/index.ts";
-import type { NotificationMessage, NotificationOptions } from "../notifications/index.ts";
-import type { Logger } from "../observability/logger.ts";
-import type { StartPipelineRunParams, StartPipelineRunResult } from "../pipeline/types.ts";
+import type { ProjectContext, TaskState } from "../context/types.ts";
+import type { TaskOrigin } from "../domain/origin.ts";
 
 /**
- * Optional structured return value from a TypeScript task handler.
+ * What a TypeScript task's `run` receives: the project context acting as this task execution,
+ * the task itself, and its state carried from one execution to the next.
  */
-export interface TsTaskResult {
-  /** Incremental state patch (or full state when `mergeState: false`) to persist on success. */
-  readonly state?: Record<string, unknown> | undefined;
-  /** Whether to shallow-merge `state` into the current state (default: true). */
-  readonly mergeState?: boolean | undefined;
-  /** Optional structured summary recorded in `task_executions.actionsSummary`. */
-  readonly summary?: Record<string, unknown> | undefined;
+export interface TaskContext<S extends object = Record<string, unknown>> extends ProjectContext {
+  readonly origin: TaskOrigin;
+  readonly task: {
+    readonly id: string;
+    readonly name: string;
+    readonly cron: string;
+    readonly timezone?: string | undefined;
+  };
+  /** The only way to read and write the task's state; it is saved when the execution succeeds. */
+  readonly state: TaskState<S>;
 }
 
 /**
- * Runtime capability context dynamically injected into every TypeScript task `run(ctx)` call.
+ * Runs one execution. A returned object is recorded as the execution's summary.
  */
-export interface TaskRunContext {
-  readonly projectId: string;
-  readonly taskId: string;
-  readonly taskKey: string;
-  readonly taskName: string;
-  readonly workdir: string;
-  readonly env: Readonly<Record<string, string>>;
-  /** Non-sensitive project variables from `project.yaml` `vars:`. */
-  readonly vars: Readonly<Record<string, ProjectVarValue>>;
-  readonly logger: Logger;
-  readonly signal?: AbortSignal | undefined;
-  /** Snapshot of the task's persisted incremental state before execution. */
-  readonly state: Readonly<Record<string, unknown>>;
+export type TaskRun<S extends object = Record<string, unknown>> = (
+  ctx: TaskContext<S>,
+) => Promise<Record<string, unknown> | void> | Record<string, unknown> | void;
 
-  /** Render a prompt template using this task's standard project/vars/task/state/now scopes. */
-  renderPrompt(template: string, extraScopes?: Readonly<Record<string, unknown>>): string;
-
-  /** Read the task's current incremental state. */
-  getState(): Promise<Record<string, unknown>>;
-
-  /** Update the task's incremental state (shallow-merged by default). */
-  updateState(
-    delta: Record<string, unknown>,
-    options?: { readonly merge?: boolean | undefined },
-  ): Promise<Record<string, unknown>>;
-
-  /** Send a notification through the project's configured NotificationOutbox. */
-  notify(message: NotificationMessage, options?: NotificationOptions): Promise<void>;
-
-  /** Persist an artifact to ArtifactStore. */
-  createArtifact(params: CreateArtifactParams): Promise<ArtifactRecord>;
-
-  /**
-   * Dispatch a new independent Agent session in the current project.
-   * Dispatched sessions always follow the project's default runtime, model, and reasoningEffort.
-   */
-  dispatchTask(params: StartSessionParams): Promise<StartedSession>;
-
-  /**
-   * Call a tool on a project-configured MCP server (from `project.yaml` `runtime.mcpServers`).
-   * Connections are lazily created and reused for the duration of this task execution.
-   */
-  callMcpTool<T = unknown>(
-    serverName: string,
-    toolName: string,
-    args?: Record<string, unknown>,
-    options?: McpToolCallOptions,
-  ): Promise<McpToolResult<T>>;
-
-  /** List allowed tools exposed by a project-configured MCP server. */
-  listMcpTools(serverName: string, options?: McpToolCallOptions): Promise<readonly McpToolInfo[]>;
-
-  /**
-   * Start (or idempotently locate via `externalKey`) a Pipeline run in the current project.
-   */
-  startPipelineRun(params: StartPipelineRunParams): Promise<StartPipelineRunResult>;
-}
-
-export type TsTaskHandler = (
-  ctx: TaskRunContext,
-) => Promise<TsTaskResult | void> | TsTaskResult | void;
-
-/**
- * Definition object passed to `api.registerTask(...)` inside a TypeScript task module.
- */
-export interface TsTaskRegistration {
-  /**
-   * Short unique task identifier within the project.
-   * Optional when the file registers only a single task (defaults to filename without `.ts`);
-   * required when a file registers multiple tasks.
-   */
+export interface TaskSpec<S extends object = Record<string, unknown>> {
+  /** Unique within the project. Defaults to the file name for a file with a single task. */
   readonly id?: string | undefined;
   readonly name: string;
   readonly cron: string;
@@ -99,27 +34,49 @@ export interface TsTaskRegistration {
   readonly enabled?: boolean | undefined;
   readonly description?: string | undefined;
   readonly timeoutMs?: number | undefined;
-  readonly run: TsTaskHandler;
+  readonly run: TaskRun<S>;
+}
+
+const TASK_BRAND = "AgentOrchestratorTask" as const;
+
+/** A task as `defineTask` returns it; the loader accepts nothing else. */
+export interface DefinedTask extends TaskSpec<Record<string, unknown>> {
+  readonly __brand: typeof TASK_BRAND;
 }
 
 /**
- * Pi-style dynamic injection API passed to `export default function (api: TaskExtensionAPI)`.
+ * Declares a scheduled TypeScript task. A file under `projects/<id>/tasks/` default-exports one
+ * task, or an array of tasks that each have an `id`.
+ *
+ * ```ts
+ * export default defineTask({
+ *   name: "Issue poll",
+ *   cron: "*\/10 * * * *",
+ *   async run(ctx) {
+ *     const since = ctx.state.get().since;
+ *     ctx.state.merge({ since: new Date().toISOString() });
+ *   },
+ * });
+ * ```
  */
-export interface TaskExtensionAPI {
-  readonly projectId: string;
-  readonly workdir: string;
-  readonly env: Readonly<Record<string, string>>;
-  readonly logger: Logger;
-  registerTask(task: TsTaskRegistration): void;
+export function defineTask<S extends object = Record<string, unknown>>(
+  spec: TaskSpec<S>,
+): DefinedTask {
+  return { ...(spec as unknown as TaskSpec), __brand: TASK_BRAND };
 }
 
-export type TaskExtensionFactory = (api: TaskExtensionAPI) => void | Promise<void>;
+export function isDefinedTask(value: unknown): value is DefinedTask {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { __brand?: unknown }).__brand === TASK_BRAND
+  );
+}
 
-/**
- * Strict validation schema for `api.registerTask(...)` definitions.
- */
-export const tsTaskRegistrationSchema = z
+/** Validates what `defineTask` was given. */
+export const taskSpecSchema = z
   .object({
+    __brand: z.literal(TASK_BRAND),
     id: z.string().trim().min(1).optional(),
     name: z.string().trim().min(1),
     cron: z.string().trim().min(1),
@@ -127,10 +84,8 @@ export const tsTaskRegistrationSchema = z
     enabled: z.boolean().optional().default(true),
     description: z.string().optional(),
     timeoutMs: z.number().positive().optional(),
-    run: z.custom<TsTaskHandler>((value) => typeof value === "function", {
+    run: z.custom<TaskRun>((value) => typeof value === "function", {
       message: "run must be a function",
     }),
   })
   .strict();
-
-export type ValidatedTsTaskRegistration = z.infer<typeof tsTaskRegistrationSchema>;

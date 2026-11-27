@@ -1004,34 +1004,33 @@ export default definePipeline({
 });
 `;
     const tsTaskCode = `
-export default function (api) {
-  api.registerTask({
-    id: "scan",
-    name: "Scan & Trigger",
-    cron: "0 0 1 1 *",
-    enabled: false,
-    async run(ctx) {
-      const first = await ctx.startPipelineRun({
-        pipelineId: "delivery",
-        title: "From TS Task",
-        externalKey: "JIRA-77",
-      });
-      const second = await ctx.startPipelineRun({
-        pipelineId: "delivery",
-        title: "From TS Task Duplicate",
-        externalKey: "JIRA-77",
-      });
-      return {
-        summary: {
-          firstCreated: first.created,
-          secondCreated: second.created,
-          sameRun: first.run.runId === second.run.runId,
-          createdBy: first.run.createdBy,
-        },
-      };
-    },
-  });
-}
+import { defineTask } from ${JSON.stringify(path.resolve(import.meta.dir, "../src/task/sdk.ts"))};
+export default defineTask({
+  id: "scan",
+  name: "Scan & Trigger",
+  cron: "0 0 1 1 *",
+  enabled: false,
+  async run(ctx) {
+    const first = await ctx.pipelines.start({
+      pipelineId: "delivery",
+      title: "From TS Task",
+      externalKey: "JIRA-77",
+    });
+    const second = await ctx.pipelines.start({
+      pipelineId: "delivery",
+      title: "From TS Task Duplicate",
+      externalKey: "JIRA-77",
+    });
+    const found = await ctx.pipelines.find({ pipelineId: "delivery", externalKey: "JIRA-77" });
+    return {
+      firstCreated: first.created,
+      secondCreated: second.created,
+      sameRun: first.run.runId === second.run.runId,
+      foundRun: found?.runId === first.run.runId,
+      createdBy: first.run.createdBy,
+    };
+  },
+});
 `;
     const env = await createTestProjectRuntime({ pipelineCode, tsTaskCode });
     try {
@@ -1045,6 +1044,7 @@ export default function (api) {
         firstCreated: true,
         secondCreated: false,
         sameRun: true,
+        foundRun: true,
         createdBy: "task:scan",
       });
     } finally {

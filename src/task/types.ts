@@ -37,17 +37,6 @@ export const taskFrontmatterSchema = z.object({
   timezone: z.string().optional().describe("Schedule timezone (e.g. 'Asia/Shanghai', defaults to system timezone)"),
   enabled: z.boolean().optional().default(true).describe("Whether task scheduling is enabled"),
   description: z.string().optional().describe("Task description and business purpose"),
-  type: z
-    .string()
-    .min(1)
-    .optional()
-    .describe("Executor type identifier: agent, script, or custom registered executor"),
-  executor: z
-    .string()
-    .min(1)
-    .optional()
-    .describe("Custom executor alias or class identifier (alias of type)"),
-  command: z.string().optional().describe("Executable shell command when type is script"),
   timeoutMs: z.number().positive().optional().describe("Task execution timeout in milliseconds"),
   runtime: taskRuntimeSchema
     .optional()
@@ -74,9 +63,8 @@ export interface TaskDefinition {
   readonly filePath: string;
   readonly sourceFormat?: TaskSourceFormat | undefined;
   readonly fileMtimeMs?: number | undefined;
-  readonly type?: string | undefined;
-  readonly executor?: string | undefined;
-  readonly command?: string | undefined;
+  /** Which executor runs it: `agent` for Markdown prompt tasks, `ts` for TypeScript tasks. */
+  readonly type: string;
   readonly timeoutMs?: number | undefined;
   readonly runtime?: TaskRuntimeConfig | undefined;
 }

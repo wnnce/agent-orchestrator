@@ -224,27 +224,24 @@ Repo={{project.id}} Branch={{project.repo.baseBranch}} Author={{vars.githubAutho
       await writeFile(
         path.join(tasksDir, "feeder.ts"),
         `
-export default function (api) {
-  api.registerTask({
-    id: "feeder",
-    name: "Feeder Task",
-    cron: "0 0 * * *",
-    enabled: false,
-    async run(ctx) {
-      const rendered = ctx.renderPrompt(
-        "TS {{project.id}} author={{vars.githubAuthor}} extra={{custom.tag}} secret={{env.GITHUB_TOKEN}}",
-        { custom: { tag: "v1" } },
-      );
-      return {
-        state: {
-          rendered,
-          authorVar: ctx.vars.githubAuthor,
-          maxBatchVar: ctx.vars.maxBatch,
-        },
-      };
-    },
-  });
-}
+import { defineTask } from ${JSON.stringify(path.resolve(import.meta.dir, "../src/task/sdk.ts"))};
+export default defineTask({
+  id: "feeder",
+  name: "Feeder Task",
+  cron: "0 0 * * *",
+  enabled: false,
+  run(ctx) {
+    const rendered = ctx.render(
+      "TS {{project.id}} author={{vars.githubAuthor}} extra={{custom.tag}} secret={{env.GITHUB_TOKEN}}",
+      { custom: { tag: "v1" } },
+    );
+    ctx.state.set({
+      rendered,
+      authorVar: ctx.project.vars.githubAuthor,
+      maxBatchVar: ctx.project.vars.maxBatch,
+    });
+  },
+});
 `,
       );
 

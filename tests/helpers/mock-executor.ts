@@ -35,7 +35,7 @@ export class MockTaskExecutor implements ITaskExecutor {
   }
 
   canHandle(task: TaskDefinition): boolean {
-    return task.type === this.type || task.executor === this.type;
+    return task.type === this.type;
   }
 
   async execute(context: TaskExecutionContext): Promise<TaskRunResult> {

@@ -20,6 +20,8 @@ import {
 } from "../src/runtime/runtime.ts";
 import { isTsTaskFile, loadTsTaskModule, TaskLoader } from "../src/task/index.ts";
 
+const SDK = JSON.stringify(path.resolve(import.meta.dir, "../src/task/sdk.ts"));
+
 class CapturingRuntime implements AgentRuntime {
   readonly name: string;
   readonly type: string;
@@ -98,28 +100,26 @@ describe("TypeScript task module contract & loader", () => {
     expect(isTsTaskFile("sync-issues.md")).toBe(false);
   });
 
-  test("loads single-task module with default id and multi-task module with shared api context", async () => {
+  test("loads a single task with the file name as id, and an array of tasks with their ids", async () => {
     const tasksDir = path.join(root, "tasks");
     await mkdir(tasksDir, { recursive: true });
 
     const singleFile = path.join(tasksDir, "ping-health.ts");
     await writeFile(
       singleFile,
-      `
-export default function (api) {
-  api.registerTask({
-    name: "Ping Health",
-    cron: "*/5 * * * *",
-    enabled: false,
-    async run() {
-      return { summary: { ok: true, project: api.projectId } };
-    },
-  });
-}
+      `import { defineTask } from ${SDK};
+export default defineTask({
+  name: "Ping Health",
+  cron: "*/5 * * * *",
+  enabled: false,
+  run(ctx) {
+    return { ok: true, project: ctx.project.id };
+  },
+});
 `,
     );
 
-    const single = await loadTsTaskModule(singleFile, "demo", { env: { API_TOKEN: "sec" } }, silentLogger);
+    const single = await loadTsTaskModule(singleFile, "demo");
     expect(single.tasks).toHaveLength(1);
     expect(single.tasks[0]?.taskId).toBe("ping-health");
     expect(single.tasks[0]?.taskKey).toBe("demo:ping-health");
@@ -129,117 +129,83 @@ export default function (api) {
     const multiFile = path.join(tasksDir, "github-suite.ts");
     await writeFile(
       multiFile,
-      `
-export default async function (api) {
-  const token = api.env.GITHUB_TOKEN ?? "";
-  api.registerTask({
-    id: "scan-issues",
-    name: "Scan Issues",
-    cron: "*/10 * * * *",
-    async run() {
-      return { summary: { tokenPresent: Boolean(token), kind: "issues" } };
-    },
-  });
-  api.registerTask({
+      `import { defineTask } from ${SDK};
+export default [
+  defineTask({ id: "scan-issues", name: "Scan Issues", cron: "*/10 * * * *", run() {} }),
+  defineTask({
     id: "scan-prs",
     name: "Scan PRs",
     cron: "*/15 * * * *",
     timezone: "Asia/Shanghai",
     enabled: false,
-    async run() {
-      return { summary: { tokenPresent: Boolean(token), kind: "prs" } };
-    },
-  });
-}
+    run() {},
+  }),
+];
 `,
     );
 
-    const multi = await loadTsTaskModule(
-      multiFile,
-      "demo",
-      { env: { GITHUB_TOKEN: "tok_123" } },
-      silentLogger,
-    );
+    const multi = await loadTsTaskModule(multiFile, "demo");
     expect(multi.tasks.map((t) => t.taskId)).toEqual(["scan-issues", "scan-prs"]);
     expect(multi.tasks[1]?.timezone).toBe("Asia/Shanghai");
     expect(multi.tasks[1]?.enabled).toBe(false);
     expect(multi.handlers.size).toBe(2);
   });
 
-  test("rejects modules that violate the Pi-style injection contract", async () => {
+  test("rejects modules that do not export defineTask tasks", async () => {
     const tasksDir = path.join(root, "tasks");
     await mkdir(tasksDir, { recursive: true });
+    const write = async (name: string, body: string) => {
+      const file = path.join(tasksDir, name);
+      await writeFile(file, `import { defineTask } from ${SDK};\n${body}`);
+      return file;
+    };
 
-    // 1. Missing default function export
-    const noDefault = path.join(tasksDir, "no-default.ts");
-    await writeFile(noDefault, `export const foo = 1;`);
-    await expect(loadTsTaskModule(noDefault, "demo", {}, silentLogger)).rejects.toThrow(
-      /must default-export a factory function/,
-    );
+    // 1. No default export, or something other than defineTask(...)
+    for (const body of [
+      "export const foo = 1;",
+      "export default [];",
+      'export default { name: "T", cron: "* * * * *", run() {} };',
+      "export default function (api) {}",
+    ]) {
+      const file = await write("not-a-task.ts", body);
+      await expect(loadTsTaskModule(file, "demo")).rejects.toThrow(
+        /must default-export defineTask/,
+      );
+    }
 
-    // 2. Factory registers nothing
-    const emptyFactory = path.join(tasksDir, "empty-factory.ts");
-    await writeFile(emptyFactory, `export default function (api) {}`);
-    await expect(loadTsTaskModule(emptyFactory, "demo", {}, silentLogger)).rejects.toThrow(
-      /did not register any task/,
+    // 2. Several tasks without explicit ids
+    const multiNoId = await write(
+      "multi-no-id.ts",
+      `export default [
+  defineTask({ id: "t1", name: "T1", cron: "* * * * *", run() {} }),
+  defineTask({ name: "T2", cron: "* * * * *", run() {} }),
+];`,
     );
-
-    // 3. Multi-task registration missing explicit id
-    const multiNoId = path.join(tasksDir, "multi-no-id.ts");
-    await writeFile(
-      multiNoId,
-      `
-export default function (api) {
-  api.registerTask({ id: "t1", name: "T1", cron: "* * * * *", run() {} });
-  api.registerTask({ name: "T2", cron: "* * * * *", run() {} });
-}
-`,
-    );
-    await expect(loadTsTaskModule(multiNoId, "demo", {}, silentLogger)).rejects.toThrow(
+    await expect(loadTsTaskModule(multiNoId, "demo")).rejects.toThrow(
       /every task must specify an explicit "id"/,
     );
 
-    // 4. Duplicate id inside same file
-    const dupId = path.join(tasksDir, "dup-id.ts");
-    await writeFile(
-      dupId,
-      `
-export default function (api) {
-  api.registerTask({ id: "same", name: "T1", cron: "* * * * *", run() {} });
-  api.registerTask({ id: "same", name: "T2", cron: "* * * * *", run() {} });
-}
-`,
+    // 3. Duplicate id inside the same file
+    const dupId = await write(
+      "dup-id.ts",
+      `export default [
+  defineTask({ id: "same", name: "T1", cron: "* * * * *", run() {} }),
+  defineTask({ id: "same", name: "T2", cron: "* * * * *", run() {} }),
+];`,
     );
-    await expect(loadTsTaskModule(dupId, "demo", {}, silentLogger)).rejects.toThrow(
-      /Duplicate task id "same"/,
-    );
+    await expect(loadTsTaskModule(dupId, "demo")).rejects.toThrow(/Duplicate task id "same"/);
 
-    // 5. Unknown extra property or non-function run
-    const badSchema = path.join(tasksDir, "bad-schema.ts");
-    await writeFile(
-      badSchema,
-      `
-export default function (api) {
-  api.registerTask({ name: "Bad", cron: "* * * * *", unknownField: true, run() {} });
-}
-`,
+    // 4. Unknown properties or a run that is not a function
+    const badSchema = await write(
+      "bad-schema.ts",
+      `export default defineTask({ name: "Bad", cron: "* * * * *", unknownField: true, run() {} });`,
     );
-    await expect(loadTsTaskModule(badSchema, "demo", {}, silentLogger)).rejects.toThrow(
-      /Invalid TS task registration/,
+    await expect(loadTsTaskModule(badSchema, "demo")).rejects.toThrow(/Invalid task #1/);
+    const badRun = await write(
+      "bad-run.ts",
+      `export default defineTask({ name: "BadRun", cron: "* * * * *", run: "not-a-fn" });`,
     );
-
-    const badRun = path.join(tasksDir, "bad-run.ts");
-    await writeFile(
-      badRun,
-      `
-export default function (api) {
-  api.registerTask({ name: "BadRun", cron: "* * * * *", run: "not-a-fn" });
-}
-`,
-    );
-    await expect(loadTsTaskModule(badRun, "demo", {}, silentLogger)).rejects.toThrow(
-      /run must be a function/,
-    );
+    await expect(loadTsTaskModule(badRun, "demo")).rejects.toThrow(/run must be a function/);
   });
 
   test("TaskLoader loads .md and .ts together, skips helpers/invalid files, and prevents duplicate taskId collisions", async () => {
@@ -261,25 +227,20 @@ Markdown prompt.
     );
     await writeFile(
       path.join(tasksDir, "b-typescript.ts"),
-      `
+      `import { defineTask } from ${SDK};
 import { PREFIX } from "./_shared.ts";
-export default function (api) {
-  api.registerTask({
-    id: "shared-id",
-    name: "Colliding TS Task",
-    cron: "0 * * * *",
-    run() {},
-  });
-  api.registerTask({
+export default [
+  defineTask({ id: "shared-id", name: "Colliding TS Task", cron: "0 * * * *", run() {} }),
+  defineTask({
     id: "unique-ts",
     name: "Unique TS Task",
     cron: "0 * * * *",
     enabled: false,
     run() {
-      return { summary: { prefix: PREFIX } };
+      return { prefix: PREFIX };
     },
-  });
-}
+  }),
+];
 `,
     );
 
@@ -356,54 +317,51 @@ describe("TypeScript task end-to-end execution, dispatch, timeout, and hot reloa
     const taskFile = path.join(projectDir, "tasks", "pipeline.ts");
     await writeFile(
       taskFile,
-      `
-export default function (api) {
-  api.registerTask({
+      `import { defineTask } from ${SDK};
+export default [
+  defineTask({
     id: "poll-and-dispatch",
     name: "Poll and Dispatch",
     cron: "0 0 * * *",
     enabled: false,
-    description: "Deterministic TS polling that dispatches an agent session on demand",
+    description: "Deterministic TS polling that starts an agent session on demand",
     async run(ctx) {
-      const prev = await ctx.getState();
+      const prev = ctx.state.get();
       const count = typeof prev.count === "number" ? prev.count + 1 : 1;
-      const dispatched = await ctx.dispatchTask({
+      const started = await ctx.sessions.start({
         title: "dev(ts-poll): handle #" + count,
-        prompt: "Process item #" + count + " using token " + Boolean(ctx.env.CUSTOM_API_TOKEN),
+        prompt: "Process item #" + count + " using token " + Boolean(ctx.project.env.CUSTOM_API_TOKEN),
         metadata: { runCount: count },
       });
-      await ctx.createArtifact({
+      await ctx.artifacts.create({
         kind: "poll-report",
         content: "count=" + count,
         contentType: "text/plain",
       });
       await ctx.notify({
-        title: "TS Task Dispatched",
-        text: "Dispatched session " + dispatched.sessionId,
+        title: "TS Task Started",
+        text: "Started session " + started.sessionId,
         level: "info",
       });
+      ctx.state.set({ count, lastSessionId: started.sessionId });
       return {
-        state: { count, lastSessionId: dispatched.sessionId },
-        summary: {
-          count,
-          tokenSeen: ctx.env.CUSTOM_API_TOKEN === "secret_token_xyz",
-          dispatchedSessionId: dispatched.sessionId,
-        },
+        count,
+        tokenSeen: ctx.project.env.CUSTOM_API_TOKEN === "secret_token_xyz",
+        startedSessionId: started.sessionId,
       };
     },
-  });
-
-  api.registerTask({
+  }),
+  defineTask({
     id: "check-counter",
     name: "Check Counter",
     cron: "0 0 * * *",
     enabled: false,
-    async run(ctx) {
-      await ctx.updateState({ checked: true });
-      return { summary: { projectId: ctx.projectId, taskId: ctx.taskId } };
+    run(ctx) {
+      ctx.state.merge({ checked: true });
+      return { projectId: ctx.project.id, taskId: ctx.task.id, origin: ctx.origin.kind };
     },
-  });
-}
+  }),
+];
 `,
     );
 
@@ -434,6 +392,7 @@ export default function (api) {
 
     const dispatchedSession = await store.getSession(dispatchedId);
     expect(dispatchedSession?.source).toBe("dispatch");
+    expect(dispatchedSession?.metadata?.sourceTaskId).toBe("poll-and-dispatch");
     expect(dispatchedSession?.runtime).toBe("codex");
     expect(dispatchedSession?.model).toBe("gpt-5.6-terra");
     expect(dispatchedSession?.reasoningEffort).toBe("high");
@@ -461,6 +420,7 @@ export default function (api) {
     expect(counterExecs[0]?.actionsSummary).toEqual({
       projectId: "demo",
       taskId: "check-counter",
+      origin: "task",
     });
   });
 
@@ -468,18 +428,17 @@ export default function (api) {
     const taskFile = path.join(projectDir, "tasks", "hot-reload.ts");
     await writeFile(
       taskFile,
-      `
-export default function (api) {
-  api.registerTask({
-    id: "hot-reload",
-    name: "Hot Reload Task",
-    cron: "0 0 * * *",
-    enabled: false,
-    async run() {
-      return { state: { version: 1 }, summary: { version: 1 } };
-    },
-  });
-}
+      `import { defineTask } from ${SDK};
+export default defineTask({
+  id: "hot-reload",
+  name: "Hot Reload Task",
+  cron: "0 0 * * *",
+  enabled: false,
+  run(ctx) {
+    ctx.state.set({ version: 1 });
+    return { version: 1 };
+  },
+});
 `,
     );
 
@@ -493,18 +452,17 @@ export default function (api) {
     // Edit file on disk and bump mtime explicitly to guarantee mtime delta on fast filesystems
     await writeFile(
       taskFile,
-      `
-export default function (api) {
-  api.registerTask({
-    id: "hot-reload",
-    name: "Hot Reload Task",
-    cron: "0 0 * * *",
-    enabled: false,
-    async run() {
-      return { state: { version: 2 }, summary: { version: 2 } };
-    },
-  });
-}
+      `import { defineTask } from ${SDK};
+export default defineTask({
+  id: "hot-reload",
+  name: "Hot Reload Task",
+  cron: "0 0 * * *",
+  enabled: false,
+  run(ctx) {
+    ctx.state.set({ version: 2 });
+    return { version: 2 };
+  },
+});
 `,
     );
     const future = new Date(Date.now() + 2000);
@@ -521,19 +479,18 @@ export default function (api) {
     const timeoutFile = path.join(projectDir, "tasks", "slow-task.ts");
     await writeFile(
       timeoutFile,
-      `
-export default function (api) {
-  api.registerTask({
-    id: "slow-task",
-    name: "Slow Task",
-    cron: "0 0 * * *",
-    enabled: false,
-    timeoutMs: 80,
-    async run() {
-      await new Promise(() => {});
-    },
-  });
-}
+      `import { defineTask } from ${SDK};
+export default defineTask({
+  id: "slow-task",
+  name: "Slow Task",
+  cron: "0 0 * * *",
+  enabled: false,
+  timeoutMs: 80,
+  async run(ctx) {
+    ctx.state.set({ touched: true });
+    await new Promise(() => {});
+  },
+});
 `,
     );
 
@@ -544,5 +501,7 @@ export default function (api) {
     expect(timeoutExecs).toHaveLength(1);
     expect(timeoutExecs[0]?.status).toBe("failed");
     expect(timeoutExecs[0]?.errorMessage).toMatch(/timed out/i);
+    // A failed execution keeps the state it started with
+    expect(timeoutExecs[0]?.stateAfter).toEqual({});
   });
 });
