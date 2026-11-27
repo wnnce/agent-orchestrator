@@ -14,6 +14,16 @@ server:
 logging:
   level: info # debug | info | warn | error
 
+# 2.5 OpenTelemetry tracing over OTLP/HTTP (Jaeger, Tempo, SLS, Langfuse, an OTel Collector, ...)
+# Unset fields fall back to the standard OTEL_* environment variables; put exporter credentials
+# in OTEL_EXPORTER_OTLP_HEADERS rather than in this file.
+tracing:
+  enabled: false
+  # serviceName: agent-orchestrator # or OTEL_SERVICE_NAME
+  # environment: production
+  # endpoint: http://localhost:4318/v1/traces # or OTEL_EXPORTER_OTLP_ENDPOINT
+  # sampleRate: 1.0 # share of new traces to record; continued traces follow the caller
+
 # 3. Storage and paths (relative paths resolve from this YAML file's directory)
 storage:
   dataDir: .data

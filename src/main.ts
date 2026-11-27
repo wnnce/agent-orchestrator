@@ -8,11 +8,13 @@ import { MemoryStore, PostgresStore, type Store } from "./persistence/store.ts";
 import { ProjectManager } from "./project/manager.ts";
 import { Gateway } from "./gateway/server.ts";
 import { Logger } from "./observability/logger.ts";
+import { setupTracing } from "./observability/tracing-setup.ts";
 import { MemoryEventHub } from "./events/hub.ts";
 import { SessionManager } from "./session/index.ts";
 
 const config = await loadConfig(configPathFromArgs(process.argv.slice(2)));
 const logger = new Logger({ level: config.logLevel });
+const tracing = setupTracing(config.tracing, { logger });
 logger.info("service bootstrap started", {
   host: config.host,
   port: config.port,
@@ -45,6 +47,7 @@ const shutdown = async () => {
   server.stop(true);
   await projectManager.stop();
   await store.close();
+  await tracing.shutdown();
   logger.info("service shutdown completed");
   process.exit(0);
 };

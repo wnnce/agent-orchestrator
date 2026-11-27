@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Logger } from "../observability/logger.ts";
+import type { Context } from "../observability/tracing.ts";
 import type { NotificationConfig, ArtifactRecord } from "../domain/types.ts";
 import type { NotificationMessage, NotificationOptions } from "../notifications/index.ts";
 import type {
@@ -20,6 +21,7 @@ export interface CreateActionContextParams {
   readonly workspacePath?: string | undefined;
   readonly logger?: Logger | undefined;
   readonly signal?: AbortSignal | undefined;
+  readonly traceContext?: Context | undefined;
   readonly services?: (Partial<ActionServicesMap> & Record<string, unknown>) | undefined;
   readonly projectNotifications?: NotificationConfig[] | undefined;
 
@@ -80,6 +82,7 @@ export function createActionContext(params: CreateActionContextParams): ActionCo
     ...(workdir !== undefined ? { workdir } : {}),
     logger,
     ...(signal !== undefined ? { signal } : {}),
+    ...(params.traceContext !== undefined ? { traceContext: params.traceContext } : {}),
 
     async notify(message: NotificationMessage, options?: NotificationOptions): Promise<void> {
       if (params.onNotify) {

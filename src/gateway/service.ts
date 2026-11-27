@@ -6,6 +6,7 @@ import { ProjectManager } from "../project/manager.ts";
 import { ProjectRouter } from "../router/project-router.ts";
 import type { InboundEnvelope, InboundResult } from "../channels/types.ts";
 import type { Logger } from "../observability/logger.ts";
+import { SpanKind, withSpan } from "../observability/tracing.ts";
 import type { EventHub } from "../events/hub.ts";
 import { FeishuClient, FeishuSessionStreamer, buildFeishuCard } from "../channels/feishu.ts";
 import {
@@ -256,7 +257,23 @@ export class GatewayService {
     this.feishuCloseObservers.set(sessionId, unsubscribe);
   }
 
-  private async processInbound(envelope: InboundEnvelope): Promise<InboundResult> {
+  private processInbound(envelope: InboundEnvelope): Promise<InboundResult> {
+    const { channel, conversationId } = envelope.conversation;
+    return withSpan(
+      `inbound ${channel}`,
+      {
+        kind: SpanKind.CONSUMER,
+        attributes: {
+          "messaging.system": channel,
+          "messaging.message.id": envelope.messageId,
+          "messaging.destination.name": conversationId,
+        },
+      },
+      () => this.dispatchInbound(envelope),
+    );
+  }
+
+  private async dispatchInbound(envelope: InboundEnvelope): Promise<InboundResult> {
     const text = envelope.text.trim();
     if (!text) throw new ValidationError("inbound message text is required");
 

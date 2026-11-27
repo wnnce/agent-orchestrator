@@ -9,6 +9,7 @@ import { ProjectManager } from "../project/manager.ts";
 import type { Logger } from "../observability/logger.ts";
 import { createOpenAPIApp } from "./openapi.ts";
 import { GatewayService } from "./service.ts";
+import { httpTracing } from "./tracing.ts";
 import { FeishuWSAdapter } from "../channels/feishu.ts";
 import { WeComClient, WeComWSAdapter } from "../channels/wecom.ts";
 import type { EventHub } from "../events/hub.ts";
@@ -92,6 +93,9 @@ export class Gateway {
 
   private createApp(): OpenAPIHono {
     const app = createOpenAPIApp({ logger: this.logger });
+
+    // 0. Tracing for API requests; registered first so the request log below carries the trace ID
+    app.use(`${API_V1_PREFIX}/*`, httpTracing());
 
     // 1. Request logging & x-request-id middleware
     app.use("*", async (c, next) => {

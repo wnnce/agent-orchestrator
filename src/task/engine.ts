@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Logger } from "../observability/logger.ts";
+import { SpanStatusCode, captureTraceContext, withSpan } from "../observability/tracing.ts";
 import type { Store } from "../persistence/store.ts";
 import type { TaskExecutorRegistry } from "./registry.ts";
 import type {
@@ -63,6 +64,7 @@ export class TaskEngine {
       taskId: task.taskId,
       task,
       enqueuedAt: new Date(),
+      traceContext: captureTraceContext(),
     });
 
     this.logger.info("task enqueued for execution", {
@@ -147,6 +149,32 @@ export class TaskEngine {
     if (!queued) return;
 
     this.activeWorkers++;
+    try {
+      await withSpan(
+        `task ${queued.taskKey}`,
+        {
+          parent: queued.traceContext,
+          attributes: {
+            "project.id": queued.projectId,
+            "task.key": queued.taskKey,
+            "task.id": queued.taskId,
+            ...(queued.task.type ? { "task.type": queued.task.type } : {}),
+          },
+        },
+        async (span) => {
+          if (!(await this.runQueued(queued))) span.setStatus({ code: SpanStatusCode.ERROR });
+        },
+      );
+    } finally {
+      // Release single-flight lock and worker slot, continue pumping queue
+      this.runningTasks.delete(queued.taskKey);
+      this.activeWorkers--;
+      void this.processNext();
+    }
+  }
+
+  /** Runs one queued task and records its execution; returns whether it succeeded. */
+  private async runQueued(queued: QueuedTask): Promise<boolean> {
     const startedAt = new Date();
     const executionId = `exec_${randomUUID()}`;
 
@@ -233,6 +261,7 @@ export class TaskEngine {
         success: result.success,
         durationMs: result.durationMs,
       });
+      return result.success;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.error("task worker execution error", {
@@ -259,12 +288,9 @@ export class TaskEngine {
           finishedAt: new Date().toISOString(),
         });
       }
+      return false;
     } finally {
       if (timeoutTimer) clearTimeout(timeoutTimer);
-      // 5. Release single-flight lock and worker slot, continue pumping queue
-      this.runningTasks.delete(queued.taskKey);
-      this.activeWorkers--;
-      void this.processNext();
     }
   }
 }

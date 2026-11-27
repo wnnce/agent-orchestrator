@@ -1,5 +1,6 @@
 import { Cron } from "croner";
 import { Logger } from "../observability/logger.ts";
+import { detached } from "../observability/tracing.ts";
 import type { TaskDefinition } from "./types.ts";
 import type { TaskEngine } from "./engine.ts";
 
@@ -41,13 +42,15 @@ export class TaskScheduler {
           ...(task.timezone ? { timezone: task.timezone } : {}),
           protect: true, // Prevent overlapping invocations if execution exceeds interval
         },
-        () => {
-          this.logger.info("cron triggered task execution", {
-            taskKey: task.taskKey,
-            name: task.name,
-          });
-          this.engine.dispatch(task);
-        },
+        () =>
+          // A cron run starts its own trace; the timer may have been set up during a request.
+          detached(() => {
+            this.logger.info("cron triggered task execution", {
+              taskKey: task.taskKey,
+              name: task.name,
+            });
+            this.engine.dispatch(task);
+          }),
       );
 
       this.jobs.set(task.taskKey, job);

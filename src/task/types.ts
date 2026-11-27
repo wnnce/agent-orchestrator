@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ActionContext } from "../actions/types.ts";
 import { REASONING_EFFORTS, type ReasoningEffort } from "../domain/types.ts";
+import type { Context } from "../observability/tracing.ts";
 
 /**
  * Optional per-task runtime override schema (mirrors project.yaml `runtime:` shape).
@@ -97,6 +98,8 @@ export interface QueuedTask {
   readonly taskId: string;
   readonly task: TaskDefinition;
   readonly enqueuedAt: Date;
+  /** Trace of whoever queued the task (an API request, a cron tick); the run continues it. */
+  readonly traceContext: Context;
 }
 
 /**

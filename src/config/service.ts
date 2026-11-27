@@ -20,6 +20,22 @@ export const loggingConfigSchema = z.strictObject({
   level: z.enum(["debug", "info", "warn", "error"]).default("info"),
 });
 
+/**
+ * OpenTelemetry tracing. Fields left out fall back to the standard `OTEL_*` environment
+ * variables (`OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`, ...),
+ * which is also the place for exporter credentials.
+ */
+export const tracingConfigSchema = z.strictObject({
+  enabled: z.boolean().default(false),
+  serviceName: optionalText,
+  environment: optionalText,
+  /** OTLP/HTTP traces endpoint, e.g. `http://localhost:4318/v1/traces`. */
+  endpoint: optionalText,
+  headers: z.record(z.string(), z.string()).default({}),
+  /** Share of new traces to record; a trace continued from a caller follows the caller's choice. */
+  sampleRate: z.number().min(0).max(1).default(1),
+});
+
 export const storageConfigSchema = z.strictObject({
   dataDir: z.string().trim().min(1).default(".data"),
   projectsDir: z.string().trim().min(1).default("projects"),
@@ -80,6 +96,7 @@ export const hierarchicalAppConfigSchema = z.strictObject({
   defaultRuntime: z.string().min(1).default("codex"),
   server: serverConfigSchema.prefault({}),
   logging: loggingConfigSchema.prefault({}),
+  tracing: tracingConfigSchema.prefault({}),
   storage: storageConfigSchema.prefault({}),
   auth: authConfigSchema.prefault({}),
   router: routerConfigSchema.prefault({}),
@@ -170,6 +187,7 @@ export const appConfigSchema = z.preprocess(normalizeRawConfig, hierarchicalAppC
 
 export type ServerConfig = z.output<typeof serverConfigSchema>;
 export type LoggingConfig = z.output<typeof loggingConfigSchema>;
+export type TracingConfig = z.output<typeof tracingConfigSchema>;
 export type StorageConfig = {
   dataDir: string;
   projectsDir: string;
@@ -188,6 +206,7 @@ export interface AppConfig {
   defaultRuntime?: string;
   server?: ServerConfig;
   logging?: LoggingConfig;
+  tracing?: TracingConfig;
   storage?: StorageConfig;
   auth?: AuthConfig;
   router?: RouterConfig;
@@ -287,6 +306,7 @@ export async function loadConfig(file = "config.yaml"): Promise<AppConfig> {
     defaultRuntime: data.defaultRuntime,
     server: data.server,
     logging: data.logging,
+    tracing: data.tracing,
     storage,
     auth: data.auth,
     router: data.router,

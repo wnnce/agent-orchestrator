@@ -3,6 +3,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { McpServerConfig } from "../domain/types.ts";
 import { Logger } from "../observability/logger.ts";
+import { SpanKind, withSpan } from "../observability/tracing.ts";
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 30_000;
 const DEFAULT_TOOL_TIMEOUT_MS = 60_000;
@@ -334,35 +335,41 @@ export class ProjectMcpClientPool {
         : DEFAULT_TOOL_TIMEOUT_MS);
     const effectiveSignal = combineSignals(this.options.signal, callOptions?.signal);
 
-    try {
-      const client = await this.getClient(server, callOptions?.signal);
-      const raw = await client.callTool(
-        {
-          name: toolName,
-          ...(args !== undefined ? { arguments: args } : {}),
-        },
-        {
-          timeout: timeoutMs,
-          ...(effectiveSignal ? { signal: effectiveSignal } : {}),
-        },
-      );
-      const unwrapped = unwrapMcpToolResult<T>(raw, serverName, toolName);
-      this.logger.debug("mcp tool call completed", {
-        server: serverName,
-        tool: toolName,
-        durationMs: Date.now() - startedAt,
-      });
-      return unwrapped;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.logger.warn("mcp tool call failed", {
-        server: serverName,
-        tool: toolName,
-        durationMs: Date.now() - startedAt,
-        error: message,
-      });
-      throw err;
-    }
+    return withSpan(
+      `mcp ${serverName}.${toolName}`,
+      { kind: SpanKind.CLIENT, attributes: { "mcp.server": serverName, "mcp.tool": toolName } },
+      async () => {
+        try {
+          const client = await this.getClient(server, callOptions?.signal);
+          const raw = await client.callTool(
+            {
+              name: toolName,
+              ...(args !== undefined ? { arguments: args } : {}),
+            },
+            {
+              timeout: timeoutMs,
+              ...(effectiveSignal ? { signal: effectiveSignal } : {}),
+            },
+          );
+          const unwrapped = unwrapMcpToolResult<T>(raw, serverName, toolName);
+          this.logger.debug("mcp tool call completed", {
+            server: serverName,
+            tool: toolName,
+            durationMs: Date.now() - startedAt,
+          });
+          return unwrapped;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.warn("mcp tool call failed", {
+            server: serverName,
+            tool: toolName,
+            durationMs: Date.now() - startedAt,
+            error: message,
+          });
+          throw err;
+        }
+      },
+    );
   }
 
   async listTools(

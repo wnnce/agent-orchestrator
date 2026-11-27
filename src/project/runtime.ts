@@ -70,9 +70,24 @@ import {
   PipelineEngine,
   PipelineEventHub,
 } from "../pipeline/index.ts";
+import {
+  captureTraceContext,
+  detached,
+  withSpan,
+  withTraceContext,
+  type Context,
+} from "../observability/tracing.ts";
+import { TurnTrace } from "./turn-trace.ts";
+
+interface QueuedTurn {
+  readonly turn: TurnRecord;
+  /** Trace of whoever queued the turn; the turn's span continues it. */
+  readonly traceContext: Context;
+}
 
 interface ActiveTurn {
   turn: TurnRecord;
+  trace: TurnTrace;
   runtimeId?: string;
   starting: boolean;
   canceled: boolean;
@@ -118,7 +133,7 @@ function sessionActionScope(
 export class ProjectRuntime {
   private readonly runtimes = new Map<string, AgentRuntime>();
   private readonly activeTurns = new Map<string, ActiveTurn>();
-  private readonly pendingTurns = new Map<string, TurnRecord[]>();
+  private readonly pendingTurns = new Map<string, QueuedTurn[]>();
   private readonly pumps = new Map<string, Promise<void>>();
   private readonly admissions = new Map<string, Promise<unknown>>();
   private readonly maintenance = new Set<string>();
@@ -289,6 +304,7 @@ export class ProjectRuntime {
     taskKey?: string | undefined;
     scope?: ActionScope | undefined;
     signal?: AbortSignal | undefined;
+    traceContext?: Context | undefined;
   }): ActionContext {
     const workspacePath =
       params.workspacePath ?? this.project.projectDir ?? process.cwd();
@@ -301,6 +317,7 @@ export class ProjectRuntime {
       workspacePath,
       logger: this.logger,
       signal: params.signal,
+      traceContext: params.traceContext,
       projectNotifications: this.project.notifications,
       services: {
         notifications: this.notifications,
@@ -772,7 +789,7 @@ export class ProjectRuntime {
         turnId: turn.id,
         input,
       });
-      queue.push(turn);
+      queue.push({ turn, traceContext: captureTraceContext() });
       this.pendingTurns.set(sessionId, queue);
       this.startPump(sessionId);
       return turn;
@@ -780,7 +797,8 @@ export class ProjectRuntime {
   }
   private startPump(id: string): void {
     if (this.pumps.has(id)) return;
-    const task = this.pump(id).catch((error) =>
+    // Each turn continues the trace it was queued from, not the one that started the pump.
+    const task = detached(() => this.pump(id)).catch((error) =>
       this.logger.error("session pump failed", { sessionId: id, error }),
     );
     this.pumps.set(id, task);
@@ -792,22 +810,30 @@ export class ProjectRuntime {
   }
   private async pump(id: string): Promise<void> {
     while (!this.stopping) {
-      const turn = this.pendingTurns.get(id)?.shift();
-      if (!turn) {
+      const queued = this.pendingTurns.get(id)?.shift();
+      if (!queued) {
         this.pendingTurns.delete(id);
         return;
       }
+      const { turn } = queued;
       const entity = await this.entity(id);
       if (entity.status === "closing" || entity.status === "archived") {
         await this.finishQueued(entity.toRoute(), turn);
         continue;
       }
+      const route = entity.toRoute();
       let resolve!: () => void;
       const completed = new Promise<void>((r) => {
         resolve = r;
       });
       const active: ActiveTurn = {
         turn,
+        trace: new TurnTrace(queued.traceContext, {
+          projectId: this.project.id,
+          sessionId: id,
+          turnId: turn.id,
+          source: route.source,
+        }),
         starting: true,
         canceled: false,
         settled: false,
@@ -816,11 +842,13 @@ export class ProjectRuntime {
         resolve,
       };
       this.activeTurns.set(id, active);
-      try {
-        await this.runTurn(entity.toRoute(), turn);
-      } catch (error) {
-        await this.finishTurn(id, active, "failed", String(error));
-      }
+      await withTraceContext(active.trace.context, async () => {
+        try {
+          await this.runTurn(route, turn);
+        } catch (error) {
+          await this.finishTurn(id, active, "failed", String(error));
+        }
+      });
       await completed;
     }
   }
@@ -839,14 +867,14 @@ export class ProjectRuntime {
   }
   private async cancelQueued(id: string, turnId?: string): Promise<void> {
     const queue = this.pendingTurns.get(id) ?? [];
-    const canceled = queue.filter((t) => !turnId || t.id === turnId);
+    const canceled = queue.filter(({ turn }) => !turnId || turn.id === turnId);
     this.pendingTurns.set(
       id,
-      queue.filter((t) => turnId && t.id !== turnId),
+      queue.filter(({ turn }) => turnId && turn.id !== turnId),
     );
     const route = await this.store.getSession(id);
     if (!route) return;
-    for (const turn of canceled) await this.finishQueued(route, turn);
+    for (const { turn } of canceled) await this.finishQueued(route, turn);
   }
   async waitForIdle(id: string): Promise<void> {
     await this.admissions.get(id)?.catch(() => {});
@@ -886,10 +914,7 @@ export class ProjectRuntime {
   async interrupt(sessionId: string, turnId?: string): Promise<void> {
     await this.admissions.get(sessionId)?.catch(() => {});
     const route = await this.loadSession(sessionId);
-    if (
-      turnId &&
-      this.pendingTurns.get(sessionId)?.some((t) => t.id === turnId)
-    ) {
+    if (turnId && this.pendingTurns.get(sessionId)?.some(({ turn }) => turn.id === turnId)) {
       await this.cancelQueued(sessionId, turnId);
       return;
     }
@@ -970,15 +995,17 @@ export class ProjectRuntime {
     const id = route.sessionId;
     const active = this.activeTurns.get(id)!;
     const entity = await this.entity(id);
-    const workspacePath = await this.ensureWorkspace(route);
+    const workspacePath = await withSpan("workspace.prepare", {}, () =>
+      this.ensureWorkspace(route),
+    );
     const taskKey =
       typeof route.metadata?.taskKey === "string"
         ? route.metadata.taskKey
         : undefined;
-    const { runtimeSessionId, runtime: sessionRuntime } = await this.bindRuntimeSession(
-      entity,
-      workspacePath,
-      taskKey,
+    const { runtimeSessionId, runtime: sessionRuntime } = await withSpan(
+      "runtime.bind_session",
+      {},
+      () => this.bindRuntimeSession(entity, workspacePath, taskKey),
     );
     const boundRoute = entity.toRoute();
     const context = this.context(
@@ -989,6 +1016,7 @@ export class ProjectRuntime {
       sessionActionScope(boundRoute.source, taskKey),
       boundRoute.metadata,
     );
+    active.trace.bindRuntime(sessionRuntime.type, context.project.runtime?.model);
     if (entity.status !== "closing") await entity.transitionTo("active");
     entity.touch();
     await entity.flush(this.store);
@@ -1224,6 +1252,7 @@ export class ProjectRuntime {
           scope: actionScope,
           turnId: this.activeTurns.get(sessionId)?.turn.id ?? params.turnId,
           signal: params.signal,
+          traceContext: this.activeTurns.get(sessionId)?.trace.context,
         }),
     };
   }
@@ -1234,9 +1263,15 @@ export class ProjectRuntime {
       return;
     }
     const previous = this.runtimeEvents.get(id) ?? Promise.resolve();
+    // Runtimes call back from their own context; handle the event inside the turn's trace.
+    const traceContext = active?.trace.context;
     const task = previous
       .catch(() => {})
-      .then(() => this.processRuntimeEvent(id, event));
+      .then(() =>
+        traceContext
+          ? withTraceContext(traceContext, () => this.processRuntimeEvent(id, event))
+          : this.processRuntimeEvent(id, event),
+      );
     this.runtimeEvents.set(id, task);
     try {
       await task;
@@ -1272,6 +1307,7 @@ export class ProjectRuntime {
     )
       return;
     if (type === "turn.started") return;
+    active?.trace.record(event);
     if (
       active &&
       (type === "turn.completed" ||
@@ -1341,6 +1377,7 @@ export class ProjectRuntime {
           ? (event.payload as { usage?: unknown }).usage
           : undefined;
       const usage = isTurnUsage(rawUsage) ? rawUsage : undefined;
+      active.trace.finish(status, usage, error);
       await this.store.updateTurn(active.turn.id, {
         status,
         finishedAt: new Date().toISOString(),

@@ -1,3 +1,5 @@
+import { activeTraceIds } from "./tracing.ts";
+
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 export type LogFields = Record<string, unknown>;
@@ -131,6 +133,7 @@ export class Logger {
           timestamp,
           level,
           service: this.service,
+          ...activeTraceIds(),
           message,
           ...(sanitize(this.fields) as Record<string, unknown>),
           ...sanitizedCallFields,

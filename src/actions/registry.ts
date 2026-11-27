@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { Logger } from "../observability/logger.ts";
+import { SpanStatusCode, withSpan } from "../observability/tracing.ts";
 import type { Store } from "../persistence/store.ts";
 import { createActionContext, type CreateActionContextParams } from "./context.ts";
 import type {
@@ -11,6 +12,10 @@ import type {
   CodexDynamicToolSpec,
   OpenAIFunctionTool,
 } from "./types.ts";
+
+interface ExecuteOptions {
+  readonly parameterOverride?: z.ZodType | Record<string, unknown> | undefined;
+}
 
 export class ActionRegistry {
   private readonly actions = new Map<string, ActionDefinition<unknown, unknown>>();
@@ -112,16 +117,46 @@ export class ActionRegistry {
     name: string,
     rawArgs: unknown,
     context: ActionContext | CreateActionContextParams,
-    options?: { readonly parameterOverride?: z.ZodType | Record<string, unknown> | undefined },
+    options?: ExecuteOptions,
   ): Promise<ActionResult<T>> {
-    const startTime = Date.now();
-
     // Ensure context conforms to full ActionContext interface
     const effectiveContext: ActionContext =
       typeof (context as ActionContext).notify === "function"
         ? (context as ActionContext)
         : createActionContext(context);
 
+    return withSpan(
+      `action ${name}`,
+      {
+        parent: effectiveContext.traceContext,
+        attributes: {
+          "action.name": name,
+          "action.scope": effectiveContext.scope,
+          "project.id": effectiveContext.projectId,
+          "session.id": effectiveContext.sessionId,
+          ...(effectiveContext.turnId ? { "turn.id": effectiveContext.turnId } : {}),
+        },
+      },
+      async (span) => {
+        const result = await this.run<T>(name, rawArgs, effectiveContext, options);
+        if (!result.success) {
+          span.setStatus({
+            code: SpanStatusCode.ERROR,
+            ...(result.error ? { message: result.error } : {}),
+          });
+        }
+        return result;
+      },
+    );
+  }
+
+  private async run<T>(
+    name: string,
+    rawArgs: unknown,
+    effectiveContext: ActionContext,
+    options: ExecuteOptions | undefined,
+  ): Promise<ActionResult<T>> {
+    const startTime = Date.now();
     const action = this.actions.get(name);
     if (!action) {
       const result: ActionResult<T> = {

@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import type { Logger } from "../observability/logger.ts";
+import type { Context } from "../observability/tracing.ts";
 import type {
   NotificationMessage,
   NotificationOptions,
@@ -85,6 +86,11 @@ export interface ActionContext {
   // Observability & lifecycle
   readonly logger: Logger;
   readonly signal?: AbortSignal | undefined;
+  /**
+   * Trace the action's span belongs to, e.g. the agent turn that called it. Runtimes invoke
+   * actions from their own callbacks, whose active context says nothing about the caller.
+   */
+  readonly traceContext?: Context | undefined;
 
   // First-class business APIs
   /**
