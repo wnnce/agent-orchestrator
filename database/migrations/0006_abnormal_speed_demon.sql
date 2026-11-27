@@ -1,0 +1,1 @@
+ALTER TABLE "pipeline_node_runs" ADD COLUMN "traceparent" varchar(55);

@@ -575,6 +575,8 @@ export interface PipelineNodeRunRecord {
   sequence: number;
   executorType: PipelineNodeExecutorType;
   triggeredByRecordId?: string;
+  /** W3C traceparent of the operation that created this node run (when tracing is enabled). */
+  traceparent?: string;
   status: PipelineNodeRunStatus;
   sessionId?: string;
   inputContext: Record<string, unknown>;

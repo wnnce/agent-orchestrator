@@ -211,6 +211,8 @@ export interface PipelineNodeRunRecord {
   readonly executorType: PipelineNodeExecutorType;
   readonly sessionId?: string | undefined;
   readonly triggeredByRecordId?: string | undefined;
+  /** W3C `traceparent` of the operation that created this node run; its launches link to it. */
+  readonly traceparent?: string | undefined;
   readonly status: PipelineNodeRunStatus;
   /** Validated strong-typed `data` for this node attempt (`{}` if node declares no input). */
   readonly inputContext: Record<string, unknown>;

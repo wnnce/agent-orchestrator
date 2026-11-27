@@ -6,6 +6,7 @@ import type { ProjectConfig, SessionRoute } from "../domain/types.ts";
 import type { McpClientFactory } from "../mcp/index.ts";
 import type { NotificationOutbox } from "../notifications/index.ts";
 import type { Logger } from "../observability/logger.ts";
+import { activeTraceparent, detached, linksTo, withSpan } from "../observability/tracing.ts";
 import type { PipelineStore } from "../persistence/types.ts";
 import type { WorkspaceManager } from "../workspace/workspace.ts";
 import {
@@ -35,6 +36,7 @@ import type {
   ListPipelineActionsFilter,
   ListPipelineNodeLogsFilter,
   ListPipelineRunsFilter,
+  NewPipelineNodeRun,
   PipelineActionContextPayload,
   PipelineActionName,
   PipelineActionRecord,
@@ -292,7 +294,7 @@ export class PipelineEngine {
 
     let run: PipelineRunRecord;
     try {
-      run = await store.createRun(planned.run, planned.firstNodeRun);
+      run = await store.createRun(planned.run, withTraceparent(planned.firstNodeRun));
     } catch (error) {
       // Another caller created the run for this externalKey first.
       const raced = await findExisting();
@@ -580,7 +582,7 @@ export class PipelineEngine {
         ...(transition.nodeRunPatch
           ? { nodeRunPatch: { nodeRunId: state.nodeRun.nodeRunId, patch: transition.nodeRunPatch } }
           : {}),
-        ...(transition.newNodeRun ? { newNodeRun: transition.newNodeRun } : {}),
+        ...(transition.newNodeRun ? { newNodeRun: withTraceparent(transition.newNodeRun) } : {}),
         ...(transition.record ? { record: transition.record } : {}),
         ...(request.capacity !== undefined
           ? {
@@ -679,7 +681,8 @@ export class PipelineEngine {
       try {
         switch (effect.kind) {
           case "launch_node":
-            this.track(this.launchNode(run.runId, state.nodeRun.nodeRunId));
+            // The launch runs in the background, outside the trace of this transition.
+            this.track(detached(() => this.launchNode(run.runId, state.nodeRun.nodeRunId)));
             break;
           case "send_reminder":
             await this.sendReminder(state.nodeRun, effect.sessionId);
@@ -717,23 +720,46 @@ export class PipelineEngine {
         throw new Error(`node "${state.nodeRun.nodeId}" is not defined in pipeline "${runId}"`);
       }
 
-      const run = await this.ensureWorkspace(state.run);
-      if (!(await this.isRunning(state.nodeRun))) {
-        // The run was cancelled while its workspace was being prepared.
-        const latest = await this.requireRun(runId);
-        if (latest.status === "cancelled") await this.removeWorkspace(latest);
-        return;
-      }
-      if (node.executor === "agent") {
-        await this.startAgentNode(run, state, node);
-      } else {
-        await this.executeTsNode(run, state, node);
-      }
+      // A run can last days and wait on people, so each launch is a trace of its own, linked to
+      // the operation that created the node run; `pipeline.run_id` gathers a run's traces.
+      await withSpan(
+        `pipeline.node ${node.id}`,
+        {
+          root: true,
+          links: linksTo(state.nodeRun.traceparent),
+          attributes: {
+            "project.id": state.run.projectId,
+            "pipeline.id": state.run.pipelineId,
+            "pipeline.version": state.run.pipelineVersion,
+            "pipeline.run_id": runId,
+            "pipeline.node_id": node.id,
+            "pipeline.node_run_id": nodeRunId,
+            "pipeline.node.executor": node.executor,
+            "pipeline.node.attempt": state.nodeRun.attempt,
+          },
+        },
+        () => this.startNode(state, node),
+      );
     } catch (error) {
       await this.transitionQuietly(
         { runId, nodeRunId },
         { kind: "fail", actorType: "system", reason: (error as Error).message },
       );
+    }
+  }
+
+  private async startNode(state: PipelineMachineState, node: PipelineNodeConfig): Promise<void> {
+    const run = await withSpan("workspace.prepare", {}, () => this.ensureWorkspace(state.run));
+    if (!(await this.isRunning(state.nodeRun))) {
+      // The run was cancelled while its workspace was being prepared.
+      const latest = await this.requireRun(run.runId);
+      if (latest.status === "cancelled") await this.removeWorkspace(latest);
+      return;
+    }
+    if (node.executor === "agent") {
+      await this.startAgentNode(run, state, node);
+    } else {
+      await this.executeTsNode(run, state, node);
     }
   }
 
@@ -1030,4 +1056,10 @@ function runEventType(run: PipelineRunRecord): PipelineStreamEventType {
   if (run.status === "completed") return "pipeline.run.completed";
   if (run.status === "cancelled") return "pipeline.run.cancelled";
   return "pipeline.run.updated";
+}
+
+/** Stamps a new node run with the active trace, so launching it can link back to its cause. */
+function withTraceparent(nodeRun: NewPipelineNodeRun): NewPipelineNodeRun {
+  const traceparent = activeTraceparent();
+  return traceparent ? { ...nodeRun, traceparent } : nodeRun;
 }

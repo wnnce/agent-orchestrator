@@ -393,6 +393,7 @@ export const pipelineNodeRuns = pgTable(
       .notNull(),
     sessionId: varchar("session_id", { length: 100 }),
     triggeredByRecordId: varchar("triggered_by_record_id", { length: 100 }),
+    traceparent: varchar("traceparent", { length: 55 }),
     status: varchar("status", { length: 40 }).$type<PipelineNodeRunStatus>().notNull(),
     inputContext: jsonb("input_context").$type<Record<string, unknown>>().notNull().default({}),
     finalAction: varchar("final_action", { length: 50 }).$type<PipelineActionName>(),

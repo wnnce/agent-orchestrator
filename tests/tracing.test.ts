@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -8,7 +8,7 @@ import {
   type ReadableSpan,
 } from "@opentelemetry/sdk-trace";
 import { z } from "zod";
-import { ActionRegistry } from "../src/actions/index.ts";
+import { ActionRegistry, pipelineActions } from "../src/actions/index.ts";
 import { ArtifactStore } from "../src/artifacts/store.ts";
 import type { AppConfig } from "../src/config/config.ts";
 import { loadConfig } from "../src/config/service.ts";
@@ -34,6 +34,8 @@ import {
 import { TaskEngine } from "../src/task/engine.ts";
 import type { TaskDefinition } from "../src/task/types.ts";
 import { WorkspaceManager } from "../src/workspace/workspace.ts";
+
+const PIPELINE_SDK_PATH = path.resolve(import.meta.dir, "../src/pipeline/index.ts");
 
 let exporter: InMemorySpanExporter;
 let tracing: TracingHandle | undefined;
@@ -70,6 +72,16 @@ function isChild(child: ReadableSpan, parent: ReadableSpan): boolean {
     child.spanContext().traceId === parent.spanContext().traceId &&
     child.parentSpanContext?.spanId === parent.spanContext().spanId
   );
+}
+
+async function waitFor<T>(check: () => Promise<T | undefined> | T | undefined): Promise<T> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const value = await check();
+    if (value !== undefined) return value;
+    await Bun.sleep(10);
+  }
+  throw new Error("waitFor timed out");
 }
 
 async function tempDir(prefix: string): Promise<string> {
@@ -399,5 +411,141 @@ describe("action and task tracing", () => {
     const second = only("task p:second");
     expect(isChild(second, only("api request"))).toBe(true);
     expect(second.status.code).toBe(2);
+  });
+});
+
+/** Ends every agent turn by calling `pipeline_next`, from outside any trace. */
+class AdvancingRuntime extends FakeRuntime {
+  constructor(private readonly actions: ActionRegistry) {
+    super();
+  }
+
+  override async startTurn(
+    context: RuntimeContext,
+    sessionId: string,
+    turnId: string,
+  ): Promise<RuntimeTurn> {
+    const runtimeTurnId = `rt_${turnId}`;
+    setTimeout(() =>
+      detached(async () => {
+        await this.actions.execute(
+          "pipeline_next",
+          { summary: "Drafted", content: "Draft done" },
+          context.createActionContext!({ turnId }),
+          { parameterOverride: context.actionParameterOverrides?.pipeline_next },
+        );
+        await context.onEvent({
+          type: "turn.completed",
+          sessionId,
+          turnId: runtimeTurnId,
+          payload: {},
+        });
+      }),
+    );
+    return { id: runtimeTurnId };
+  }
+}
+
+describe("pipeline tracing", () => {
+  test("each node launch is its own trace, linked to what created the node run", async () => {
+    enableTracing();
+    const root = await tempDir("ao-tracing-pipeline-");
+    const projectDir = path.join(root, "project");
+    await mkdir(path.join(projectDir, "pipelines"), { recursive: true });
+    await writeFile(
+      path.join(projectDir, "pipelines", "flow.ts"),
+      `import { definePipeline, node } from ${JSON.stringify(PIPELINE_SDK_PATH)};
+export default definePipeline({
+  name: "Flow",
+  nodes: [
+    node.agent({ id: "draft", name: "Draft", prompt: "Draft it", gate: "auto" }),
+    node.code({
+      id: "check",
+      name: "Check",
+      async run() {
+        return { action: "next", summary: "Checked", content: "ok" };
+      },
+    }),
+    node.end({ id: "done", name: "Done" }),
+  ],
+});
+`,
+      "utf8",
+    );
+    const store = new MemoryStore();
+    const logger = new Logger({ sink: () => {} });
+    const actions = new ActionRegistry(logger, store);
+    actions.registerAll(pipelineActions);
+    const project: ProjectConfig = {
+      id: "traced",
+      displayName: "Traced",
+      description: "test",
+      routing: { projectId: "traced" },
+      projectDir,
+      repository: { url: "", baseBranch: "main" },
+      runtime: { type: "fake" },
+    };
+    const dataDir = path.join(root, "data");
+    const runtime = new ProjectRuntime(
+      project,
+      store,
+      new AdvancingRuntime(actions),
+      new WorkspaceManager(
+        path.join(dataDir, "projects"),
+        path.join(dataDir, "bases"),
+        path.join(dataDir, "secrets"),
+        logger,
+        path.join(dataDir, "pipelines"),
+      ),
+      new ArtifactStore(path.join(root, "artifacts"), store),
+      undefined,
+      logger,
+      undefined,
+      undefined,
+      {},
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      actions,
+    );
+    await runtime.start();
+    cleanups.push(() => runtime.stop());
+
+    const { run } = await withSpan("start request", {}, () =>
+      runtime.pipelineEngine.startRun({ pipelineId: "flow", title: "Traced run" }),
+    );
+    await waitFor(async () => {
+      const latest = await store.pipelines.getRun(run.runId);
+      return latest?.status === "completed" ? latest : undefined;
+    });
+    await waitFor(() => (finished("pipeline.node check").length > 0 ? true : undefined));
+
+    const startRequest = only("start request");
+    const draftNode = only("pipeline.node draft");
+    expect(draftNode.parentSpanContext).toBeUndefined();
+    expect(draftNode.links.map((link) => link.context.spanId)).toEqual([
+      startRequest.spanContext().spanId,
+    ]);
+    expect(draftNode.attributes).toMatchObject({
+      "pipeline.id": "flow",
+      "pipeline.run_id": run.runId,
+      "pipeline.node_id": "draft",
+      "pipeline.node.executor": "agent",
+    });
+
+    // The agent's turn runs in the node's trace; its pipeline_next call lands in the turn.
+    const turn = only("invoke_agent fake");
+    expect(isChild(turn, draftNode)).toBe(true);
+    expect(isChild(only("action pipeline_next"), turn)).toBe(true);
+
+    // The turn finishing created the next node run, so the next launch links to the turn.
+    const checkNode = only("pipeline.node check");
+    expect(checkNode.parentSpanContext).toBeUndefined();
+    expect(checkNode.links.map((link) => link.context.spanId)).toEqual([turn.spanContext().spanId]);
+    const nodeRuns = await store.pipelines.listNodeRuns(run.runId);
+    expect(nodeRuns.find((nodeRun) => nodeRun.nodeId === "check")?.traceparent).toContain(
+      turn.spanContext().spanId,
+    );
   });
 });

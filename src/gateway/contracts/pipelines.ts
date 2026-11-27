@@ -164,6 +164,7 @@ export const pipelineNodeRunRecordSchema = z
     sequence: z.number().int(),
     executorType: pipelineExecutorTypeSchema,
     triggeredByRecordId: z.string().optional(),
+    traceparent: z.string().optional(),
     status: pipelineNodeRunStatusSchema,
     sessionId: z.string().optional(),
     inputContext: z.record(z.string(), z.unknown()),
