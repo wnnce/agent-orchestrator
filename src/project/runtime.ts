@@ -1322,7 +1322,8 @@ export class ProjectRuntime {
           : type === "turn.failed"
             ? "failed"
             : "interrupted",
-        undefined,
+        // The runtime's reason for a failed turn is the turn's error.
+        event.type === "turn.failed" ? event.payload.error : undefined,
         event,
       );
       return;

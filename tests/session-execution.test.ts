@@ -188,6 +188,22 @@ describe("session execution and control", () => {
       turnId: turn.id,
     });
   });
+  test("a turn the runtime reports as failed keeps the runtime's reason", async () => {
+    const turn = await runtime.turn(sessionId, "fail please");
+    await agent.started(1);
+    const start = agent.starts[0]!;
+    await start.context.onEvent({
+      type: "turn.failed",
+      sessionId: start.session,
+      turnId: start.id,
+      payload: { status: "failed", error: "Not logged in" },
+    });
+    await runtime.waitForIdle(sessionId);
+    expect(await store.getTurn(turn.id)).toMatchObject({
+      status: "failed",
+      error: "Not logged in",
+    });
+  });
   test("canceling a queued turn does not cancel the active turn", async () => {
     const first = await runtime.turn(sessionId, "long");
     await agent.started(1);
