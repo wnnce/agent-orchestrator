@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import type { OpenAPIHono } from "@hono/zod-openapi";
 import { serveStatic } from "hono/bun";
 import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -6,6 +6,7 @@ import type { AppConfig } from "../config/config.ts";
 import type { Store } from "../persistence/store.ts";
 import { ProjectManager } from "../project/manager.ts";
 import type { Logger } from "../observability/logger.ts";
+import { createOpenAPIApp } from "./openapi.ts";
 import { GatewayService } from "./service.ts";
 import { FeishuWSAdapter } from "../channels/feishu.ts";
 import { WeComClient, WeComWSAdapter } from "../channels/wecom.ts";
@@ -28,7 +29,7 @@ import {
 export const API_V1_PREFIX = "/api/v1";
 
 export class Gateway {
-  readonly app: Hono;
+  readonly app: OpenAPIHono;
   private readonly service: GatewayService;
   private readonly feishuWs?: FeishuWSAdapter;
   private readonly wecomWs?: WeComWSAdapter;
@@ -88,8 +89,8 @@ export class Gateway {
     this.app = this.createApp();
   }
 
-  private createApp(): Hono {
-    const app = new Hono();
+  private createApp(): OpenAPIHono {
+    const app = createOpenAPIApp();
 
     // 1. Request logging & x-request-id middleware
     app.use("*", async (c, next) => {
@@ -113,10 +114,7 @@ export class Gateway {
         path: c.req.path,
         error: err,
       });
-      return c.json(
-        { error: err instanceof Error ? err.message : String(err) },
-        400,
-      );
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
     });
 
     // 3. Health, Readiness & OpenAPI Docs (root paths, no authentication)
@@ -128,7 +126,7 @@ export class Gateway {
     app.route("/", createDocsRouter(app));
 
     // 4. Versioned API routes (/api/v1)
-    const apiV1 = new Hono();
+    const apiV1 = createOpenAPIApp();
 
     // Public runtime discovery under /api/v1
     apiV1.route("/", createRuntimesRouter(this.projects.getRuntimeRegistry(), modelCatalog));
@@ -147,10 +145,7 @@ export class Gateway {
 
     // Domain routes
     apiV1.route("/", createProjectsRouter({ projects: this.projects, store: this.store }));
-    apiV1.route(
-      "/",
-      createTasksRouter({ projects: this.projects, store: this.store }),
-    );
+    apiV1.route("/", createTasksRouter({ projects: this.projects, store: this.store }));
     apiV1.route("/", createActionsRouter({ store: this.store }));
     apiV1.route("/", createScheduledJobsRouter({ store: this.store }));
     apiV1.route(

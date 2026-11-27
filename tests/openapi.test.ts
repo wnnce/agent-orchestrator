@@ -1,3 +1,4 @@
+import { createRoute, z } from "@hono/zod-openapi";
 import { describe, expect, it } from "bun:test";
 import type { AppConfig } from "../src/config/config.ts";
 import type { ProjectConfig } from "../src/domain/types.ts";
@@ -56,8 +57,8 @@ interface OpenApiDoc {
   paths: Record<string, Record<string, Record<string, unknown>>>;
 }
 
-describe("Gateway OpenAPI & Docs (hono-openapi + Scalar)", () => {
-  it("auto-generates OpenAPI 3.1.0 JSON at GET /openapi.json from Hono routes", async () => {
+describe("Gateway OpenAPI & Docs (@hono/zod-openapi + Scalar)", () => {
+  it("generates OpenAPI 3.1.0 JSON at GET /openapi.json from contract routes", async () => {
     const gateway = createTestGateway();
     const res = await gateway.handle(new Request("http://localhost/openapi.json"));
     expect(res.status).toBe(200);
@@ -77,6 +78,8 @@ describe("Gateway OpenAPI & Docs (hono-openapi + Scalar)", () => {
     expect(doc.paths["/api/v1/runtimes"]?.get?.security).toEqual([]);
     expect(doc.paths["/api/v1/sessions/{sessionId}/events"]?.get).toBeDefined();
     expect(doc.paths["/api/v1/projects/{projectId}/tasks/{taskId}/run"]?.post).toBeDefined();
+    expect(doc.paths["/api/v1/projects/{projectId}/overview"]?.get).toBeDefined();
+    expect(doc.paths["/api/v1/projects/{projectId}/metrics"]?.get).toBeDefined();
   });
 
   it("serves Scalar interactive API documentation HTML at GET /docs", async () => {
@@ -107,23 +110,36 @@ describe("Gateway OpenAPI & Docs (hono-openapi + Scalar)", () => {
     expect(protectedRes.status).toBe(401);
   });
 
-  it("automatically discovers every registered HTTP route including newly added routes without separate spec files", async () => {
+  it("documents every registered HTTP route including dynamically added OpenAPI routes with 100% parity", async () => {
     const gateway = createTestGateway();
-    // Simulate adding a brand-new route without even calling describeRoute()
-    gateway.app.get("/dynamic-demo/:itemId", (c) => c.json({ itemId: c.req.param("itemId") }));
+    const demoRoute = createRoute({
+      method: "get",
+      path: "/dynamic-demo/{itemId}",
+      request: {
+        params: z.object({
+          itemId: z.string().openapi({ param: { name: "itemId", in: "path" } }),
+        }),
+      },
+      responses: {
+        200: {
+          description: "Demo item",
+          content: { "application/json": { schema: z.object({ itemId: z.string() }) } },
+        },
+      },
+    });
+    gateway.app.openapi(demoRoute, (c) => c.json({ itemId: c.req.valid("param").itemId }, 200));
 
     const res = await gateway.handle(new Request("http://localhost/openapi.json"));
     expect(res.status).toBe(200);
     const doc = (await res.json()) as OpenApiDoc;
 
-    // Newly added route is automatically discovered with path parameter extracted
     const dynamicOp = doc.paths["/dynamic-demo/{itemId}"]?.get;
     expect(dynamicOp).toBeDefined();
     expect(dynamicOp?.parameters).toEqual([
       expect.objectContaining({ name: "itemId", in: "path", required: true }),
     ]);
 
-    // Every registered Gateway HTTP route matches the generated OpenAPI paths
+    // Every registered Gateway HTTP route matches the generated OpenAPI paths 1:1
     const ignoredPaths = new Set(["/openapi.json", "/docs", "*", "/*"]);
     const httpMethods = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
     const registeredRoutes = new Set<string>();

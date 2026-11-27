@@ -1,7 +1,7 @@
+import type { OpenAPIHono } from "@hono/zod-openapi";
 import { Scalar } from "@scalar/hono-api-reference";
-import { Hono } from "hono";
-import { openAPIRouteHandler, resolver } from "hono-openapi";
-import { z } from "zod";
+import { errorResponseSchema } from "../contracts/common.ts";
+import { createOpenAPIApp } from "../openapi.ts";
 
 export interface DocsRouterOptions {
   readonly specUrl?: string | undefined;
@@ -10,21 +10,14 @@ export interface DocsRouterOptions {
   readonly description?: string | undefined;
 }
 
-const errorResponseSchema = z
-  .object({
-    error: z.string().describe("Machine-readable error code or message"),
-    message: z.string().optional().describe("Optional human-readable error detail"),
-  })
-  .meta({ ref: "ErrorResponse" });
-
-const errorContent = {
+const errorResponseRef = {
   "application/json": {
-    schema: resolver(errorResponseSchema),
+    schema: { $ref: "#/components/schemas/ErrorResponse" },
   },
 };
 
-export function createDocsRouter(app: Hono, options: DocsRouterOptions = {}): Hono {
-  const router = new Hono();
+export function createDocsRouter(app: OpenAPIHono, options: DocsRouterOptions = {}): OpenAPIHono {
+  const router = createOpenAPIApp();
   const title = options.title ?? "Agent Orchestrator Gateway API";
   const version = options.version ?? "0.1.0";
   const description =
@@ -32,62 +25,48 @@ export function createDocsRouter(app: Hono, options: DocsRouterOptions = {}): Ho
     "HTTP and SSE gateway API for coordinating agent runtimes, sessions, scheduled tasks, actions, and webhooks.";
   const specUrl = options.specUrl ?? "/openapi.json";
 
-  router.get(
-    "/openapi.json",
-    openAPIRouteHandler(app, {
-      includeEmptyPaths: true,
-      exclude: ["/openapi.json", "/docs", "*", "/*"],
-      defaultValidationErrorResponse: {
-        description: "Invalid request parameters or payload",
-        content: {
-          "application/json": {
-            schema: { $ref: "#/components/schemas/ErrorResponse" },
-          },
-        },
+  // Register shared OpenAPI components on the root OpenAPIHono registry
+  app.openAPIRegistry.register("ErrorResponse", errorResponseSchema);
+  app.openAPIRegistry.registerComponent("securitySchemes", "bearerAuth", {
+    type: "http",
+    scheme: "bearer",
+    description:
+      "Bearer API token configured via `apiToken` (ignored when `allowUnauthenticated` is enabled).",
+  });
+  app.openAPIRegistry.registerComponent("responses", "BadRequest", {
+    description: "Invalid request parameters or payload",
+    content: errorResponseRef,
+  });
+  app.openAPIRegistry.registerComponent("responses", "Unauthorized", {
+    description: "Missing or invalid Bearer API token",
+    content: errorResponseRef,
+  });
+  app.openAPIRegistry.registerComponent("responses", "Forbidden", {
+    description: "Operation not permitted on this resource",
+    content: errorResponseRef,
+  });
+  app.openAPIRegistry.registerComponent("responses", "NotFound", {
+    description: "Requested resource was not found",
+    content: errorResponseRef,
+  });
+  app.openAPIRegistry.registerComponent("responses", "Conflict", {
+    description: "Operation conflicts with current resource state",
+    content: errorResponseRef,
+  });
+
+  router.get("/openapi.json", (c) => {
+    const doc = app.getOpenAPI31Document({
+      openapi: "3.1.0",
+      info: {
+        title,
+        version,
+        description,
       },
-      documentation: {
-        info: {
-          title,
-          version,
-          description,
-        },
-        servers: [{ url: "/", description: "Current Gateway Server" }],
-        security: [{ bearerAuth: [] }],
-        components: {
-          securitySchemes: {
-            bearerAuth: {
-              type: "http",
-              scheme: "bearer",
-              description:
-                "Bearer API token configured via `apiToken` (ignored when `allowUnauthenticated` is enabled).",
-            },
-          },
-          responses: {
-            BadRequest: {
-              description: "Invalid request parameters or payload",
-              content: errorContent,
-            },
-            Unauthorized: {
-              description: "Missing or invalid Bearer API token",
-              content: errorContent,
-            },
-            Forbidden: {
-              description: "Operation not permitted on this resource",
-              content: errorContent,
-            },
-            NotFound: {
-              description: "Requested resource was not found",
-              content: errorContent,
-            },
-            Conflict: {
-              description: "Operation conflicts with current resource state",
-              content: errorContent,
-            },
-          },
-        },
-      },
-    }),
-  );
+      servers: [{ url: "/", description: "Current Gateway Server" }],
+      security: [{ bearerAuth: [] }],
+    });
+    return c.json(doc);
+  });
 
   router.get(
     "/docs",

@@ -1,63 +1,39 @@
-import { Hono } from "hono";
-import { describeRoute, resolver, validator } from "hono-openapi";
 import { randomUUID } from "node:crypto";
-import { z } from "zod";
+import type { OpenAPIHono } from "@hono/zod-openapi";
+import { ingestWebhookRoute } from "../contracts/webhooks.ts";
+import { createOpenAPIApp } from "../openapi.ts";
 import type { GatewayService } from "../service.ts";
 
 export interface WebhooksRouteDeps {
   service: GatewayService;
 }
 
-const webhookRequestSchema = z.object({
-  sessionId: z.string().optional().describe("Existing session ID to append a turn to"),
-  input: z.string().optional().describe("Prompt input text"),
-  query: z.string().optional().describe("Alias for `input`"),
-  messageId: z.string().optional().describe("Optional idempotency key for inbound routing"),
-  conversationId: z.string().optional().describe("Optional external conversation identifier"),
-});
+export function createWebhooksRouter(deps: WebhooksRouteDeps): OpenAPIHono {
+  const router = createOpenAPIApp();
 
-export function createWebhooksRouter(deps: WebhooksRouteDeps): Hono {
-  const router = new Hono();
+  router.openapi(ingestWebhookRoute, async (c) => {
+    const { projectId } = c.req.valid("param");
+    const body = c.req.valid("json");
+    const input = body.input ?? body.query ?? "";
 
-  router.post(
-    "/webhooks/:projectId",
-    describeRoute({
-      tags: ["Webhooks"],
-      summary: "Ingest an HTTP webhook event for a project",
-      responses: {
-        202: {
-          description: "Webhook event accepted",
-          content: {
-            "application/json": { schema: resolver(z.record(z.string(), z.unknown())) },
-          },
-        },
+    if (body.sessionId) {
+      const turn = await deps.service.submitTurn(body.sessionId, input);
+      return c.json({ sessionId: body.sessionId, turn } as Record<string, unknown>, 202);
+    }
+
+    const result = await deps.service.handleInbound({
+      messageId: body.messageId ?? `http_${randomUUID()}`,
+      conversation: {
+        channel: "http",
+        conversationId: body.conversationId ?? `http_${randomUUID()}`,
       },
-    }),
-    validator("json", webhookRequestSchema),
-    async (c) => {
-      const projectId = c.req.param("projectId");
-      const body = c.req.valid("json");
-      const input = body.input ?? body.query ?? "";
+      projectId,
+      text: input,
+      receivedAt: new Date().toISOString(),
+    });
 
-      if (body.sessionId) {
-        const turn = await deps.service.submitTurn(body.sessionId, input);
-        return c.json({ sessionId: body.sessionId, turn }, 202);
-      }
-
-      const result = await deps.service.handleInbound({
-        messageId: body.messageId ?? `http_${randomUUID()}`,
-        conversation: {
-          channel: "http",
-          conversationId: body.conversationId ?? `http_${randomUUID()}`,
-        },
-        projectId,
-        text: input,
-        receivedAt: new Date().toISOString(),
-      });
-
-      return c.json(result, 202);
-    },
-  );
+    return c.json(result as unknown as Record<string, unknown>, 202);
+  });
 
   return router;
 }
