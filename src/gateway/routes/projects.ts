@@ -1,14 +1,19 @@
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import type { ProjectMetricsData, ProjectOverviewData, Store } from "../../persistence/types.ts";
 import type { ProjectManager } from "../../project/manager.ts";
+import { builtinTools } from "../../tools/builtin/index.ts";
+import { toJsonSchema } from "../../tools/registry.ts";
 import {
   getProjectMetricsRoute,
   getProjectOverviewRoute,
   listProjectSkillsRoute,
+  listProjectToolsRoute,
   listProjectsRoute,
 } from "../contracts/projects.ts";
 import { createOpenAPIApp } from "../openapi.ts";
 import { TtlSingleflightCache } from "../stats-cache.ts";
+
+const BUILTIN_TOOL_NAMES = new Set(builtinTools.map((tool) => tool.name));
 
 export interface ProjectsRouteDeps {
   projects: ProjectManager;
@@ -48,6 +53,22 @@ export function createProjectsRouter(deps: ProjectsRouteDeps): OpenAPIHono {
     const { projectId } = c.req.valid("param");
     const skills = await deps.projects.listSkills(projectId);
     return c.json({ projectId, skills }, 200);
+  });
+
+  router.openapi(listProjectToolsRoute, (c) => {
+    const { projectId } = c.req.valid("param");
+    const runtime = deps.projects.get(projectId);
+    const tools = runtime.tools
+      .all()
+      .filter((tool) => tool.source === "project")
+      .map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        source: "project" as const,
+        overridesBuiltin: BUILTIN_TOOL_NAMES.has(tool.name),
+        inputSchema: toJsonSchema(tool.input),
+      }));
+    return c.json({ projectId, tools }, 200);
   });
 
   router.openapi(getProjectOverviewRoute, async (c) => {

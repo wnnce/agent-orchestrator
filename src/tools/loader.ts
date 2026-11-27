@@ -139,7 +139,7 @@ export async function loadProjectTools(
           continue;
         }
         seen.set(tool.name, filePath);
-        loaded.push(tool);
+        loaded.push({ ...tool, source: "project" });
       }
     } catch (error) {
       logger?.error("failed to load project tool module", {

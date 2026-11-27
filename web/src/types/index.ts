@@ -16,6 +16,14 @@ export interface ProjectSkill {
   metadata?: ProjectSkillMetadata;
 }
 
+export interface ProjectTool {
+  name: string;
+  description: string;
+  source: "builtin" | "project";
+  overridesBuiltin: boolean;
+  inputSchema: Record<string, unknown>;
+}
+
 export interface RuntimeModelOption {
   id: string;
   displayName: string;

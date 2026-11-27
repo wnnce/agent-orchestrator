@@ -43,6 +43,16 @@ export const projectSkillSchema = z
   })
   .openapi("ProjectSkill");
 
+export const projectToolSchema = z
+  .object({
+    name: z.string(),
+    description: z.string(),
+    source: z.enum(["builtin", "project"]),
+    overridesBuiltin: z.boolean(),
+    inputSchema: z.record(z.string(), z.unknown()),
+  })
+  .openapi("ProjectTool");
+
 const projectOverviewSessionItemSchema = z.object({
   sessionId: z.string(),
   title: z.string().optional(),
@@ -242,6 +252,23 @@ export const listProjectSkillsRoute = createRoute({
     200: jsonContent(
       z.object({ projectId: z.string(), skills: z.array(projectSkillSchema) }),
       "Skills discovered for the project",
+    ),
+    404: notFoundResponse,
+  },
+});
+
+export const listProjectToolsRoute = createRoute({
+  method: "get",
+  path: "/projects/{projectId}/tools",
+  tags: ["Projects"],
+  summary: "List project-scoped custom tools registered for a project",
+  request: {
+    params: projectIdParamSchema,
+  },
+  responses: {
+    200: jsonContent(
+      z.object({ projectId: z.string(), tools: z.array(projectToolSchema) }),
+      "Project custom tools registered in the project's tool registry",
     ),
     404: notFoundResponse,
   },

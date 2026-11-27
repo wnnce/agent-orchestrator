@@ -19,4 +19,4 @@ export const builtinTools: readonly ToolDefinition[] = [
   listProjectPipelinesTool,
   dispatchPipelineRunTool,
   ...pipelineNodeTools,
-];
+].map((tool) => ({ ...tool, source: "builtin" as const }));

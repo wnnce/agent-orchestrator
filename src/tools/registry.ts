@@ -44,9 +44,14 @@ export class ToolRegistry {
     }
   }
 
+  /** All tools registered in this project, regardless of session `when` predicates. */
+  all(): ToolDefinition[] {
+    return [...this.tools.values()];
+  }
+
   /** The tools offered to a session at `site`. */
   list(site: ToolSite): ToolDefinition[] {
-    return [...this.tools.values()].filter((tool) => tool.when?.(site) ?? true);
+    return this.all().filter((tool) => tool.when?.(site) ?? true);
   }
 
   specs(site: ToolSite, inputs?: Readonly<Record<string, z.ZodObject>>): ToolSpec[] {

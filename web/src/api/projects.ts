@@ -4,6 +4,7 @@ import type {
   ProjectOverviewData,
   ProjectRouting,
   ProjectSkill,
+  ProjectTool,
 } from "../types";
 import { http } from "./http";
 
@@ -18,6 +19,13 @@ export const projectsApi = {
       `/projects/${encodeURIComponent(projectId)}/skills`,
     );
     return data.skills ?? [];
+  },
+
+  async listTools(projectId: string): Promise<ProjectTool[]> {
+    const data = await http.get<{ tools?: ProjectTool[] }>(
+      `/projects/${encodeURIComponent(projectId)}/tools`,
+    );
+    return data.tools ?? [];
   },
 
   async getOverview(

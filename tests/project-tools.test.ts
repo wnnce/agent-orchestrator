@@ -3,12 +3,20 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { ArtifactStore } from "../src/artifacts/store.ts";
+import type { AppConfig } from "../src/config/config.ts";
 import type { ProjectConfig } from "../src/domain/types.ts";
+import { Gateway } from "../src/gateway/server.ts";
 import { Logger } from "../src/observability/logger.ts";
 import { MemoryStore } from "../src/persistence/store.ts";
 import { GLOBAL_PROJECT_ID } from "../src/project/global.ts";
+import { ProjectManager } from "../src/project/manager.ts";
 import { ProjectRuntime } from "../src/project/runtime.ts";
-import { FakeRuntime, type RuntimeContext, type RuntimeTurn } from "../src/runtime/runtime.ts";
+import {
+  FakeRuntime,
+  RuntimeRegistry,
+  type RuntimeContext,
+  type RuntimeTurn,
+} from "../src/runtime/index.ts";
 import {
   builtinTools,
   isProjectToolFile,
@@ -110,6 +118,8 @@ export default defineTool({
 
     const loaded = await loadProjectTools(projectDir, "demo", logger);
     expect(loaded.map((t) => t.name)).toEqual(["greet_user", "ping_service"]);
+    expect(loaded.every((t) => t.source === "project")).toBe(true);
+    expect(builtinTools.every((t) => t.source === "builtin")).toBe(true);
     expect(
       logs.some((l) => l.level === "warn" && l.message.includes("duplicate custom project tool")),
     ).toBe(true);
@@ -324,5 +334,157 @@ export default defineTool({
     cleanups.push(() => runtime.stop());
 
     expect(runtime.tools.specs({})).toEqual([]);
+  });
+});
+
+describe("GET /api/v1/projects/:projectId/tools", () => {
+  test("returns only project custom tools (excluding built-ins) with overridesBuiltin and inputSchema", async () => {
+    const root = await tempDir("ao-gw-tools-");
+    const shopDir = path.join(root, "projects", "shop");
+    const emptyDir = path.join(root, "projects", "empty");
+    await mkdir(path.join(shopDir, "tools"), { recursive: true });
+    await mkdir(emptyDir, { recursive: true });
+
+    await writeFile(
+      path.join(shopDir, "tools", "custom.ts"),
+      `import { defineTool, z } from ${JSON.stringify(TOOLS_SDK_PATH)};
+export default [
+  defineTool({
+    name: "lookup_env",
+    description: "Read a project env value",
+    source: "builtin",
+    input: z.object({
+      key: z.string().describe("Environment variable key"),
+      fallback: z.string().optional(),
+    }),
+    when: () => false,
+    async run({ key }, ctx) {
+      return { value: ctx.project.env[key] ?? null };
+    },
+  }),
+  defineTool({
+    name: "send_notification",
+    description: "Custom project notification override",
+    input: z.object({ title: z.string(), text: z.string() }),
+    async run() {
+      return { ok: true };
+    },
+  }),
+];
+`,
+      "utf8",
+    );
+
+    const store = new MemoryStore();
+    const logger = new Logger({ sink: () => {} });
+    const registry = new RuntimeRegistry();
+    registry.register({
+      type: "fake",
+      name: "fake",
+      description: "Fake test runtime",
+      create: () => new FakeRuntime(),
+    });
+
+    const config: AppConfig = {
+      defaultRuntime: "fake",
+      host: "127.0.0.1",
+      port: 7070,
+      logLevel: "error",
+      dataDir: path.join(root, "data"),
+      artifactDir: path.join(root, "artifacts"),
+      projectConfigPath: path.join(root, "projects"),
+      allowUnauthenticated: true,
+      routerBaseUrl: "http://localhost",
+      feishu: { enabled: false },
+    };
+
+    const projectsConfig: ProjectConfig[] = [
+      {
+        id: "shop",
+        displayName: "Shop",
+        description: "Shop project",
+        projectDir: shopDir,
+        routing: { projectId: "shop" },
+        repository: { url: "", baseBranch: "main" },
+        runtime: { type: "fake" },
+      },
+      {
+        id: "empty",
+        displayName: "Empty",
+        description: "No custom tools",
+        projectDir: emptyDir,
+        routing: { projectId: "empty" },
+        repository: { url: "", baseBranch: "main" },
+        runtime: { type: "fake" },
+      },
+    ];
+
+    const projects = new ProjectManager(
+      projectsConfig,
+      store,
+      config,
+      logger,
+      undefined,
+      undefined,
+      registry,
+    );
+    await projects.start();
+    cleanups.push(() => projects.stop());
+
+    const gateway = new Gateway(config, store, projects, logger);
+
+    const shopRes = await gateway.app.request("/api/v1/projects/shop/tools");
+    expect(shopRes.status).toBe(200);
+    const shopBody = (await shopRes.json()) as {
+      projectId: string;
+      tools: Array<{
+        name: string;
+        description: string;
+        source: string;
+        overridesBuiltin: boolean;
+        inputSchema: {
+          type?: string;
+          properties?: Record<string, { type?: string; description?: string }>;
+          required?: string[];
+        };
+      }>;
+    };
+
+    expect(shopBody.projectId).toBe("shop");
+    expect(shopBody.tools.map((t) => t.name)).toEqual(["send_notification", "lookup_env"]);
+
+    // Built-in tools that were not overridden must not be exposed
+    expect(shopBody.tools.some((t) => t.name === "create_artifact")).toBe(false);
+    expect(shopBody.tools.some((t) => t.name === "dispatch_agent_task")).toBe(false);
+    expect(shopBody.tools.some((t) => t.name === "pipeline_next")).toBe(false);
+
+    const lookupTool = shopBody.tools.find((t) => t.name === "lookup_env");
+    expect(lookupTool).toMatchObject({
+      name: "lookup_env",
+      description: "Read a project env value",
+      source: "project",
+      overridesBuiltin: false,
+    });
+    expect(lookupTool?.inputSchema.type).toBe("object");
+    expect(lookupTool?.inputSchema.properties?.key).toMatchObject({
+      type: "string",
+      description: "Environment variable key",
+    });
+    expect(lookupTool?.inputSchema.required).toEqual(["key"]);
+
+    const overrideTool = shopBody.tools.find((t) => t.name === "send_notification");
+    expect(overrideTool).toMatchObject({
+      name: "send_notification",
+      description: "Custom project notification override",
+      source: "project",
+      overridesBuiltin: true,
+    });
+
+    const emptyRes = await gateway.app.request("/api/v1/projects/empty/tools");
+    expect(emptyRes.status).toBe(200);
+    expect(await emptyRes.json()).toEqual({ projectId: "empty", tools: [] });
+
+    const missingRes = await gateway.app.request("/api/v1/projects/does-not-exist/tools");
+    expect(missingRes.status).toBe(404);
   });
 });

@@ -6,7 +6,10 @@ import {
   ArrowRight,
   Check,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Clock,
+  Code2,
   Copy,
   Cpu,
   GitBranch,
@@ -50,6 +53,42 @@ function formatCountdown(iso: string): string {
   return remMins > 0 ? `${hours}h ${remMins}m 后` : `${hours}h 后`;
 }
 
+interface ToolParamInfo {
+  name: string;
+  type: string;
+  required: boolean;
+  description?: string;
+}
+
+function extractToolParams(inputSchema: Record<string, unknown>): ToolParamInfo[] {
+  const properties = inputSchema.properties;
+  if (!properties || typeof properties !== "object" || Array.isArray(properties)) return [];
+  const requiredSet = new Set(
+    Array.isArray(inputSchema.required)
+      ? inputSchema.required.filter((item): item is string => typeof item === "string")
+      : [],
+  );
+  return Object.entries(properties as Record<string, unknown>).map(([name, raw]) => {
+    const prop = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+    let type = "any";
+    if (typeof prop.type === "string") {
+      type = prop.type;
+    } else if (Array.isArray(prop.type)) {
+      type = prop.type.filter((item): item is string => typeof item === "string").join(" | ");
+    } else if (Array.isArray(prop.enum)) {
+      type = prop.enum.map((v) => JSON.stringify(v)).join(" | ");
+    } else if (Array.isArray(prop.anyOf)) {
+      type = "union";
+    }
+    return {
+      name,
+      type,
+      required: requiredSet.has(name),
+      description: typeof prop.description === "string" ? prop.description : undefined,
+    };
+  });
+}
+
 export function ProjectInfoView() {
   const activeProject = useCurrentProject();
   const activeProjectId = activeProject.projectId;
@@ -60,6 +99,7 @@ export function ProjectInfoView() {
   const [sseConnected, setSseConnected] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [copiedRepo, setCopiedRepo] = useState(false);
+  const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const sseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const tz = useMemo(() => detectBrowserTimeZone(), []);
@@ -83,6 +123,13 @@ export function ProjectInfoView() {
   const skillsQuery = useQuery({
     queryKey: queryKeys.projectSkills(activeProjectId),
     queryFn: () => projectsApi.listSkills(activeProjectId),
+    enabled: Boolean(activeProjectId),
+    staleTime: 60_000,
+  });
+
+  const toolsQuery = useQuery({
+    queryKey: queryKeys.projectTools(activeProjectId),
+    queryFn: () => projectsApi.listTools(activeProjectId),
     enabled: Boolean(activeProjectId),
     staleTime: 60_000,
   });
@@ -117,6 +164,8 @@ export function ProjectInfoView() {
       ]);
       qc.setQueryData(queryKeys.projectOverview(activeProjectId), freshOverview);
       qc.setQueryData(queryKeys.projectMetrics(activeProjectId, range, tz), freshMetrics);
+      void qc.invalidateQueries({ queryKey: queryKeys.projectSkills(activeProjectId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.projectTools(activeProjectId) });
     } catch (err: unknown) {
       toast.error(`刷新失败: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -138,6 +187,12 @@ export function ProjectInfoView() {
   const metrics = metricsQuery.data;
   const skills = skillsQuery.data ?? [];
   const loadingSkills = skillsQuery.isPending;
+  const tools = toolsQuery.data ?? [];
+  const loadingTools = toolsQuery.isPending;
+
+  const toggleToolParams = (toolName: string) => {
+    setExpandedTools((prev) => ({ ...prev, [toolName]: !prev[toolName] }));
+  };
 
   const runtimeParts = [
     activeProject.runtime?.type,
@@ -826,6 +881,106 @@ export function ProjectInfoView() {
             )}
           </section>
         </div>
+
+        {/* 5. Loaded Project Custom Tools */}
+        <section className="rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] overflow-hidden flex flex-col">
+          <div className="px-4 py-2.5 bg-[var(--bg-table-header)] border-b border-[var(--border-default)] flex items-center justify-between">
+            <span className="text-[11px] font-semibold text-[var(--text-primary)] uppercase tracking-wider font-mono">
+              Loaded Tools ({tools.length})
+            </span>
+            <span className="text-[10.5px] text-[var(--text-muted)] font-mono">tools/*</span>
+          </div>
+
+          {loadingTools ? (
+            <div className="p-6 text-center text-xs text-[var(--text-muted)] font-mono">
+              Scanning project tools...
+            </div>
+          ) : tools.length === 0 ? (
+            <div className="p-6 text-center text-xs text-[var(--text-muted)] font-mono">
+              No custom tools detected in this project's tools/ directory.
+            </div>
+          ) : (
+            <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+              {tools.map((tool) => {
+                const params = extractToolParams(tool.inputSchema);
+                const isExpanded = Boolean(expandedTools[tool.name]);
+                return (
+                  <div
+                    key={tool.name}
+                    className="rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-canvas)] px-3.5 py-3 flex flex-col gap-2"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                        <Code2 className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0" />
+                        <span className="font-semibold text-xs text-[var(--text-primary)] font-mono truncate">
+                          {tool.name}
+                        </span>
+                        {tool.overridesBuiltin && (
+                          <span
+                            title="Overrides a built-in tool with the same name"
+                            className="text-[10px] font-mono px-1.5 py-0 rounded-[var(--radius-xs)] bg-amber-500/10 border border-amber-500/30 text-amber-500 shrink-0"
+                          >
+                            override
+                          </span>
+                        )}
+                      </div>
+
+                      {params.length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleToolParams(tool.name)}
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[var(--radius-xs)] text-[10.5px] font-mono text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer shrink-0"
+                        >
+                          {isExpanded ? (
+                            <ChevronDown className="w-3 h-3" />
+                          ) : (
+                            <ChevronRight className="w-3 h-3" />
+                          )}
+                          <span>
+                            {params.length} {params.length === 1 ? "param" : "params"}
+                          </span>
+                        </button>
+                      ) : (
+                        <span className="text-[10.5px] font-mono text-[var(--text-muted)] shrink-0">
+                          no params
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+                      {tool.description}
+                    </p>
+
+                    {isExpanded && params.length > 0 && (
+                      <div className="mt-0.5 pt-2 border-t border-[var(--border-subtle)] space-y-1.5">
+                        {params.map((param) => (
+                          <div key={param.name} className="text-[11px] leading-relaxed">
+                            <div className="flex items-center gap-1.5 flex-wrap font-mono">
+                              <span className="text-[var(--text-primary)] font-medium">
+                                {param.name}
+                              </span>
+                              <span className="text-[var(--text-muted)]">{param.type}</span>
+                              {param.required && (
+                                <span className="text-[9.5px] uppercase px-1 py-0 rounded-[var(--radius-xs)] bg-[var(--bg-surface-elevated)] border border-[var(--border-default)] text-[var(--text-secondary)]">
+                                  required
+                                </span>
+                              )}
+                            </div>
+                            {param.description && (
+                              <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
+                                {param.description}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
       </div>
     </div>
   );

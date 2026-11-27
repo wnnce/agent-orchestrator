@@ -12,6 +12,8 @@ import type {
 } from "../pipeline/types.ts";
 import type { PipelineHistoryQuery } from "../pipeline/context.ts";
 
+export type ToolSource = "builtin" | "project";
+
 /**
  * A tool an agent can call. Tools adapt project capabilities for a model: a JSON input schema,
  * a description, and when they are offered. `run` returns its result or throws.
@@ -20,6 +22,8 @@ export interface ToolDefinition<TInput extends z.ZodObject = z.ZodObject, TOutpu
   readonly name: string;
   readonly description: string;
   readonly input: TInput;
+  /** Origin of this tool definition, assigned automatically during registration/loading. */
+  readonly source?: ToolSource | undefined;
   /** Whether a session is offered this tool. Offered everywhere when omitted. */
   readonly when?: ((site: ToolSite) => boolean) | undefined;
   run(input: z.output<TInput>, ctx: ToolContext): Promise<TOutput>;
