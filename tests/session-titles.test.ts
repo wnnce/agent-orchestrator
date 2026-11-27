@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 import { ArtifactStore } from "../src/artifacts/store.ts";
 import type { ProjectConfig } from "../src/domain/types.ts";
-import { SessionTitleGenerator } from "../src/gateway/titles.ts";
+import { SessionTitleGenerator } from "../src/app/titles.ts";
 import { Logger } from "../src/observability/logger.ts";
 import { MemoryStore } from "../src/persistence/store.ts";
 import { ProjectRuntime } from "../src/project/runtime.ts";

@@ -2,9 +2,11 @@ import { randomUUID } from "node:crypto";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import { ingestWebhookRoute } from "../contracts/webhooks.ts";
 import { createOpenAPIApp } from "../openapi.ts";
+import type { SessionService } from "../../app/sessions.ts";
 import type { GatewayService } from "../service.ts";
 
 export interface WebhooksRouteDeps {
+  sessions: SessionService;
   service: GatewayService;
 }
 
@@ -17,7 +19,7 @@ export function createWebhooksRouter(deps: WebhooksRouteDeps): OpenAPIHono {
     const input = body.input ?? body.query ?? "";
 
     if (body.sessionId) {
-      const turn = await deps.service.submitTurn(body.sessionId, input);
+      const turn = await deps.sessions.submitTurn(body.sessionId, input);
       return c.json({ sessionId: body.sessionId, turn } as Record<string, unknown>, 202);
     }
 

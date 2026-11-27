@@ -351,6 +351,35 @@ describe("Gateway with Hono", () => {
     }
   });
 
+  it("refuses manual turns in task sessions from both the session API and webhooks", async () => {
+    const { gateway, projectManager } = createTestGateway();
+    await projectManager.start();
+    try {
+      const session = await projectManager.get("test-proj").createSession(undefined, "task");
+      const viaSessionApi = await gateway.handle(
+        new Request(`http://localhost/api/v1/sessions/${session.sessionId}/turns`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ input: "hi" }),
+        }),
+      );
+      const viaWebhook = await gateway.handle(
+        new Request("http://localhost/api/v1/webhooks/test-proj", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sessionId: session.sessionId, input: "hi" }),
+        }),
+      );
+      for (const response of [viaSessionApi, viaWebhook]) {
+        expect(response.status).toBe(403);
+        expect(((await response.json()) as { error: string }).error).toBe("task_session_read_only");
+      }
+    } finally {
+      await gateway.stop();
+      await projectManager.stop();
+    }
+  });
+
   it("lists tool executions via GET /api/v1/tool-executions", async () => {
     const { gateway, store } = createTestGateway();
 

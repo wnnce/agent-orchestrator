@@ -14,7 +14,8 @@ import {
   createGlobalProjectConfig,
 } from "../src/project/global.ts";
 import { WorkspaceManager } from "../src/workspace/workspace.ts";
-import { GatewayService } from "../src/gateway/service.ts";
+import { SessionService } from "../src/app/sessions.ts";
+import { SessionTitleGenerator } from "../src/app/titles.ts";
 import { MemoryStore } from "../src/persistence/store.ts";
 import { ProjectManager } from "../src/project/manager.ts";
 import { Logger } from "../src/observability/logger.ts";
@@ -427,7 +428,7 @@ describe("3-Tier Decision Chain Router & Global Fallback", () => {
       expect(existsSync(globalProjectsDir)).toBe(true);
     });
 
-    test("GatewayService routes unmatched user query to _global_ workspace in read-only mode", async () => {
+    test("SessionService routes unmatched user query to _global_ workspace in read-only mode", async () => {
       const rootDir = path.join(testDir, "gateway-test");
       const projectsDir = path.join(rootDir, "projects");
       await mkdir(projectsDir, { recursive: true });
@@ -453,10 +454,15 @@ describe("3-Tier Decision Chain Router & Global Fallback", () => {
         logger,
       );
 
-      const service = new GatewayService(config, store, projectManager, logger);
+      const service = new SessionService({
+        projects: projectManager,
+        router: new ProjectRouter(),
+        titles: new SessionTitleGenerator(undefined, logger),
+        logger,
+      });
 
       // User asks macro architecture query that doesn't match any project keywords
-      const created = await service.createSession({
+      const created = await service.create({
         query: "请问我们系统有哪些核心业务模块？整体技术栈是什么？",
       });
 

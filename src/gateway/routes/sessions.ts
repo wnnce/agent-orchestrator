@@ -1,7 +1,7 @@
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import type { Context, TypedResponse } from "hono";
 import { streamSSE } from "hono/streaming";
-import { ErrorCode, ForbiddenError } from "../../domain/errors.ts";
+import { ErrorCode } from "../../domain/errors.ts";
 import type { EventHub } from "../../events/hub.ts";
 import type { Store } from "../../persistence/store.ts";
 import type { ProjectManager } from "../../project/manager.ts";
@@ -23,13 +23,13 @@ import {
   submitTurnRoute,
 } from "../contracts/sessions.ts";
 import { createOpenAPIApp } from "../openapi.ts";
-import type { GatewayService } from "../service.ts";
+import type { SessionService } from "../../app/sessions.ts";
 
 export interface SessionsRouteDeps {
   store: Store;
   projects: ProjectManager;
   eventHub: EventHub;
-  service: GatewayService;
+  sessions: SessionService;
 }
 
 export function createSessionsRouter(deps: SessionsRouteDeps): OpenAPIHono {
@@ -38,7 +38,7 @@ export function createSessionsRouter(deps: SessionsRouteDeps): OpenAPIHono {
   // 1. Create Session (Global or Project-scoped)
   router.openapi(createSessionRoute, async (c) => {
     const body = c.req.valid("json");
-    const created = await deps.service.createSession({
+    const created = await deps.sessions.create({
       ...body,
       source: body.external?.channel ?? "web",
     });
@@ -48,7 +48,7 @@ export function createSessionsRouter(deps: SessionsRouteDeps): OpenAPIHono {
   router.openapi(createProjectSessionRoute, async (c) => {
     const { projectId } = c.req.valid("param");
     const body = c.req.valid("json");
-    const created = await deps.service.createSession({
+    const created = await deps.sessions.create({
       ...body,
       projectId,
       source: body.external?.channel ?? "web",
@@ -177,17 +177,8 @@ export function createSessionsRouter(deps: SessionsRouteDeps): OpenAPIHono {
   // 5. Turns & Interaction (Protected with Task Session Read-Only Guard)
   router.openapi(submitTurnRoute, async (c) => {
     const { sessionId } = c.req.valid("param");
-    const route = await (await deps.projects.runtimeForSession(sessionId)).getSession(sessionId);
-
-    if (route.source === "task") {
-      throw new ForbiddenError(
-        "Task session is automated and read-only; manual turn input is disabled.",
-        ErrorCode.TASK_SESSION_READ_ONLY,
-      );
-    }
-
     const { input } = c.req.valid("json");
-    const turn = await deps.service.submitTurn(sessionId, input);
+    const turn = await deps.sessions.submitTurn(sessionId, input);
     return c.json({ turn }, 202);
   });
 

@@ -1,5 +1,5 @@
 import type { AppConfig } from "../config/config.ts";
-import { ConflictError, ErrorCode, NotFoundError, ValidationError } from "../domain/errors.ts";
+import { ConflictError, ValidationError } from "../domain/errors.ts";
 import type { SessionRoute, TurnRecord } from "../domain/types.ts";
 import type { Store } from "../persistence/store.ts";
 import { ProjectManager } from "../project/manager.ts";
@@ -18,36 +18,12 @@ import {
 } from "../channels/wecom.ts";
 import type { SessionManager } from "../session/index.ts";
 import { MemoryInbox } from "./inbox.ts";
-import { SessionTitleGenerator } from "./titles.ts";
-
-export interface CreateSessionInput {
-  projectId?: string | undefined;
-  title?: string | undefined;
-  query?: string | undefined;
-  submitQuery?: boolean | undefined;
-  source?: string | undefined;
-  runtime?: string | undefined;
-  model?: string | undefined;
-  reasoningEffort?: string | undefined;
-  external?:
-    | {
-        channel: string;
-        conversationId: string;
-        threadId?: string | undefined;
-      }
-    | undefined;
-}
-
-export interface CreatedSession {
-  session: SessionRoute;
-  routedProject: string;
-  turn?: TurnRecord;
-}
+import { SessionService } from "../app/sessions.ts";
+import { SessionTitleGenerator } from "../app/titles.ts";
 
 /** Transport-neutral application entry point for sessions and inbound messages. */
 export class GatewayService {
-  private readonly router: ProjectRouter;
-  private readonly titles: SessionTitleGenerator;
+  readonly sessions: SessionService;
   readonly inbox: MemoryInbox;
   private readonly feishuClient?: FeishuClient;
   private readonly feishuStreamer?: FeishuSessionStreamer;
@@ -68,8 +44,12 @@ export class GatewayService {
     wecomClient?: WeComClient,
   ) {
     this.sessionManager = sessionManager ?? projects.sessionManager;
-    this.router = new ProjectRouter(config.routerApiKey, config.routerModel, config.routerBaseUrl);
-    this.titles = new SessionTitleGenerator(config.titles, logger);
+    this.sessions = new SessionService({
+      projects,
+      router: new ProjectRouter(config.routerApiKey, config.routerModel, config.routerBaseUrl),
+      titles: new SessionTitleGenerator(config.titles, logger),
+      logger,
+    });
     this.inbox = new MemoryInbox((envelope) => this.processInbound(envelope));
     if (config.feishu?.appId && config.feishu?.appSecret) {
       this.feishuClient =
@@ -104,72 +84,6 @@ export class GatewayService {
       this.wecomClient = wecomClient;
       this.wecomStreamer = new WeComSessionStreamer(this.eventHub, this.wecomClient, logger);
     }
-  }
-
-  async createSession(input: CreateSessionInput): Promise<CreatedSession> {
-    const query = input.query?.trim() ?? "";
-    const projectId = input.projectId?.trim() ?? "";
-    const explicitTitle = input.title?.trim();
-    const project = projectId
-      ? this.projects.get(projectId)
-      : this.projects.get(
-          (
-            await this.router.route(query, this.projects.list(), {
-              enableGlobalFallback: true,
-              globalProject: this.projects.getGlobalProject(),
-            })
-          ).project.id,
-        );
-    const source = input.source ?? input.external?.channel ?? "web";
-    const runtimeOverride =
-      input.runtime || input.model || input.reasoningEffort
-        ? {
-            ...(input.runtime ? { runtime: input.runtime } : {}),
-            ...(input.model ? { model: input.model } : {}),
-            ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
-          }
-        : undefined;
-    let route = await project.createSession(
-      explicitTitle ? { title: explicitTitle } : undefined,
-      source,
-      runtimeOverride,
-    );
-    if (input.external) {
-      route = await project.bindExternal(route.sessionId, {
-        channel: input.external.channel,
-        conversationId: input.external.conversationId,
-        ...(input.external.threadId ? { threadId: input.external.threadId } : {}),
-      });
-    }
-    const turn =
-      query && input.submitQuery !== false ? await project.turn(route.sessionId, query) : undefined;
-    if (query && !explicitTitle) {
-      this.generateSessionTitle(route.sessionId, query);
-    }
-    return { session: route, routedProject: project.project.id, ...(turn ? { turn } : {}) };
-  }
-
-  async submitTurn(sessionId: string, input: string): Promise<TurnRecord> {
-    const route = await this.store.getSession(sessionId);
-    if (!route) {
-      throw new NotFoundError(`Session ${sessionId} not found`, ErrorCode.SESSION_NOT_FOUND);
-    }
-    if (!route.title) this.generateSessionTitle(sessionId, input);
-    return this.projects.get(route.projectId).turn(sessionId, input);
-  }
-
-  /** Names the session after `query` in the background, unless it gets a title first. */
-  generateSessionTitle(sessionId: string, query: string): void {
-    void this.titles
-      .generate(query)
-      .then(async (title) => {
-        if (!title) return;
-        const route = await this.store.getSession(sessionId);
-        if (route) await this.projects.get(route.projectId).setGeneratedTitle(sessionId, title);
-      })
-      .catch((error) =>
-        this.logger.warn("failed to set generated session title", { sessionId, error }),
-      );
   }
 
   async acceptInbound(envelope: InboundEnvelope): Promise<{ duplicate: boolean }> {
@@ -406,7 +320,7 @@ export class GatewayService {
       session = existing
         ? existing
         : (
-            await this.createSession({
+            await this.sessions.create({
               ...(envelope.projectId ? { projectId: envelope.projectId } : {}),
               query: text,
               submitQuery: false,
@@ -455,7 +369,7 @@ export class GatewayService {
         };
         this.wecomStreamer.enqueueTurn(session.sessionId, wecomTurnContext);
       }
-      turn = await this.submitTurn(session.sessionId, text);
+      turn = await this.sessions.submitTurn(session.sessionId, text);
     } catch (error) {
       if (feishuTurnContext)
         this.feishuStreamer?.discardTurn(session!.sessionId, feishuTurnContext);

@@ -156,11 +156,14 @@ export class Gateway {
         store: this.store,
         projects: this.projects,
         eventHub: this.eventHub,
-        service: this.service,
+        sessions: this.service.sessions,
       }),
     );
     apiV1.route("/", createPipelinesRouter({ projects: this.projects }));
-    apiV1.route("/", createWebhooksRouter({ service: this.service }));
+    apiV1.route(
+      "/",
+      createWebhooksRouter({ sessions: this.service.sessions, service: this.service }),
+    );
 
     app.route(API_V1_PREFIX, apiV1);
 
