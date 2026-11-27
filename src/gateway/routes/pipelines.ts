@@ -1,12 +1,8 @@
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import type { Context, TypedResponse } from "hono";
+import type { TypedResponse } from "hono";
 import { streamSSE } from "hono/streaming";
+import { NotFoundError } from "../../domain/errors.ts";
 import type { Store } from "../../persistence/store.ts";
-import {
-  PipelineConflictError,
-  PipelineNotFoundError,
-  PipelineValidationError,
-} from "../../pipeline/index.ts";
 import type { ProjectManager } from "../../project/manager.ts";
 import type { ProjectRuntime } from "../../project/runtime.ts";
 import {
@@ -30,43 +26,26 @@ export interface PipelinesRouteDeps {
   readonly store: Store;
 }
 
-function resolveProjectRuntime(projects: ProjectManager, projectId: string): ProjectRuntime | null {
-  try {
-    return projects.get(projectId);
-  } catch {
-    return null;
-  }
-}
-
-async function resolveRuntimeForRun(
+async function requireRuntimeForRun(
   deps: PipelinesRouteDeps,
   runId: string,
-): Promise<ProjectRuntime | null> {
+): Promise<ProjectRuntime> {
   const run = await deps.store.pipelines.getRun(runId);
-  if (!run) return null;
-  return resolveProjectRuntime(deps.projects, run.projectId);
+  if (!run) {
+    throw new NotFoundError(`pipeline run not found: ${runId}`);
+  }
+  return deps.projects.get(run.projectId);
 }
 
-async function resolveRuntimeForNodeRun(
+async function requireRuntimeForNodeRun(
   deps: PipelinesRouteDeps,
   nodeRunId: string,
-): Promise<ProjectRuntime | null> {
+): Promise<ProjectRuntime> {
   const nodeRun = await deps.store.pipelines.getNodeRun(nodeRunId);
-  if (!nodeRun) return null;
-  return resolveProjectRuntime(deps.projects, nodeRun.projectId);
-}
-
-function handlePipelineError(c: Context, err: unknown) {
-  if (err instanceof PipelineNotFoundError) {
-    return c.json({ error: "not_found", message: err.message }, 404);
+  if (!nodeRun) {
+    throw new NotFoundError(`pipeline node run not found: ${nodeRunId}`);
   }
-  if (err instanceof PipelineConflictError) {
-    return c.json({ error: "conflict", message: err.message }, 409);
-  }
-  if (err instanceof PipelineValidationError) {
-    return c.json({ error: "validation_error", message: err.message }, 400);
-  }
-  throw err;
+  return deps.projects.get(nodeRun.projectId);
 }
 
 export function createPipelinesRouter(deps: PipelinesRouteDeps): OpenAPIHono {
@@ -75,62 +54,33 @@ export function createPipelinesRouter(deps: PipelinesRouteDeps): OpenAPIHono {
   // 1. Project-scoped Pipeline Definitions & Run Creation / Listing
   router.openapi(listProjectPipelinesRoute, async (c) => {
     const { projectId } = c.req.valid("param");
-    const runtime = resolveProjectRuntime(deps.projects, projectId);
-    if (!runtime) {
-      return c.json(
-        { error: "project_not_found", message: `project not found: ${projectId}` },
-        404,
-      );
-    }
+    const runtime = deps.projects.get(projectId);
     const pipelines = await runtime.pipelineEngine.listPipelinesWithVersions();
     return c.json({ projectId, pipelines }, 200);
   });
 
   router.openapi(listPipelineRunsRoute, async (c) => {
     const { projectId, pipelineId } = c.req.valid("param");
-    const runtime = resolveProjectRuntime(deps.projects, projectId);
-    if (!runtime) {
-      return c.json(
-        { error: "project_not_found", message: `project not found: ${projectId}` },
-        404,
-      );
-    }
-    const query = c.req.valid("query");
-    const runs = await runtime.pipelineEngine.listRuns(pipelineId, query);
+    const runtime = deps.projects.get(projectId);
+    const runs = await runtime.pipelineEngine.listRuns(pipelineId, c.req.valid("query"));
     return c.json({ projectId, pipelineId, runs }, 200);
   });
 
   router.openapi(startPipelineRunRoute, async (c) => {
     const { projectId, pipelineId } = c.req.valid("param");
-    const runtime = resolveProjectRuntime(deps.projects, projectId);
-    if (!runtime) {
-      return c.json(
-        { error: "project_not_found", message: `project not found: ${projectId}` },
-        404,
-      );
-    }
+    const runtime = deps.projects.get(projectId);
     const body = c.req.valid("json");
-    try {
-      const result = await runtime.pipelineEngine.startRun({
-        pipelineId,
-        ...body,
-        createdBy: body.createdBy ?? "api",
-      });
-      return result.created ? c.json(result, 201) : c.json(result, 200);
-    } catch (err) {
-      return handlePipelineError(c, err);
-    }
+    const result = await runtime.pipelineEngine.startRun({
+      pipelineId,
+      ...body,
+      createdBy: body.createdBy ?? "api",
+    });
+    return result.created ? c.json(result, 201) : c.json(result, 200);
   });
 
   router.openapi(pipelineEventsStreamRoute, async (c) => {
     const { projectId } = c.req.valid("param");
-    const runtime = resolveProjectRuntime(deps.projects, projectId);
-    if (!runtime) {
-      return c.json(
-        { error: "project_not_found", message: `project not found: ${projectId}` },
-        404,
-      );
-    }
+    const runtime = deps.projects.get(projectId);
     const filter = c.req.valid("query");
 
     return streamSSE(c, async (stream) => {
@@ -165,130 +115,67 @@ export function createPipelinesRouter(deps: PipelinesRouteDeps): OpenAPIHono {
   // 2. Pipeline Run Resources (addressed by globally unique runId)
   router.openapi(getPipelineRunDetailRoute, async (c) => {
     const { runId } = c.req.valid("param");
-    const runtime = await resolveRuntimeForRun(deps, runId);
-    if (!runtime) {
-      return c.json({ error: "not_found", message: `pipeline run not found: ${runId}` }, 404);
-    }
-    try {
-      const detail = await runtime.pipelineEngine.getRunDetail(runId);
-      return c.json(detail, 200);
-    } catch (err) {
-      return handlePipelineError(c, err);
-    }
+    const runtime = await requireRuntimeForRun(deps, runId);
+    const detail = await runtime.pipelineEngine.getRunDetail(runId);
+    return c.json(detail, 200);
   });
 
   router.openapi(listPipelineRunActionsRoute, async (c) => {
     const { runId } = c.req.valid("param");
-    const runtime = await resolveRuntimeForRun(deps, runId);
-    if (!runtime) {
-      return c.json({ error: "not_found", message: `pipeline run not found: ${runId}` }, 404);
-    }
+    const runtime = await requireRuntimeForRun(deps, runId);
     const { afterSeq, ...query } = c.req.valid("query");
-    try {
-      const actions = await runtime.pipelineEngine.listRunActions(runId, {
-        ...query,
-        ...(afterSeq !== undefined ? { afterSequence: afterSeq } : {}),
-      });
-      return c.json({ runId, actions }, 200);
-    } catch (err) {
-      return handlePipelineError(c, err);
-    }
+    const actions = await runtime.pipelineEngine.listRunActions(runId, {
+      ...query,
+      ...(afterSeq !== undefined ? { afterSequence: afterSeq } : {}),
+    });
+    return c.json({ runId, actions }, 200);
   });
 
   router.openapi(approvePipelineRunRoute, async (c) => {
     const { runId } = c.req.valid("param");
-    const runtime = await resolveRuntimeForRun(deps, runId);
-    if (!runtime) {
-      return c.json({ error: "not_found", message: `pipeline run not found: ${runId}` }, 404);
-    }
-    const body = c.req.valid("json");
-    try {
-      const run = await runtime.pipelineEngine.approveRun(runId, body);
-      return c.json({ run }, 200);
-    } catch (err) {
-      return handlePipelineError(c, err);
-    }
+    const runtime = await requireRuntimeForRun(deps, runId);
+    const run = await runtime.pipelineEngine.approveRun(runId, c.req.valid("json"));
+    return c.json({ run }, 200);
   });
 
   router.openapi(rejectPipelineRunRoute, async (c) => {
     const { runId } = c.req.valid("param");
-    const runtime = await resolveRuntimeForRun(deps, runId);
-    if (!runtime) {
-      return c.json({ error: "not_found", message: `pipeline run not found: ${runId}` }, 404);
-    }
-    const body = c.req.valid("json");
-    try {
-      const run = await runtime.pipelineEngine.rejectRun(runId, body);
-      return c.json({ run }, 200);
-    } catch (err) {
-      return handlePipelineError(c, err);
-    }
+    const runtime = await requireRuntimeForRun(deps, runId);
+    const run = await runtime.pipelineEngine.rejectRun(runId, c.req.valid("json"));
+    return c.json({ run }, 200);
   });
 
   router.openapi(retryPipelineRunRoute, async (c) => {
     const { runId } = c.req.valid("param");
-    const runtime = await resolveRuntimeForRun(deps, runId);
-    if (!runtime) {
-      return c.json({ error: "not_found", message: `pipeline run not found: ${runId}` }, 404);
-    }
-    const body = c.req.valid("json");
-    try {
-      const run = await runtime.pipelineEngine.retryRun(runId, body);
-      return c.json({ run }, 200);
-    } catch (err) {
-      return handlePipelineError(c, err);
-    }
+    const runtime = await requireRuntimeForRun(deps, runId);
+    const run = await runtime.pipelineEngine.retryRun(runId, c.req.valid("json"));
+    return c.json({ run }, 200);
   });
 
   router.openapi(cancelPipelineRunRoute, async (c) => {
     const { runId } = c.req.valid("param");
-    const runtime = await resolveRuntimeForRun(deps, runId);
-    if (!runtime) {
-      return c.json({ error: "not_found", message: `pipeline run not found: ${runId}` }, 404);
-    }
-    const body = c.req.valid("json");
-    try {
-      const run = await runtime.pipelineEngine.cancelRun(runId, body);
-      return c.json({ run }, 200);
-    } catch (err) {
-      return handlePipelineError(c, err);
-    }
+    const runtime = await requireRuntimeForRun(deps, runId);
+    const run = await runtime.pipelineEngine.cancelRun(runId, c.req.valid("json"));
+    return c.json({ run }, 200);
   });
 
   router.openapi(signalPipelineRunRoute, async (c) => {
     const { runId } = c.req.valid("param");
-    const runtime = await resolveRuntimeForRun(deps, runId);
-    if (!runtime) {
-      return c.json({ error: "not_found", message: `pipeline run not found: ${runId}` }, 404);
-    }
-    try {
-      const result = await runtime.pipelineEngine.signalRun(runId);
-      return c.json(result, 200);
-    } catch (err) {
-      return handlePipelineError(c, err);
-    }
+    const runtime = await requireRuntimeForRun(deps, runId);
+    const result = await runtime.pipelineEngine.signalRun(runId);
+    return c.json(result, 200);
   });
 
   // 3. Pipeline Node Run Resources (addressed by globally unique nodeRunId)
   router.openapi(listPipelineNodeLogsRoute, async (c) => {
     const { nodeRunId } = c.req.valid("param");
-    const runtime = await resolveRuntimeForNodeRun(deps, nodeRunId);
-    if (!runtime) {
-      return c.json(
-        { error: "not_found", message: `pipeline node run not found: ${nodeRunId}` },
-        404,
-      );
-    }
+    const runtime = await requireRuntimeForNodeRun(deps, nodeRunId);
     const { afterSeq, ...query } = c.req.valid("query");
-    try {
-      const logs = await runtime.pipelineEngine.listNodeRunLogs(nodeRunId, {
-        ...query,
-        ...(afterSeq !== undefined ? { afterSequence: afterSeq } : {}),
-      });
-      return c.json({ nodeRunId, logs }, 200);
-    } catch (err) {
-      return handlePipelineError(c, err);
-    }
+    const logs = await runtime.pipelineEngine.listNodeRunLogs(nodeRunId, {
+      ...query,
+      ...(afterSeq !== undefined ? { afterSequence: afterSeq } : {}),
+    });
+    return c.json({ nodeRunId, logs }, 200);
   });
 
   return router;

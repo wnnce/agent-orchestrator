@@ -1,4 +1,5 @@
 import type { AppConfig } from "../config/config.ts";
+import { ConflictError, ErrorCode, NotFoundError, ValidationError } from "../domain/errors.ts";
 import type { SessionRoute, TurnRecord } from "../domain/types.ts";
 import type { Store } from "../persistence/store.ts";
 import { ProjectManager } from "../project/manager.ts";
@@ -149,7 +150,9 @@ export class GatewayService {
 
   async submitTurn(sessionId: string, input: string): Promise<TurnRecord> {
     const route = await this.store.getSession(sessionId);
-    if (!route) throw new Error("session_not_found");
+    if (!route) {
+      throw new NotFoundError(`Session ${sessionId} not found`, ErrorCode.SESSION_NOT_FOUND);
+    }
     if (!route.title) this.generateSessionTitle(sessionId, input);
     return this.projects.get(route.projectId).turn(sessionId, input);
   }
@@ -255,7 +258,7 @@ export class GatewayService {
 
   private async processInbound(envelope: InboundEnvelope): Promise<InboundResult> {
     const text = envelope.text.trim();
-    if (!text) throw new Error("inbound message text is required");
+    if (!text) throw new ValidationError("inbound message text is required");
 
     const existing = await this.store.findSessionByExternal(
       envelope.conversation.channel,
@@ -278,7 +281,9 @@ export class GatewayService {
           envelope.conversation.conversationId,
           envelope.conversation.threadId,
         ));
-      if (!session) throw new Error("duplicate inbound message is still being processed");
+      if (!session) {
+        throw new ConflictError("duplicate inbound message is still being processed");
+      }
       this.logger.info("duplicate inbound message ignored", {
         channel: envelope.conversation.channel,
         messageId: envelope.messageId,
@@ -443,8 +448,7 @@ export class GatewayService {
     } catch (error) {
       if (feishuTurnContext)
         this.feishuStreamer?.discardTurn(session!.sessionId, feishuTurnContext);
-      if (wecomTurnContext)
-        this.wecomStreamer?.discardTurn(session!.sessionId, wecomTurnContext);
+      if (wecomTurnContext) this.wecomStreamer?.discardTurn(session!.sessionId, wecomTurnContext);
       await this.store.releaseInboundMessage(envelope.messageId);
       throw error;
     }

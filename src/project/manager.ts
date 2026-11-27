@@ -1,12 +1,9 @@
+import { ErrorCode, NotFoundError } from "../domain/errors.ts";
 import type { NotificationConfig, ProjectConfig } from "../domain/types.ts";
 import type { Store } from "../persistence/store.ts";
 import { ArtifactStore } from "../artifacts/store.ts";
 import { WorkspaceManager } from "../workspace/workspace.ts";
-import {
-  RuntimeRegistry,
-  defaultRuntimeRegistry,
-  type AgentRuntime,
-} from "../runtime/index.ts";
+import { RuntimeRegistry, defaultRuntimeRegistry, type AgentRuntime } from "../runtime/index.ts";
 import { ProjectRuntime } from "./runtime.ts";
 import type { AppConfig } from "../config/config.ts";
 import path from "node:path";
@@ -79,9 +76,7 @@ export class ProjectManager {
     });
   }
   async stop(): Promise<void> {
-    await Promise.all(
-      [...this.runtimes.values()].map((runtime) => runtime.stop()),
-    );
+    await Promise.all([...this.runtimes.values()].map((runtime) => runtime.stop()));
     this.logger.info("project runtimes stopped", {
       projectCount: this.runtimes.size,
     });
@@ -92,7 +87,12 @@ export class ProjectManager {
       runtime = this.createRuntime(this.globalProject);
       this.runtimes.set(GLOBAL_PROJECT_ID, runtime);
     }
-    if (!runtime) throw new Error(`project runtime not found: ${projectId}`);
+    if (!runtime) {
+      throw new NotFoundError(
+        `project runtime not found: ${projectId}`,
+        ErrorCode.PROJECT_NOT_FOUND,
+      );
+    }
     return runtime;
   }
   getGlobalProject(): ProjectConfig {
@@ -103,7 +103,9 @@ export class ProjectManager {
   }
   async listSkills(projectId: string): Promise<ProjectSkill[]> {
     const project = this.projects.find((p) => p.id === projectId);
-    if (!project) throw new Error(`project not found: ${projectId}`);
+    if (!project) {
+      throw new NotFoundError(`project not found: ${projectId}`, ErrorCode.PROJECT_NOT_FOUND);
+    }
     return SkillManager.listProjectSkills(project);
   }
   private createRuntime(
@@ -119,8 +121,7 @@ export class ProjectManager {
     const workspaceRoot = `${this.config.dataDir}/projects`;
     const baseRoot = `${this.config.dataDir}/bases`;
     const workspaces =
-      sharedWorkspaces ??
-      new WorkspaceManager(workspaceRoot, baseRoot, undefined, this.logger);
+      sharedWorkspaces ?? new WorkspaceManager(workspaceRoot, baseRoot, undefined, this.logger);
     const artifacts = new ArtifactStore(this.config.artifactDir, this.store);
 
     const actionRegistry = new ActionRegistry(this.logger, this.store);
@@ -134,8 +135,7 @@ export class ProjectManager {
         logger: this.logger.child({ projectId: project.id }),
         config: this.config,
         actionRegistry,
-        globalProject:
-          project.id === GLOBAL_PROJECT_ID ? undefined : this.globalProject,
+        globalProject: project.id === GLOBAL_PROJECT_ID ? undefined : this.globalProject,
       });
 
     const runtime = createAgentRuntime(runtimeType);
@@ -145,11 +145,7 @@ export class ProjectManager {
       runtime,
       workspaces,
       artifacts,
-      new NotificationOutbox(
-        this.store,
-        new NotificationHub(this.logger),
-        this.logger,
-      ),
+      new NotificationOutbox(this.store, new NotificationHub(this.logger), this.logger),
       this.logger,
       this.eventHub,
       this.sessionManager,

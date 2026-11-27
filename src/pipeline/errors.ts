@@ -1,23 +1,7 @@
-export class PipelineNotFoundError extends Error {
-  readonly status = 404;
-  constructor(message: string) {
-    super(message);
-    this.name = "PipelineNotFoundError";
-  }
-}
+import { ConflictError, NotFoundError, ValidationError } from "../domain/errors.ts";
 
-export class PipelineConflictError extends Error {
-  readonly status = 409;
-  constructor(message: string) {
-    super(message);
-    this.name = "PipelineConflictError";
-  }
-}
+export class PipelineNotFoundError extends NotFoundError {}
 
-export class PipelineValidationError extends Error {
-  readonly status = 400;
-  constructor(message: string) {
-    super(message);
-    this.name = "PipelineValidationError";
-  }
-}
+export class PipelineConflictError extends ConflictError {}
+
+export class PipelineValidationError extends ValidationError {}

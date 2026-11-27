@@ -20,42 +20,33 @@ export function createTasksRouter(deps: TasksRouteDeps): OpenAPIHono {
 
   router.openapi(listProjectTasksRoute, async (c) => {
     const { projectId } = c.req.valid("param");
-    try {
-      const runtime = deps.projects.get(projectId);
-      const tasks = await runtime.listTasks();
-      const scheduled = runtime.taskScheduler.getScheduledTasks();
-      const scheduledMap = new Map(scheduled.map((s) => [s.taskKey, s]));
-      const result = tasks.map((t) => ({
-        ...t,
-        isScheduled: runtime.taskScheduler.isScheduled(t.taskKey),
-        nextRun: scheduledMap.get(t.taskKey)?.nextRun?.toISOString() ?? null,
-      }));
-      return c.json({ projectId, tasks: result }, 200);
-    } catch {
-      return c.json({ error: `project not found: ${projectId}` }, 404);
-    }
+    const runtime = deps.projects.get(projectId);
+    const tasks = await runtime.listTasks();
+    const scheduled = runtime.taskScheduler.getScheduledTasks();
+    const scheduledMap = new Map(scheduled.map((s) => [s.taskKey, s]));
+    const result = tasks.map((t) => ({
+      ...t,
+      isScheduled: runtime.taskScheduler.isScheduled(t.taskKey),
+      nextRun: scheduledMap.get(t.taskKey)?.nextRun?.toISOString() ?? null,
+    }));
+    return c.json({ projectId, tasks: result }, 200);
   });
 
   router.openapi(runProjectTaskRoute, async (c) => {
     const { projectId, taskId } = c.req.valid("param");
-    try {
-      const runtime = deps.projects.get(projectId);
-      const queued = await runtime.runTask(taskId);
-      return c.json(
-        {
-          projectId,
-          taskId,
-          queued,
-          message: queued
-            ? "task dispatched successfully"
-            : "task already running or queued (single-flight skipped)",
-        },
-        200,
-      );
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return c.json({ error: msg }, 400);
-    }
+    const runtime = deps.projects.get(projectId);
+    const queued = await runtime.runTask(taskId);
+    return c.json(
+      {
+        projectId,
+        taskId,
+        queued,
+        message: queued
+          ? "task dispatched successfully"
+          : "task already running or queued (single-flight skipped)",
+      },
+      200,
+    );
   });
 
   router.openapi(listTaskExecutionsRoute, async (c) => {

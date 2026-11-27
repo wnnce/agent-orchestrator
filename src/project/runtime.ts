@@ -3,6 +3,14 @@ import { access, readdir } from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
 import {
+  ConflictError,
+  ErrorCode,
+  NotFoundError,
+  ServiceUnavailableError,
+  TooManyRequestsError,
+  ValidationError,
+} from "../domain/errors.ts";
+import {
   ScheduledJobStatus,
   type ArtifactRecord,
   type EventRecord,
@@ -643,10 +651,12 @@ export class ProjectRuntime {
   }
   private async entity(id: string): Promise<SessionEntity> {
     const entity = await this.sessionManager.getOrLoad(id);
-    if (!entity || entity.projectId !== this.project.id)
-      throw new Error(
+    if (!entity || entity.projectId !== this.project.id) {
+      throw new NotFoundError(
         `session ${id} is not owned by project ${this.project.id}`,
+        ErrorCode.SESSION_NOT_FOUND,
       );
+    }
     return entity;
   }
   async loadSession(id: string): Promise<SessionRoute> {
@@ -729,17 +739,24 @@ export class ProjectRuntime {
   ): Promise<TurnRecord> {
     return this.admit(sessionId, async () => {
       const entity = await this.entity(sessionId);
-      if (this.stopping) throw new Error("runtime is stopping");
-      if (entity.status === "archived")
-        throw new Error(`session ${sessionId} is archived and read-only`);
-      if (entity.status === "closing")
-        throw new Error(`session ${sessionId} is closing`);
-      if (this.maintenance.has(sessionId))
-        throw new Error("session maintenance in progress; retry the message");
-      if (!input.trim()) throw new Error("input is required");
+      if (this.stopping) throw new ServiceUnavailableError("runtime is stopping");
+      if (entity.status === "archived") {
+        throw new ConflictError(
+          `session ${sessionId} is archived and read-only`,
+          ErrorCode.SESSION_ARCHIVED,
+        );
+      }
+      if (entity.status === "closing") {
+        throw new ConflictError(`session ${sessionId} is closing`, ErrorCode.SESSION_CLOSING);
+      }
+      if (this.maintenance.has(sessionId)) {
+        throw new ServiceUnavailableError("session maintenance in progress; retry the message");
+      }
+      if (!input.trim()) throw new ValidationError("input is required");
       const queue = this.pendingTurns.get(sessionId) ?? [];
-      if (queue.length >= (this.options.queueLimit ?? 64))
-        throw new Error("session queue is full");
+      if (queue.length >= (this.options.queueLimit ?? 64)) {
+        throw new TooManyRequestsError("session queue is full", ErrorCode.QUEUE_FULL);
+      }
       entity.touch();
       if (entity.status !== "suspended") await entity.transitionTo("active");
       await entity.flush(this.store);
@@ -857,7 +874,7 @@ export class ProjectRuntime {
   async steer(sessionId: string, input: string): Promise<void> {
     const route = await this.loadSession(sessionId);
     const active = this.activeTurns.get(sessionId);
-    if (!active?.runtimeId || active.settled) throw new Error("no active turn");
+    if (!active?.runtimeId || active.settled) throw new ConflictError("no active turn");
     const runtime = this.runtimeForRoute(route);
     await runtime.steerTurn(
       this.context(this.workspacePath(route), sessionId, undefined, route),
@@ -898,8 +915,9 @@ export class ProjectRuntime {
   async compact(sessionId: string): Promise<void> {
     const route = await this.loadSession(sessionId);
     const active = this.activeTurns.get(sessionId);
-    if (active && !active.settled)
-      throw new Error("cannot compact while a turn is running");
+    if (active && !active.settled) {
+      throw new ConflictError("cannot compact while a turn is running");
+    }
     const runtime = this.runtimeForRoute(route);
     await runtime.compactSession(
       this.context(this.workspacePath(route), sessionId, undefined, route),
@@ -938,7 +956,9 @@ export class ProjectRuntime {
   ): Promise<ArtifactRecord> {
     const artifacts = await this.listArtifacts(sessionId);
     const artifact = artifacts.find((item) => item.id === artifactId);
-    if (!artifact) throw new Error(`artifact not found: ${artifactId}`);
+    if (!artifact) {
+      throw new NotFoundError(`artifact not found: ${artifactId}`, ErrorCode.ARTIFACT_NOT_FOUND);
+    }
     return artifact;
   }
 
@@ -1077,7 +1097,9 @@ export class ProjectRuntime {
   private resolveRuntime(runtimeType?: string): AgentRuntime {
     const resolved = this.tryResolveRuntime(runtimeType);
     if (resolved) return resolved;
-    throw new Error(`runtime not available for project ${this.project.id}: ${runtimeType}`);
+    throw new ValidationError(
+      `runtime not available for project ${this.project.id}: ${runtimeType}`,
+    );
   }
   private tryResolveRuntime(runtimeType?: string): AgentRuntime | undefined {
     const normalized = runtimeType?.trim().toLowerCase();
@@ -1655,7 +1677,10 @@ export class ProjectRuntime {
     const tasks = await this.listTasks();
     const task = tasks.find((t) => t.taskId === taskId || t.taskKey === taskId);
     if (!task) {
-      throw new Error(`Task ${taskId} not found in project ${this.project.id}`);
+      throw new NotFoundError(
+        `Task ${taskId} not found in project ${this.project.id}`,
+        ErrorCode.TASK_NOT_FOUND,
+      );
     }
     return this.taskEngine.dispatch(task);
   }

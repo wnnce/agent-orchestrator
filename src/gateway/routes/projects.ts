@@ -46,30 +46,17 @@ export function createProjectsRouter(deps: ProjectsRouteDeps): OpenAPIHono {
 
   router.openapi(listProjectSkillsRoute, async (c) => {
     const { projectId } = c.req.valid("param");
-    try {
-      const skills = await deps.projects.listSkills(projectId);
-      return c.json({ projectId, skills }, 200);
-    } catch {
-      return c.json({ error: `project not found: ${projectId}` }, 404);
-    }
+    const skills = await deps.projects.listSkills(projectId);
+    return c.json({ projectId, skills }, 200);
   });
 
   router.openapi(getProjectOverviewRoute, async (c) => {
     const { projectId } = c.req.valid("param");
     const { limit, refresh } = c.req.valid("query");
-    const bypassCache = refresh === "true" || refresh === "1";
-
-    let runtime: ReturnType<ProjectManager["get"]>;
-    try {
-      runtime = deps.projects.get(projectId);
-    } catch {
-      return c.json({ error: `project not found: ${projectId}` }, 404);
-    }
-
+    const runtime = deps.projects.get(projectId);
     const resolvedLimit = limit ?? 5;
-    const cacheKey = `${projectId}:${resolvedLimit}`;
     const data = await overviewCache.getOrLoad(
-      cacheKey,
+      `${projectId}:${resolvedLimit}`,
       overviewTtlMs,
       async () => {
         const [snapshot, tasks] = await Promise.all([
@@ -85,7 +72,7 @@ export function createProjectsRouter(deps: ProjectsRouteDeps): OpenAPIHono {
           },
         };
       },
-      { bypassCache },
+      { bypassCache: refresh === "true" || refresh === "1" },
     );
 
     return c.json(data, 200);
@@ -94,21 +81,13 @@ export function createProjectsRouter(deps: ProjectsRouteDeps): OpenAPIHono {
   router.openapi(getProjectMetricsRoute, async (c) => {
     const { projectId } = c.req.valid("param");
     const { range, tz, refresh } = c.req.valid("query");
-    const bypassCache = refresh === "true" || refresh === "1";
-
-    try {
-      deps.projects.get(projectId);
-    } catch {
-      return c.json({ error: `project not found: ${projectId}` }, 404);
-    }
-
+    deps.projects.get(projectId);
     const resolvedTz = tz?.trim() || "UTC";
-    const cacheKey = `${projectId}:${range}:${resolvedTz}`;
     const data = await metricsCache.getOrLoad(
-      cacheKey,
+      `${projectId}:${range}:${resolvedTz}`,
       metricsTtlMs,
       () => deps.store.getProjectMetrics(projectId, { range, tz: resolvedTz }),
-      { bypassCache },
+      { bypassCache: refresh === "true" || refresh === "1" },
     );
 
     return c.json(data, 200);

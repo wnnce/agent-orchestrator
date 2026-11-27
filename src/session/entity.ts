@@ -1,3 +1,4 @@
+import { ConflictError, ErrorCode } from "../domain/errors.ts";
 import type { SessionRoute, SessionStatus } from "../domain/types.ts";
 import type { Store } from "../persistence/store.ts";
 import type { SessionLifecycleHook } from "./hooks.ts";
@@ -84,10 +85,15 @@ export class SessionEntity {
   async transitionTo(status: SessionStatus): Promise<void> {
     const from = this.route.status;
     if (from === status) return;
-    if (from === "archived" && status !== "closing")
-      throw new Error(`session ${this.id} is archived and read-only`);
-    if (from === "closing" && status !== "archived" && status !== "closed")
-      throw new Error(`session ${this.id} is closing`);
+    if (from === "archived" && status !== "closing") {
+      throw new ConflictError(
+        `session ${this.id} is archived and read-only`,
+        ErrorCode.SESSION_ARCHIVED,
+      );
+    }
+    if (from === "closing" && status !== "archived" && status !== "closed") {
+      throw new ConflictError(`session ${this.id} is closing`, ErrorCode.SESSION_CLOSING);
+    }
     this.route.status = status;
     this.revision++;
     await this.notify((h) => h.onStateChanged?.(this, from, status));

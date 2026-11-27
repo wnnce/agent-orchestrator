@@ -3,6 +3,7 @@ import { serveStatic } from "hono/bun";
 import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type { AppConfig } from "../config/config.ts";
+import { UnauthorizedError } from "../domain/errors.ts";
 import type { Store } from "../persistence/store.ts";
 import { ProjectManager } from "../project/manager.ts";
 import type { Logger } from "../observability/logger.ts";
@@ -90,7 +91,7 @@ export class Gateway {
   }
 
   private createApp(): OpenAPIHono {
-    const app = createOpenAPIApp();
+    const app = createOpenAPIApp({ logger: this.logger });
 
     // 1. Request logging & x-request-id middleware
     app.use("*", async (c, next) => {
@@ -107,17 +108,7 @@ export class Gateway {
       });
     });
 
-    // 2. Global error handler
-    app.onError((err, c) => {
-      this.logger.error("gateway request failed", {
-        method: c.req.method,
-        path: c.req.path,
-        error: err,
-      });
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
-    });
-
-    // 3. Health, Readiness & OpenAPI Docs (root paths, no authentication)
+    // 2. Health, Readiness & OpenAPI Docs (root paths, no authentication)
     const modelCatalog = new RuntimeModelCatalog({
       modelsFile: this.config.runtimeModelsFile ?? "runtime-models.json",
       logger: this.logger,
@@ -125,8 +116,8 @@ export class Gateway {
     app.route("/", createHealthRouter());
     app.route("/", createDocsRouter(app));
 
-    // 4. Versioned API routes (/api/v1)
-    const apiV1 = createOpenAPIApp();
+    // 3. Versioned API routes (/api/v1)
+    const apiV1 = createOpenAPIApp({ logger: this.logger });
 
     // Public runtime discovery under /api/v1
     apiV1.route("/", createRuntimesRouter(this.projects.getRuntimeRegistry(), modelCatalog));
@@ -140,7 +131,7 @@ export class Gateway {
       if (auth === `Bearer ${this.config.apiToken}`) {
         return next();
       }
-      return c.json({ error: "unauthorized" }, 401);
+      throw new UnauthorizedError("Missing or invalid Bearer API token");
     });
 
     // Domain routes

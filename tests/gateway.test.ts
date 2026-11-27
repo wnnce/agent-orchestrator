@@ -73,7 +73,10 @@ describe("Gateway with Hono", () => {
     // Unauthenticated request should be rejected
     const unauthRes = await gateway.handle(new Request("http://localhost/api/v1/projects"));
     expect(unauthRes.status).toBe(401);
-    expect(await unauthRes.json()).toEqual({ error: "unauthorized" });
+    expect(await unauthRes.json()).toEqual({
+      error: "unauthorized",
+      message: "Missing or invalid Bearer API token",
+    });
 
     // Authenticated request should succeed
     const authRes = await gateway.handle(
@@ -332,7 +335,7 @@ describe("Gateway with Hono", () => {
             input: "test",
           }),
         });
-      expect((await gateway.handle(request())).status).toBe(400);
+      expect((await gateway.handle(request())).status).toBe(500);
       expect(store.inboundMessages.has("retry-message")).toBe(false);
       const retry = await gateway.handle(request());
       expect(retry.status).toBe(202);

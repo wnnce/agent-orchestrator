@@ -146,6 +146,7 @@ export const runProjectTaskRoute = createRoute({
       "Task dispatch status",
     ),
     400: badRequestResponse,
+    404: notFoundResponse,
   },
 });
 

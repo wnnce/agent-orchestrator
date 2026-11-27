@@ -1,4 +1,5 @@
 import type { InboundEnvelope, InboundResult } from "../channels/types.ts";
+import { ErrorCode, ServiceUnavailableError, TooManyRequestsError } from "../domain/errors.ts";
 
 export type InboxStatus = "queued" | "dispatched" | "completed" | "failed" | "canceled";
 export interface InboxRecord {
@@ -29,7 +30,7 @@ export class MemoryInbox {
     private readonly retained = 4096,
   ) {}
   accept(envelope: InboundEnvelope): { duplicate: boolean; completion: Promise<InboundResult> } {
-    if (!this.accepting) throw new Error("inbox is stopping");
+    if (!this.accepting) throw new ServiceUnavailableError("inbox is stopping");
     const key = JSON.stringify([
       envelope.conversation.channel,
       envelope.conversation.instanceId ?? "default",
@@ -45,7 +46,9 @@ export class MemoryInbox {
     const queued = [...this.records.values()].filter(
       (r) => r.status === "queued" || r.status === "dispatched",
     ).length;
-    if (!control && queued >= this.limit) throw new Error("inbox is full");
+    if (!control && queued >= this.limit) {
+      throw new TooManyRequestsError("inbox is full", ErrorCode.QUEUE_FULL);
+    }
     const conversation = conversationKey(envelope);
     const previous =
       (control ? this.running.get(conversation) : this.tails.get(conversation)) ??

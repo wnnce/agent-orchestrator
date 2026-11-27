@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ErrorCode, NotFoundError } from "../src/domain/errors.ts";
 import { ScheduledJobStatus } from "../src/domain/types.ts";
 import { createProjectsRouter } from "../src/gateway/routes/projects.ts";
 import { TtlSingleflightCache } from "../src/gateway/stats-cache.ts";
@@ -21,13 +22,17 @@ function makeProjectManagerStub(
       })),
     get: (projectId: string) => {
       const entry = projectsMap[projectId];
-      if (!entry) throw new Error(`project not found: ${projectId}`);
+      if (!entry) {
+        throw new NotFoundError(`project not found: ${projectId}`, ErrorCode.PROJECT_NOT_FOUND);
+      }
       return {
         listTasks: async () => entry.tasks ?? [],
       };
     },
     listSkills: async (projectId: string) => {
-      if (!projectsMap[projectId]) throw new Error(`project not found: ${projectId}`);
+      if (!projectsMap[projectId]) {
+        throw new NotFoundError(`project not found: ${projectId}`, ErrorCode.PROJECT_NOT_FOUND);
+      }
       return [];
     },
   } as unknown as ProjectManager;

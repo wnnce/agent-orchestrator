@@ -1,4 +1,5 @@
 import type { OpenAPIHono } from "@hono/zod-openapi";
+import { ErrorCode, NotFoundError } from "../../domain/errors.ts";
 import { RuntimeModelCatalog } from "../../runtime/catalog.ts";
 import type { RuntimeRegistry } from "../../runtime/registry.ts";
 import {
@@ -33,12 +34,13 @@ export function createRuntimesRouter(
   });
 
   router.openapi(listRuntimeModelsRoute, async (c) => {
-    if (!runtimeRegistry) return c.json({ error: "runtime_not_found" }, 404);
     const { runtimeType: rawRuntimeType } = c.req.valid("param");
     const runtimeType = rawRuntimeType.trim().toLowerCase();
-    const meta = runtimeRegistry.listRuntimes().find((r) => r.type === runtimeType);
-    if (!meta) return c.json({ error: "runtime_not_found" }, 404);
-    const models = await modelCatalog.listModels(runtimeRegistry, meta.type);
+    const meta = runtimeRegistry?.listRuntimes().find((r) => r.type === runtimeType);
+    if (!meta) {
+      throw new NotFoundError(`Runtime not found: ${runtimeType}`, ErrorCode.RUNTIME_NOT_FOUND);
+    }
+    const models = await modelCatalog.listModels(runtimeRegistry!, meta.type);
     return c.json(
       {
         runtime: meta.type,
