@@ -9,6 +9,8 @@ import {
   ListTodo,
   Loader2,
   MessageSquare,
+  PanelRightClose,
+  PanelRightOpen,
   Play,
   RotateCw,
   Search,
@@ -22,6 +24,7 @@ import { ROUTES } from "../../routes";
 import type { ProjectRuntimeDefault, TaskDefinition, TaskExecutionRecord } from "../../types";
 import { formatDateTime, formatDuration, formatTimeAgo } from "../../utils/formatters";
 import { EASE_OUT_EXPO } from "../../utils/motion";
+import { ResizablePane } from "../common/ResizablePane";
 import { SessionConversation } from "../session/SessionConversation";
 import { TaskExecutionDetail } from "../task/TaskExecutionDetail";
 
@@ -72,8 +75,8 @@ function TaskInfoPanel({
   const runtimeInfo = getEffectiveRuntimeInfo(task, projectRuntime);
 
   return (
-    <div className="flex-1 overflow-y-auto p-5 bg-[var(--bg-canvas)] select-text">
-      <div className="w-full space-y-4">
+    <div className="flex-1 overflow-y-auto px-6 py-6 bg-[var(--bg-canvas)] select-text">
+      <div className="max-w-4xl mx-auto w-full space-y-4">
         {/* Description */}
         <div className="p-4 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] space-y-1.5">
           <div className="text-[10px] font-mono font-semibold uppercase tracking-wider text-[var(--text-muted)]">
@@ -130,9 +133,7 @@ function TaskInfoPanel({
                 <span className="text-[var(--text-muted)]">Status</span>
                 <span
                   className={
-                    task.enabled
-                      ? "text-emerald-500 font-medium"
-                      : "text-[var(--text-muted)]"
+                    task.enabled ? "text-emerald-500 font-medium" : "text-[var(--text-muted)]"
                   }
                 >
                   {task.enabled ? "Enabled (Scheduled)" : "Disabled"}
@@ -255,6 +256,7 @@ export function TasksView() {
 
   // Right Runs panel filter (server-side filtered + cursor paginated)
   const [runStatusFilter, setRunStatusFilter] = useState<"all" | "success" | "failed">("all");
+  const [showRunsSidebar, setShowRunsSidebar] = useState(true);
 
   const tasksQuery = useQuery({
     queryKey: queryKeys.tasks(activeProjectId),
@@ -418,124 +420,132 @@ export function TasksView() {
 
   return (
     <div className="flex-1 flex h-full w-full overflow-hidden bg-[var(--bg-canvas)] select-text">
-      {/* 1. Left Column: Task Explorer (240px) */}
-      <aside className="w-60 border-r border-[var(--border-default)] bg-[var(--bg-sidebar)] flex flex-col shrink-0 min-h-0 select-none">
-        <div className="h-12 px-3 border-b border-[var(--border-default)] bg-[var(--bg-header)] flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="font-mono text-xs uppercase tracking-wider font-semibold text-[var(--text-primary)]">
-              Tasks
-            </span>
-            <span className="text-[10.5px] font-mono text-[var(--text-muted)] px-1.5 py-0.5 rounded-[var(--radius-xs)] bg-[var(--bg-surface-elevated)] border border-[var(--border-default)] leading-none">
-              {tasks.length}
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={() => void loadTasks()}
-            disabled={loadingTasks}
-            title="Refresh tasks"
-            className="p-1.5 rounded-[var(--radius-xs)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer disabled:opacity-50"
-          >
-            <RotateCw className={`w-3.5 h-3.5 ${loadingTasks ? "animate-spin" : ""}`} />
-          </button>
-        </div>
-
-        <div className="p-2.5 border-b border-[var(--border-subtle)] space-y-2 shrink-0">
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Filter tasks..."
-              className="w-full pl-8 pr-2.5 py-1 rounded-[var(--radius-sm)] text-xs font-mono bg-[var(--bg-canvas)] border border-[var(--border-default)] text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-hidden focus:border-[var(--border-focus)] transition-colors"
-            />
-          </div>
-
-          <div className="flex items-center gap-1 font-mono text-[10px]">
-            {(["all", "agent", "ts", "script", "action"] as const).map((t) => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => setTypeFilter(t)}
-                className={`flex-1 py-0.5 rounded-[var(--radius-xs)] uppercase border transition-colors cursor-pointer ${
-                  typeFilter === t
-                    ? "bg-[var(--primary)] text-[var(--text-inverted)] border-[var(--primary)]"
-                    : "bg-[var(--bg-canvas)] text-[var(--text-muted)] border-[var(--border-default)] hover:text-[var(--text-primary)]"
-                }`}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-1.5 space-y-1">
-          {loadingTasks && tasks.length === 0 ? (
-            <div className="py-12 flex items-center justify-center gap-2 text-xs font-mono text-[var(--text-muted)]">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              <span>Loading...</span>
+      {/* 1. Left Column: Resizable Task Explorer (drag right edge; double-click to reset) */}
+      <ResizablePane
+        edge="right"
+        defaultSize={248}
+        minSize={210}
+        maxSize={420}
+        storageKey="studio.tasks.leftWidth"
+      >
+        <aside className="w-full h-full border-r border-[var(--border-default)] bg-[var(--bg-sidebar)] flex flex-col min-h-0 overflow-hidden select-none">
+          <div className="h-12 px-3 border-b border-[var(--border-default)] bg-[var(--bg-header)] flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="font-mono text-xs uppercase tracking-wider font-semibold text-[var(--text-primary)]">
+                Tasks
+              </span>
+              <span className="text-[10.5px] font-mono text-[var(--text-muted)] px-1.5 py-0.5 rounded-[var(--radius-xs)] bg-[var(--bg-surface-elevated)] border border-[var(--border-default)] leading-none">
+                {tasks.length}
+              </span>
             </div>
-          ) : filteredTasks.length === 0 ? (
-            <div className="py-10 px-3 text-center text-[11px] font-mono text-[var(--text-muted)] space-y-1">
-              <div>{tasks.length === 0 ? "No tasks configured" : "No matching tasks"}</div>
-              {tasks.length === 0 && (
-                <div className="text-[10px] opacity-70">projects/{activeProjectId}/tasks/</div>
-              )}
-            </div>
-          ) : (
-            filteredTasks.map((task) => {
-              const isSelected = selectedTask?.taskId === task.taskId;
-              const taskType = (task.type ?? "agent").toLowerCase();
+            <button
+              type="button"
+              onClick={() => void loadTasks()}
+              disabled={loadingTasks}
+              title="Refresh tasks"
+              className="p-1.5 rounded-[var(--radius-xs)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <RotateCw className={`w-3.5 h-3.5 ${loadingTasks ? "animate-spin" : ""}`} />
+            </button>
+          </div>
 
-              return (
+          <div className="p-2.5 border-b border-[var(--border-subtle)] space-y-2 shrink-0">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Filter tasks..."
+                className="w-full pl-8 pr-2.5 py-1 rounded-[var(--radius-sm)] text-xs font-mono bg-[var(--bg-canvas)] border border-[var(--border-default)] text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-hidden focus:border-[var(--border-focus)] transition-colors"
+              />
+            </div>
+
+            <div className="flex items-center gap-1 font-mono text-[10px]">
+              {(["all", "agent", "ts", "script", "action"] as const).map((t) => (
                 <button
-                  key={task.taskKey}
+                  key={t}
                   type="button"
-                  onClick={() => {
-                    if (selectedTask?.taskId !== task.taskId) {
-                      setRunStatusFilter("all");
-                    }
-                    openTask(task.taskId);
-                  }}
-                  className={`relative w-full text-left px-2.5 py-2 rounded-[var(--radius-sm)] border transition-all duration-150 cursor-pointer space-y-1.5 ${
-                    isSelected
-                      ? "bg-[var(--bg-surface-elevated)] border-[var(--border-strong)] text-[var(--text-primary)]"
-                      : "bg-transparent border-transparent hover:bg-[var(--bg-surface-hover)]/70 text-[var(--text-secondary)]"
+                  onClick={() => setTypeFilter(t)}
+                  className={`flex-1 py-0.5 rounded-[var(--radius-xs)] uppercase border transition-colors cursor-pointer ${
+                    typeFilter === t
+                      ? "bg-[var(--primary)] text-[var(--text-inverted)] border-[var(--primary)]"
+                      : "bg-[var(--bg-canvas)] text-[var(--text-muted)] border-[var(--border-default)] hover:text-[var(--text-primary)]"
                   }`}
                 >
-                  <span
-                    className={`absolute left-0 top-2 bottom-2 w-0.5 rounded-r bg-[var(--primary)] transition-opacity duration-150 ${
-                      isSelected ? "opacity-100" : "opacity-0"
-                    }`}
-                  />
+                  {t}
+                </button>
+              ))}
+            </div>
+          </div>
 
-                  <div className="flex items-center justify-between gap-1.5">
-                    <span className="text-xs font-mono font-semibold truncate text-[var(--text-primary)]">
-                      {task.name}
-                    </span>
+          <div className="flex-1 overflow-y-auto p-1.5 space-y-1">
+            {loadingTasks && tasks.length === 0 ? (
+              <div className="py-12 flex items-center justify-center gap-2 text-xs font-mono text-[var(--text-muted)]">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Loading...</span>
+              </div>
+            ) : filteredTasks.length === 0 ? (
+              <div className="py-10 px-3 text-center text-[11px] font-mono text-[var(--text-muted)] space-y-1">
+                <div>{tasks.length === 0 ? "No tasks configured" : "No matching tasks"}</div>
+                {tasks.length === 0 && (
+                  <div className="text-[10px] opacity-70">projects/{activeProjectId}/tasks/</div>
+                )}
+              </div>
+            ) : (
+              filteredTasks.map((task) => {
+                const isSelected = selectedTask?.taskId === task.taskId;
+                const taskType = (task.type ?? "agent").toLowerCase();
+
+                return (
+                  <button
+                    key={task.taskKey}
+                    type="button"
+                    onClick={() => {
+                      if (selectedTask?.taskId !== task.taskId) {
+                        setRunStatusFilter("all");
+                      }
+                      openTask(task.taskId);
+                    }}
+                    className={`relative w-full text-left px-2.5 py-2 rounded-[var(--radius-sm)] border transition-all duration-150 cursor-pointer space-y-1.5 ${
+                      isSelected
+                        ? "bg-[var(--bg-surface-elevated)] border-[var(--border-strong)] text-[var(--text-primary)]"
+                        : "bg-transparent border-transparent hover:bg-[var(--bg-surface-hover)]/70 text-[var(--text-secondary)]"
+                    }`}
+                  >
                     <span
-                      title={task.enabled ? "Enabled (Scheduled)" : "Disabled"}
-                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                        task.enabled ? "bg-emerald-500" : "bg-[var(--border-strong)]"
+                      className={`absolute left-0 top-2 bottom-2 w-0.5 rounded-r bg-[var(--primary)] transition-opacity duration-150 ${
+                        isSelected ? "opacity-100" : "opacity-0"
                       }`}
                     />
-                  </div>
 
-                  <div className="flex items-center gap-1.5 font-mono text-[10px] min-w-0">
-                    <span
-                      className={`uppercase px-1 py-0 rounded-[var(--radius-xs)] border shrink-0 leading-tight ${taskTypeBadgeClass(taskType)}`}
-                    >
-                      {taskType}
-                    </span>
-                    <span className="text-[var(--text-muted)] truncate">{task.cron}</span>
-                  </div>
-                </button>
-              );
-            })
-          )}
-        </div>
-      </aside>
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span className="text-xs font-mono font-semibold truncate text-[var(--text-primary)]">
+                        {task.name}
+                      </span>
+                      <span
+                        title={task.enabled ? "Enabled (Scheduled)" : "Disabled"}
+                        className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                          task.enabled ? "bg-emerald-500" : "bg-[var(--border-strong)]"
+                        }`}
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-1.5 font-mono text-[10px] min-w-0">
+                      <span
+                        className={`uppercase px-1 py-0 rounded-[var(--radius-xs)] border shrink-0 leading-tight ${taskTypeBadgeClass(taskType)}`}
+                      >
+                        {taskType}
+                      </span>
+                      <span className="text-[var(--text-muted)] truncate">{task.cron}</span>
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </aside>
+      </ResizablePane>
 
       {/* 2. Center Column: Main Canvas (Task Info by default, or Selected Run Output) */}
       <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
@@ -599,19 +609,38 @@ export function TasksView() {
                 )}
               </div>
 
-              <button
-                type="button"
-                onClick={() => void handleRunNow(selectedTask.taskId)}
-                disabled={runningTaskId === selectedTask.taskId}
-                className="px-3 py-1 rounded-[var(--radius-sm)] bg-[var(--primary)] text-[var(--text-inverted)] hover:opacity-90 active:scale-95 disabled:opacity-40 text-xs font-mono font-medium transition-all cursor-pointer inline-flex items-center gap-1.5 shrink-0"
-              >
-                {runningTaskId === selectedTask.taskId ? (
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                ) : (
-                  <Play className="w-3 h-3 fill-current" />
-                )}
-                <span>{runningTaskId === selectedTask.taskId ? "Running..." : "Run Now"}</span>
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => void handleRunNow(selectedTask.taskId)}
+                  disabled={runningTaskId === selectedTask.taskId}
+                  className="px-3 py-1 rounded-[var(--radius-sm)] bg-[var(--primary)] text-[var(--text-inverted)] hover:opacity-90 active:scale-95 disabled:opacity-40 text-xs font-mono font-medium transition-all cursor-pointer inline-flex items-center gap-1.5 shrink-0"
+                >
+                  {runningTaskId === selectedTask.taskId ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Play className="w-3 h-3 fill-current" />
+                  )}
+                  <span>{runningTaskId === selectedTask.taskId ? "Running..." : "Run Now"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowRunsSidebar((prev) => !prev)}
+                  title={showRunsSidebar ? "收起右侧运行记录栏" : "展开右侧运行记录栏"}
+                  className={`w-7 h-7 rounded-[var(--radius-sm)] flex items-center justify-center transition-colors cursor-pointer ${
+                    showRunsSidebar
+                      ? "bg-[var(--bg-surface-elevated)] text-[var(--text-primary)] border border-[var(--border-default)]"
+                      : "text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)]"
+                  }`}
+                >
+                  {showRunsSidebar ? (
+                    <PanelRightClose className="w-3.5 h-3.5" />
+                  ) : (
+                    <PanelRightOpen className="w-3.5 h-3.5" />
+                  )}
+                </button>
+              </div>
             </div>
 
             {/* Animated Center Content Driven Solely by Right Panel Selection */}
@@ -651,185 +680,196 @@ export function TasksView() {
         )}
       </div>
 
-      {/* 3. Right Column: Pinned Task Info + Execution History List (272px) */}
-      {selectedTask && (
-        <aside className="w-64 lg:w-72 border-l border-[var(--border-default)] bg-[var(--bg-sidebar)] flex flex-col shrink-0 min-h-0 select-none">
-          {/* 48px Header aligned 1:1 with Left & Center */}
-          <div className="h-12 px-3 border-b border-[var(--border-default)] bg-[var(--bg-header)] flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="font-mono text-xs uppercase tracking-wider font-semibold text-[var(--text-primary)]">
-                Runs
-              </span>
-              <span className="text-[10.5px] font-mono text-[var(--text-muted)] px-1.5 py-0.5 rounded-[var(--radius-xs)] bg-[var(--bg-surface-elevated)] border border-[var(--border-default)] leading-none">
-                {taskExecutions.length}
-                {hasMoreRuns ? "+" : ""}
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => void loadTaskExecutions(selectedTask.taskId, runStatusFilter)}
-              disabled={loadingExecutions}
-              title="Refresh execution history"
-              className="p-1.5 rounded-[var(--radius-xs)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer disabled:opacity-50"
-            >
-              <RotateCw className={`w-3.5 h-3.5 ${loadingExecutions ? "animate-spin" : ""}`} />
-            </button>
-          </div>
-
-          {/* Pinned Top Entry: Task Info (always returns center canvas to Task Configuration & Prompt) */}
-          <div className="p-2 border-b border-[var(--border-default)] shrink-0">
-            <button
-              type="button"
-              onClick={() => openTask(selectedTask.taskId)}
-              className={`relative w-full text-left px-2.5 py-2 rounded-[var(--radius-sm)] border transition-all duration-150 cursor-pointer flex items-center justify-between gap-2 font-mono ${
-                !selectedExecution
-                  ? "bg-[var(--bg-surface-elevated)] border-[var(--border-strong)] text-[var(--text-primary)]"
-                  : "bg-transparent border-transparent hover:bg-[var(--bg-surface-hover)]/70 text-[var(--text-secondary)]"
-              }`}
-            >
-              <span
-                className={`absolute left-0 top-2 bottom-2 w-0.5 rounded-r bg-[var(--primary)] transition-opacity duration-150 ${
-                  !selectedExecution ? "opacity-100" : "opacity-0"
-                }`}
-              />
+      {/* 3. Right Column: Animated Collapsible & Resizable Runs Sidebar */}
+      <ResizablePane
+        edge="left"
+        defaultSize={280}
+        minSize={220}
+        maxSize={480}
+        open={Boolean(selectedTask && showRunsSidebar)}
+        storageKey="studio.tasks.rightWidth"
+      >
+        {selectedTask && (
+          <aside className="w-full h-full border-l border-[var(--border-default)] bg-[var(--bg-sidebar)] flex flex-col min-h-0 overflow-hidden select-none">
+            {/* 48px Header aligned 1:1 with Left & Center */}
+            <div className="h-12 px-3 border-b border-[var(--border-default)] bg-[var(--bg-header)] flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2 min-w-0">
-                <FileCode2 className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0" />
-                <div className="min-w-0">
-                  <div className="text-xs font-semibold truncate">任务信息</div>
-                  <div className="text-[10px] text-[var(--text-muted)] truncate">
-                    配置 · 调度 · 模板
+                <span className="font-mono text-xs uppercase tracking-wider font-semibold text-[var(--text-primary)]">
+                  Runs
+                </span>
+                <span className="text-[10.5px] font-mono text-[var(--text-muted)] px-1.5 py-0.5 rounded-[var(--radius-xs)] bg-[var(--bg-surface-elevated)] border border-[var(--border-default)] leading-none">
+                  {taskExecutions.length}
+                  {hasMoreRuns ? "+" : ""}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => void loadTaskExecutions(selectedTask.taskId, runStatusFilter)}
+                disabled={loadingExecutions}
+                title="Refresh execution history"
+                className="p-1.5 rounded-[var(--radius-xs)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <RotateCw className={`w-3.5 h-3.5 ${loadingExecutions ? "animate-spin" : ""}`} />
+              </button>
+            </div>
+
+            {/* Pinned Top Entry: Task Info (always returns center canvas to Task Configuration & Prompt) */}
+            <div className="p-2 border-b border-[var(--border-default)] shrink-0">
+              <button
+                type="button"
+                onClick={() => openTask(selectedTask.taskId)}
+                className={`relative w-full text-left px-2.5 py-2 rounded-[var(--radius-sm)] border transition-all duration-150 cursor-pointer flex items-center justify-between gap-2 font-mono ${
+                  !selectedExecution
+                    ? "bg-[var(--bg-surface-elevated)] border-[var(--border-strong)] text-[var(--text-primary)]"
+                    : "bg-transparent border-transparent hover:bg-[var(--bg-surface-hover)]/70 text-[var(--text-secondary)]"
+                }`}
+              >
+                <span
+                  className={`absolute left-0 top-2 bottom-2 w-0.5 rounded-r bg-[var(--primary)] transition-opacity duration-150 ${
+                    !selectedExecution ? "opacity-100" : "opacity-0"
+                  }`}
+                />
+                <div className="flex items-center gap-2 min-w-0">
+                  <FileCode2 className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold truncate">任务信息</div>
+                    <div className="text-[10px] text-[var(--text-muted)] truncate">
+                      配置 · 调度 · 模板
+                    </div>
                   </div>
                 </div>
-              </div>
-            </button>
-          </div>
-
-          {/* Run Status Filter */}
-          <div className="px-3 py-2 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2 font-mono text-[10px] shrink-0">
-            <span className="uppercase tracking-wider text-[var(--text-muted)]">
-              运行记录 ({taskExecutions.length}
-              {hasMoreRuns ? "+" : ""})
-            </span>
-            <div className="flex items-center gap-0.5">
-              {(["all", "success", "failed"] as const).map((st) => (
-                <button
-                  key={st}
-                  type="button"
-                  onClick={() => setRunStatusFilter(st)}
-                  className={`px-1.5 py-0.5 rounded-[var(--radius-xs)] uppercase transition-colors cursor-pointer ${
-                    runStatusFilter === st
-                      ? "bg-[var(--primary)] text-[var(--text-inverted)]"
-                      : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                  }`}
-                >
-                  {st === "success" ? "ok" : st === "failed" ? "err" : "all"}
-                </button>
-              ))}
+              </button>
             </div>
-          </div>
 
-          {/* Scrollable Execution History with Threshold-Triggered Infinite Scroll */}
-          <div ref={runsScrollRef} className="flex-1 overflow-y-auto p-1.5 space-y-1 font-mono">
-            {isLoadingRuns && taskExecutions.length === 0 ? (
-              <div className="py-10 flex items-center justify-center gap-2 text-xs text-[var(--text-muted)] animate-delayed-fade">
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                <span>Loading runs...</span>
+            {/* Run Status Filter */}
+            <div className="px-3 py-2 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2 font-mono text-[10px] shrink-0">
+              <span className="uppercase tracking-wider text-[var(--text-muted)]">
+                运行记录 ({taskExecutions.length}
+                {hasMoreRuns ? "+" : ""})
+              </span>
+              <div className="flex items-center gap-0.5">
+                {(["all", "success", "failed"] as const).map((st) => (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => setRunStatusFilter(st)}
+                    className={`px-1.5 py-0.5 rounded-[var(--radius-xs)] uppercase transition-colors cursor-pointer ${
+                      runStatusFilter === st
+                        ? "bg-[var(--primary)] text-[var(--text-inverted)]"
+                        : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                    }`}
+                  >
+                    {st === "success" ? "ok" : st === "failed" ? "err" : "all"}
+                  </button>
+                ))}
               </div>
-            ) : taskExecutions.length === 0 ? (
-              <div className="py-10 px-3 text-center text-[11px] text-[var(--text-muted)] space-y-1">
-                <div>{runStatusFilter === "all" ? "暂无运行记录" : "无匹配状态的记录"}</div>
-                {runStatusFilter === "all" && (
-                  <div className="text-[10px] opacity-70">点击 Run Now 手动执行</div>
-                )}
-              </div>
-            ) : (
-              <>
-                {taskExecutions.map((exec) => {
-                  const isSelected = selectedExecution?.executionId === exec.executionId;
-                  const isOk = exec.status === "success";
-                  return (
-                    <button
-                      key={exec.executionId}
-                      type="button"
-                      onClick={() => openTask(selectedTask.taskId, exec.executionId)}
-                      className={`relative w-full text-left px-2.5 py-2 rounded-[var(--radius-sm)] border transition-all duration-150 cursor-pointer space-y-1 ${
-                        isSelected
-                          ? "bg-[var(--bg-surface-elevated)] border-[var(--border-strong)] text-[var(--text-primary)]"
-                          : "bg-transparent border-transparent hover:bg-[var(--bg-surface-hover)]/70 text-[var(--text-secondary)]"
-                      }`}
-                    >
-                      <span
-                        className={`absolute left-0 top-2 bottom-2 w-0.5 rounded-r bg-[var(--primary)] transition-opacity duration-150 ${
-                          isSelected ? "opacity-100" : "opacity-0"
+            </div>
+
+            {/* Scrollable Execution History with Threshold-Triggered Infinite Scroll */}
+            <div ref={runsScrollRef} className="flex-1 overflow-y-auto p-1.5 space-y-1 font-mono">
+              {isLoadingRuns && taskExecutions.length === 0 ? (
+                <div className="py-10 flex items-center justify-center gap-2 text-xs text-[var(--text-muted)] animate-delayed-fade">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Loading runs...</span>
+                </div>
+              ) : taskExecutions.length === 0 ? (
+                <div className="py-10 px-3 text-center text-[11px] text-[var(--text-muted)] space-y-1">
+                  <div>{runStatusFilter === "all" ? "暂无运行记录" : "无匹配状态的记录"}</div>
+                  {runStatusFilter === "all" && (
+                    <div className="text-[10px] opacity-70">点击 Run Now 手动执行</div>
+                  )}
+                </div>
+              ) : (
+                <>
+                  {taskExecutions.map((exec) => {
+                    const isSelected = selectedExecution?.executionId === exec.executionId;
+                    const isOk = exec.status === "success";
+                    return (
+                      <button
+                        key={exec.executionId}
+                        type="button"
+                        onClick={() => openTask(selectedTask.taskId, exec.executionId)}
+                        className={`relative w-full text-left px-2.5 py-2 rounded-[var(--radius-sm)] border transition-all duration-150 cursor-pointer space-y-1 ${
+                          isSelected
+                            ? "bg-[var(--bg-surface-elevated)] border-[var(--border-strong)] text-[var(--text-primary)]"
+                            : "bg-transparent border-transparent hover:bg-[var(--bg-surface-hover)]/70 text-[var(--text-secondary)]"
                         }`}
-                      />
+                      >
+                        <span
+                          className={`absolute left-0 top-2 bottom-2 w-0.5 rounded-r bg-[var(--primary)] transition-opacity duration-150 ${
+                            isSelected ? "opacity-100" : "opacity-0"
+                          }`}
+                        />
 
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                              isOk ? "bg-emerald-500" : "bg-red-500"
-                            }`}
-                          />
-                          <span
-                            className={`text-[10.5px] font-semibold uppercase ${
-                              isOk ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
-                            }`}
-                          >
-                            {exec.status}
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                isOk ? "bg-emerald-500" : "bg-red-500"
+                              }`}
+                            />
+                            <span
+                              className={`text-[10.5px] font-semibold uppercase ${
+                                isOk
+                                  ? "text-emerald-600 dark:text-emerald-400"
+                                  : "text-red-600 dark:text-red-400"
+                              }`}
+                            >
+                              {exec.status}
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-[var(--text-muted)] inline-flex items-center gap-1 shrink-0">
+                            <Clock className="w-2.5 h-2.5 opacity-70" />
+                            <span>{formatDuration(exec.durationMs)}</span>
                           </span>
                         </div>
-                        <span className="text-[10px] text-[var(--text-muted)] inline-flex items-center gap-1 shrink-0">
-                          <Clock className="w-2.5 h-2.5 opacity-70" />
-                          <span>{formatDuration(exec.durationMs)}</span>
-                        </span>
-                      </div>
 
-                      <div className="flex items-center justify-between gap-2 text-[10px] text-[var(--text-muted)]">
-                        <span className="truncate">
-                          {exec.startedAt ? formatTimeAgo(exec.startedAt) : "-"}
-                        </span>
-                        <span className="inline-flex items-center gap-1 shrink-0 opacity-80">
-                          {exec.sessionId ? (
-                            <MessageSquare className="w-2.5 h-2.5 text-indigo-400" />
-                          ) : (
-                            <Terminal className="w-2.5 h-2.5 text-sky-400" />
-                          )}
-                          <span>{exec.executionId.slice(5, 13)}</span>
-                        </span>
-                      </div>
-                    </button>
-                  );
-                })}
-
-                {/* Infinite Scroll Sentinel / Loading / End-of-List Footer */}
-                {hasMoreRuns ? (
-                  <div ref={runsSentinelRef} className="py-2 flex items-center justify-center">
-                    {loadingMoreRuns ? (
-                      <span className="inline-flex items-center gap-1.5 text-[10.5px] text-[var(--text-muted)]">
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                        <span>加载更多...</span>
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => void loadMoreRuns()}
-                        className="px-2.5 py-1 rounded-[var(--radius-xs)] text-[10.5px] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer"
-                      >
-                        加载更多记录
+                        <div className="flex items-center justify-between gap-2 text-[10px] text-[var(--text-muted)]">
+                          <span className="truncate">
+                            {exec.startedAt ? formatTimeAgo(exec.startedAt) : "-"}
+                          </span>
+                          <span className="inline-flex items-center gap-1 shrink-0 opacity-80">
+                            {exec.sessionId ? (
+                              <MessageSquare className="w-2.5 h-2.5 text-indigo-400" />
+                            ) : (
+                              <Terminal className="w-2.5 h-2.5 text-sky-400" />
+                            )}
+                            <span>{exec.executionId.slice(5, 13)}</span>
+                          </span>
+                        </div>
                       </button>
-                    )}
-                  </div>
-                ) : (
-                  <div className="py-2 text-center text-[10px] text-[var(--text-muted)] opacity-60">
-                    已加载全部 {taskExecutions.length} 条记录
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </aside>
-      )}
+                    );
+                  })}
+
+                  {/* Infinite Scroll Sentinel / Loading / End-of-List Footer */}
+                  {hasMoreRuns ? (
+                    <div ref={runsSentinelRef} className="py-2 flex items-center justify-center">
+                      {loadingMoreRuns ? (
+                        <span className="inline-flex items-center gap-1.5 text-[10.5px] text-[var(--text-muted)]">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          <span>加载更多...</span>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void loadMoreRuns()}
+                          className="px-2.5 py-1 rounded-[var(--radius-xs)] text-[10.5px] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer"
+                        >
+                          加载更多记录
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="py-2 text-center text-[10px] text-[var(--text-muted)] opacity-60">
+                      已加载全部 {taskExecutions.length} 条记录
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </aside>
+        )}
+      </ResizablePane>
     </div>
   );
 }

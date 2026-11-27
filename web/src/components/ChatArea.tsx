@@ -231,7 +231,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         onScroll={handleScroll}
         className={
           embedded
-            ? `flex-1 overflow-y-auto p-5 ${isClosed ? "pb-20" : "pb-44"} space-y-6`
+            ? `flex-1 overflow-y-auto px-4 md:px-8 pt-6 ${isClosed ? "pb-24" : "pb-44"} space-y-6`
             : "flex-1 overflow-y-auto px-4 md:px-8 pt-8 pb-48 space-y-8"
         }
       >
@@ -291,14 +291,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             const isUser = msg.role === "user";
 
             return (
-              <div
-                key={msg.id}
-                className={
-                  embedded
-                    ? "w-full animate-msg-enter"
-                    : "max-w-3xl mx-auto w-full animate-msg-enter"
-                }
-              >
+              <div key={msg.id} className="max-w-3xl mx-auto w-full animate-msg-enter">
                 {isUser ? (
                   /* User Message: Aligned strictly on the shared left axis without boxy card */
                   <div className="w-full space-y-2">
@@ -817,13 +810,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       {/* Floating Input Composer or Closed Session Banner */}
       <div className="absolute bottom-0 inset-x-0 z-20 pointer-events-none pb-4 pt-10 bg-gradient-to-t from-[var(--bg-canvas)] via-[var(--bg-canvas)]/90 via-50% to-transparent">
         {isClosed ? (
-          <div
-            className={
-              embedded
-                ? "px-5 w-full pointer-events-auto select-none"
-                : "max-w-3xl mx-auto px-4 w-full pointer-events-auto select-none"
-            }
-          >
+          <div className="max-w-3xl mx-auto px-4 w-full pointer-events-auto select-none">
             <div className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)]/95 backdrop-blur-md text-xs text-[var(--text-muted)] font-mono">
               <Archive className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0" />
               <span>{closedReason || "This session is closed and read-only."}</span>

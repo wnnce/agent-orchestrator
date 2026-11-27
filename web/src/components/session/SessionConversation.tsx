@@ -71,10 +71,7 @@ export interface SessionConversationProps {
 
 function isTerminalStatus(status?: SessionRoute["status"]): boolean {
   return (
-    status === "closed" ||
-    status === "archived" ||
-    status === "closing" ||
-    status === "failed"
+    status === "closed" || status === "archived" || status === "closing" || status === "failed"
   );
 }
 
@@ -196,8 +193,7 @@ export function SessionConversation({
     };
   }, [sessionId]);
 
-  const matchingActiveSession =
-    activeSession?.sessionId === sessionId ? activeSession : null;
+  const matchingActiveSession = activeSession?.sessionId === sessionId ? activeSession : null;
   const currentSession = sessionDetail || matchingActiveSession;
 
   const isTaskSession = currentSession?.source === "task";
@@ -206,9 +202,9 @@ export function SessionConversation({
   );
   const isTerminal = Boolean(
     sessionNotFound ||
-      isTerminalStatus(currentSession?.status) ||
-      (currentSession?.deletedAt && currentSession.deletedAt > 0) ||
-      hasTerminalEvent,
+    isTerminalStatus(currentSession?.status) ||
+    (currentSession?.deletedAt && currentSession.deletedAt > 0) ||
+    hasTerminalEvent,
   );
   const isClosed = Boolean(readOnly || isTaskSession || isTerminal);
 
@@ -509,120 +505,122 @@ export function SessionConversation({
     return (
       <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden bg-[var(--bg-canvas)] select-text">
         {/* Compact Run Meta + Sub-tabs Bar (matches TaskExecutionDetail 1:1) */}
-        <div className="px-5 py-2.5 border-b border-[var(--border-default)] bg-[var(--bg-surface)] shrink-0 space-y-2">
-          <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-xs">
-            <div className="flex flex-wrap items-center gap-2 min-w-0">
-              {taskExecution && (
-                <span
-                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[var(--radius-xs)] text-[10px] font-semibold border uppercase ${
-                    taskExecution.status === "success"
-                      ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
-                      : "text-red-600 dark:text-red-400 bg-red-500/10 border-red-500/20"
+        <div className="px-6 py-2.5 border-b border-[var(--border-default)] bg-[var(--bg-surface)] shrink-0">
+          <div className="max-w-4xl mx-auto w-full space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-xs">
+              <div className="flex flex-wrap items-center gap-2 min-w-0">
+                {taskExecution && (
+                  <span
+                    className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[var(--radius-xs)] text-[10px] font-semibold border uppercase ${
+                      taskExecution.status === "success"
+                        ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
+                        : "text-red-600 dark:text-red-400 bg-red-500/10 border-red-500/20"
+                    }`}
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full ${
+                        taskExecution.status === "success" ? "bg-emerald-500" : "bg-red-500"
+                      }`}
+                    />
+                    {taskExecution.status}
+                  </span>
+                )}
+
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const ok = await copyToClipboard(idToCopy);
+                    if (ok) {
+                      setCopiedId(true);
+                      setTimeout(() => setCopiedId(false), 1600);
+                      toast.success("已复制 ID");
+                    }
+                  }}
+                  title={`点击复制 ${idToCopy}`}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[var(--radius-xs)] bg-[var(--bg-canvas)] border border-[var(--border-default)] text-[10.5px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-strong)] transition-colors cursor-pointer"
+                >
+                  <span>{idToCopy.slice(0, 18)}...</span>
+                  {copiedId ? (
+                    <Check className="w-3 h-3 text-emerald-500" />
+                  ) : (
+                    <Copy className="w-3 h-3 opacity-60" />
+                  )}
+                </button>
+
+                {taskExecution && (
+                  <span className="inline-flex items-center gap-1 text-[10.5px] text-[var(--text-muted)]">
+                    <Clock className="w-3 h-3" />
+                    <span>{formatDuration(taskExecution.durationMs)}</span>
+                  </span>
+                )}
+
+                {taskExecution?.startedAt && (
+                  <span className="text-[10.5px] text-[var(--text-muted)] hidden lg:inline">
+                    {formatDateTime(taskExecution.startedAt)}
+                  </span>
+                )}
+              </div>
+
+              {/* Clean inline view tabs */}
+              <div className="flex items-center gap-0.5 bg-[var(--bg-canvas)] p-0.5 rounded-[var(--radius-sm)] border border-[var(--border-default)] text-[10.5px]">
+                <button
+                  type="button"
+                  onClick={() => setEmbeddedTab("chat")}
+                  className={`px-2 py-0.5 rounded-[var(--radius-xs)] transition-colors cursor-pointer inline-flex items-center gap-1 ${
+                    embeddedTab === "chat"
+                      ? "bg-[var(--primary)] text-[var(--text-inverted)] font-medium"
+                      : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                   }`}
                 >
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full ${
-                      taskExecution.status === "success" ? "bg-emerald-500" : "bg-red-500"
-                    }`}
-                  />
-                  {taskExecution.status}
-                </span>
-              )}
-
-              <button
-                type="button"
-                onClick={async () => {
-                  const ok = await copyToClipboard(idToCopy);
-                  if (ok) {
-                    setCopiedId(true);
-                    setTimeout(() => setCopiedId(false), 1600);
-                    toast.success("已复制 ID");
-                  }
-                }}
-                title={`点击复制 ${idToCopy}`}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[var(--radius-xs)] bg-[var(--bg-canvas)] border border-[var(--border-default)] text-[10.5px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-strong)] transition-colors cursor-pointer"
-              >
-                <span>{idToCopy.slice(0, 18)}...</span>
-                {copiedId ? (
-                  <Check className="w-3 h-3 text-emerald-500" />
-                ) : (
-                  <Copy className="w-3 h-3 opacity-60" />
-                )}
-              </button>
-
-              {taskExecution && (
-                <span className="inline-flex items-center gap-1 text-[10.5px] text-[var(--text-muted)]">
-                  <Clock className="w-3 h-3" />
-                  <span>{formatDuration(taskExecution.durationMs)}</span>
-                </span>
-              )}
-
-              {taskExecution?.startedAt && (
-                <span className="text-[10.5px] text-[var(--text-muted)] hidden lg:inline">
-                  {formatDateTime(taskExecution.startedAt)}
-                </span>
-              )}
+                  <MessageSquare className="w-3 h-3" />
+                  <span>对话</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEmbeddedTab("events")}
+                  className={`px-2 py-0.5 rounded-[var(--radius-xs)] transition-colors cursor-pointer inline-flex items-center gap-1 ${
+                    embeddedTab === "events"
+                      ? "bg-[var(--primary)] text-[var(--text-inverted)] font-medium"
+                      : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                  }`}
+                >
+                  <Activity className="w-3 h-3" />
+                  <span>事件 ({events.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEmbeddedTab("artifacts")}
+                  className={`px-2 py-0.5 rounded-[var(--radius-xs)] transition-colors cursor-pointer inline-flex items-center gap-1 ${
+                    embeddedTab === "artifacts"
+                      ? "bg-[var(--primary)] text-[var(--text-inverted)] font-medium"
+                      : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                  }`}
+                >
+                  <FileCode className="w-3 h-3" />
+                  <span>产物 ({visibleArtifacts.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEmbeddedTab("info")}
+                  className={`px-2 py-0.5 rounded-[var(--radius-xs)] transition-colors cursor-pointer inline-flex items-center gap-1 ${
+                    embeddedTab === "info"
+                      ? "bg-[var(--primary)] text-[var(--text-inverted)] font-medium"
+                      : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                  }`}
+                >
+                  <Info className="w-3 h-3" />
+                  <span>状态与用量</span>
+                </button>
+              </div>
             </div>
 
-            {/* Clean inline view tabs */}
-            <div className="flex items-center gap-0.5 bg-[var(--bg-canvas)] p-0.5 rounded-[var(--radius-sm)] border border-[var(--border-default)] text-[10.5px]">
-              <button
-                type="button"
-                onClick={() => setEmbeddedTab("chat")}
-                className={`px-2 py-0.5 rounded-[var(--radius-xs)] transition-colors cursor-pointer inline-flex items-center gap-1 ${
-                  embeddedTab === "chat"
-                    ? "bg-[var(--primary)] text-[var(--text-inverted)] font-medium"
-                    : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                }`}
-              >
-                <MessageSquare className="w-3 h-3" />
-                <span>对话</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setEmbeddedTab("events")}
-                className={`px-2 py-0.5 rounded-[var(--radius-xs)] transition-colors cursor-pointer inline-flex items-center gap-1 ${
-                  embeddedTab === "events"
-                    ? "bg-[var(--primary)] text-[var(--text-inverted)] font-medium"
-                    : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                }`}
-              >
-                <Activity className="w-3 h-3" />
-                <span>事件 ({events.length})</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setEmbeddedTab("artifacts")}
-                className={`px-2 py-0.5 rounded-[var(--radius-xs)] transition-colors cursor-pointer inline-flex items-center gap-1 ${
-                  embeddedTab === "artifacts"
-                    ? "bg-[var(--primary)] text-[var(--text-inverted)] font-medium"
-                    : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                }`}
-              >
-                <FileCode className="w-3 h-3" />
-                <span>产物 ({visibleArtifacts.length})</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setEmbeddedTab("info")}
-                className={`px-2 py-0.5 rounded-[var(--radius-xs)] transition-colors cursor-pointer inline-flex items-center gap-1 ${
-                  embeddedTab === "info"
-                    ? "bg-[var(--primary)] text-[var(--text-inverted)] font-medium"
-                    : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                }`}
-              >
-                <Info className="w-3 h-3" />
-                <span>状态与用量</span>
-              </button>
-            </div>
+            {taskExecution?.errorMessage && (
+              <div className="flex items-start gap-2 px-3 py-1.5 rounded-[var(--radius-sm)] border border-red-500/30 bg-red-500/10 text-[11px] text-red-600 dark:text-red-400 font-mono">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-red-500" />
+                <span className="break-words leading-relaxed">{taskExecution.errorMessage}</span>
+              </div>
+            )}
           </div>
-
-          {taskExecution?.errorMessage && (
-            <div className="flex items-start gap-2 px-3 py-1.5 rounded-[var(--radius-sm)] border border-red-500/30 bg-red-500/10 text-[11px] text-red-600 dark:text-red-400 font-mono">
-              <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-red-500" />
-              <span className="break-words leading-relaxed">{taskExecution.errorMessage}</span>
-            </div>
-          )}
         </div>
 
         {/* Embedded Tab Content */}
@@ -646,9 +644,9 @@ export function SessionConversation({
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.14, ease: EASE_OUT_EXPO }}
-              className="flex-1 flex flex-col min-h-0 p-5"
+              className="flex-1 flex flex-col min-h-0 px-6 py-5"
             >
-              <div className="flex-1 flex flex-col min-h-0 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] overflow-hidden">
+              <div className="max-w-4xl mx-auto w-full flex-1 flex flex-col min-h-0 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] overflow-hidden">
                 <div className="px-4 py-2 border-b border-[var(--border-default)] bg-[var(--bg-table-header)] shrink-0">
                   <div className="relative max-w-sm">
                     <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
@@ -719,9 +717,9 @@ export function SessionConversation({
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.14, ease: EASE_OUT_EXPO }}
-              className="flex-1 overflow-y-auto p-5"
+              className="flex-1 overflow-y-auto px-6 py-5"
             >
-              <div className="w-full space-y-2.5">
+              <div className="max-w-4xl mx-auto w-full space-y-2.5">
                 {visibleArtifacts.length === 0 ? (
                   <div className="text-center py-10 text-xs font-mono text-[var(--text-muted)]">
                     本次执行暂无生成产物
@@ -762,9 +760,9 @@ export function SessionConversation({
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.14, ease: EASE_OUT_EXPO }}
-              className="flex-1 overflow-y-auto p-5 font-mono text-xs"
+              className="flex-1 overflow-y-auto px-6 py-5 font-mono text-xs"
             >
-              <div className="w-full space-y-4">
+              <div className="max-w-4xl mx-auto w-full space-y-4">
                 {/* Session & Model Usage */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] overflow-hidden text-[11px]">
@@ -779,7 +777,9 @@ export function SessionConversation({
                       {currentSession?.runtime && (
                         <div>
                           <span className="text-[var(--text-muted)]">Runtime: </span>
-                          <span className="text-[var(--text-primary)]">{currentSession.runtime}</span>
+                          <span className="text-[var(--text-primary)]">
+                            {currentSession.runtime}
+                          </span>
                         </div>
                       )}
                       {currentSession?.model && (
