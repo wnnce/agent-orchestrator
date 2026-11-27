@@ -21,7 +21,7 @@ import {
   createDocsRouter,
   createProjectsRouter,
   createTasksRouter,
-  createActionsRouter,
+  createToolsRouter,
   createScheduledJobsRouter,
   createSessionsRouter,
   createPipelinesRouter,
@@ -141,7 +141,7 @@ export class Gateway {
     // Domain routes
     apiV1.route("/", createProjectsRouter({ projects: this.projects, store: this.store }));
     apiV1.route("/", createTasksRouter({ projects: this.projects, store: this.store }));
-    apiV1.route("/", createActionsRouter({ store: this.store }));
+    apiV1.route("/", createToolsRouter({ store: this.store }));
     apiV1.route("/", createScheduledJobsRouter({ store: this.store }));
     apiV1.route(
       "/",

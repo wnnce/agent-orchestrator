@@ -3,7 +3,6 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
-import { ActionRegistry, builtinActions } from "../src/actions/index.ts";
 import { ArtifactStore } from "../src/artifacts/store.ts";
 import type { ProjectConfig } from "../src/domain/types.ts";
 import { Logger } from "../src/observability/logger.ts";
@@ -17,9 +16,8 @@ import {
   node,
 } from "../src/pipeline/index.ts";
 import { ProjectRuntime } from "../src/project/runtime.ts";
-import { actionToJsonSchema, resolveActionsForSite } from "../src/runtime/action-bridge.ts";
 import { ACPMcpBridge } from "../src/runtime/acp/mcp-bridge.ts";
-import { bridgeActionsToPiTools } from "../src/runtime/pi/tools.ts";
+import { piToolsFor } from "../src/runtime/pi/tools.ts";
 import {
   FAKE_CAPABILITIES,
   type AgentRuntime,
@@ -28,6 +26,8 @@ import {
   type RuntimeSession,
   type RuntimeTurn,
 } from "../src/runtime/runtime.ts";
+import type { PipelineOrigin, TaskOrigin } from "../src/domain/origin.ts";
+import { toJsonSchema, type SessionTools, type ToolCallResult } from "../src/tools/index.ts";
 import { WorkspaceManager } from "../src/workspace/workspace.ts";
 
 const tempDirs: string[] = [];
@@ -83,17 +83,15 @@ class InspectableScriptedRuntime implements AgentRuntime {
     (args: {
       input: string;
       context: RuntimeContext;
-      callAction: (name: string, params: Record<string, unknown>) => Promise<unknown>;
+      callAction: (name: string, params: Record<string, unknown>) => Promise<ToolCallResult>;
     }) => Promise<string | void> | string | void
   > = [];
-
-  constructor(private readonly actionRegistry: ActionRegistry) {}
 
   enqueue(
     handler: (args: {
       input: string;
       context: RuntimeContext;
-      callAction: (name: string, params: Record<string, unknown>) => Promise<unknown>;
+      callAction: (name: string, params: Record<string, unknown>) => Promise<ToolCallResult>;
     }) => Promise<string | void> | string | void,
   ): void {
     this.handlers.push(handler);
@@ -130,11 +128,8 @@ class InspectableScriptedRuntime implements AgentRuntime {
             input,
             context,
             callAction: async (name, params) => {
-              const actionCtx = context.createActionContext?.({ turnId });
-              if (!actionCtx) throw new Error("missing createActionContext");
-              return this.actionRegistry.execute(name, params, actionCtx, {
-                parameterOverride: context.actionParameterOverrides?.[name],
-              });
+              if (!context.tools) throw new Error("the session has no tools");
+              return context.tools.call(name, params);
             },
           });
           if (typeof maybe === "string") outputText = maybe;
@@ -441,8 +436,6 @@ export default definePipeline({
 
     const store = new MemoryStore();
     const logger = new Logger({ level: "error" });
-    const actionRegistry = new ActionRegistry(logger, store);
-    actionRegistry.registerAll(builtinActions);
 
     const project: ProjectConfig = {
       id: "sdk-demo",
@@ -468,7 +461,7 @@ export default definePipeline({
     );
     await workspaces.syncBase(project);
 
-    const runtime = new InspectableScriptedRuntime(actionRegistry);
+    const runtime = new InspectableScriptedRuntime();
     const artifacts = new ArtifactStore(artifactDir, store);
     const pipelineHub = new PipelineEventHub();
     const projectRuntime = new ProjectRuntime(
@@ -482,11 +475,6 @@ export default definePipeline({
       undefined,
       undefined,
       { pipelineEventHub: pipelineHub },
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      actionRegistry,
     );
     await projectRuntime.start();
 
@@ -502,47 +490,46 @@ export default definePipeline({
         }),
       ).rejects.toBeInstanceOf(PipelineValidationError);
 
-      // 2. Verify dynamic tool schemas across runtimes (resolveActionsForSite / Pi / ACP)
-      const designOverrides = engine.getActionParameterOverridesForNode("typed-flow", "design");
-      const designActions = resolveActionsForSite(actionRegistry, {
-        actionScope: "pipeline",
-        actionParameterOverrides: designOverrides,
+      // 2. Each runtime offers pipeline_next with the data the next node declares
+      const nodeOwner = (nodeId: string): PipelineOrigin => ({
+        kind: "pipeline",
+        pipelineId: "typed-flow",
+        runId: "run_x",
+        nodeId,
+        nodeRunId: `pnr_${nodeId}`,
       });
-      const designNextJson = actionToJsonSchema(
-        designActions.find((a) => a.name === "pipeline_next")!.parameters,
-      ) as { properties?: Record<string, unknown>; required?: string[] };
+      const sessionToolsAt = (nodeId: string): SessionTools =>
+        projectRuntime["sessionTools"](`ses_${nodeId}`, "/tmp", nodeOwner(nodeId));
+
+      const designNext = sessionToolsAt("design").specs.find((t) => t.name === "pipeline_next")!;
+      const designNextJson = designNext.inputSchema as {
+        properties?: Record<string, unknown>;
+        required?: string[];
+      };
       expect(designNextJson.required).toContain("data");
       expect(designNextJson.properties?.data).toMatchObject({
         type: "object",
         required: ["suggestedBranch"],
       });
+      expect(toJsonSchema(engine.pipelineNextInput("typed-flow", "design")!)).toEqual(
+        designNextJson,
+      );
 
       // For `implement` -> next node is `untyped_step` (no input schema) -> `data` is omitted!
-      const implOverrides = engine.getActionParameterOverridesForNode("typed-flow", "implement");
-      const piImplTools = bridgeActionsToPiTools(actionRegistry, () => ({
-        project,
-        workspacePath: "/tmp",
-        sessionId: "ses_impl",
-        actionScope: "pipeline",
-        actionParameterOverrides: implOverrides,
-      }));
-      const piNextParams = piImplTools.find((t) => t.name === "pipeline_next")!.parameters as unknown as {
+      const piImplTools = piToolsFor(sessionToolsAt("implement"));
+      const piNextParams = piImplTools.find((t) => t.name === "pipeline_next")!
+        .parameters as unknown as {
         properties?: Record<string, unknown>;
         required?: string[];
       };
       expect(piNextParams.properties?.data).toBeUndefined();
       expect(piNextParams.properties?.metadata).toBeDefined();
 
-      // Verify ACP MCP bridge also exposes per-session overridden schema on tools/list
-      const acpBridge = new ACPMcpBridge(actionRegistry);
-      acpBridge.registerSession("bridge-design", () => ({
-        project,
-        workspacePath: "/tmp",
-        sessionId: "ses_design",
-        actionScope: "pipeline",
-        actionParameterOverrides: designOverrides,
-      }));
-      const mcpServer = acpBridge.mcpServerForSession("bridge-design", undefined, "pipeline");
+      // The ACP MCP bridge lists the same per-session schema on tools/list
+      const acpBridge = new ACPMcpBridge();
+      const designTools = sessionToolsAt("design");
+      acpBridge.registerSession("bridge-design", () => designTools);
+      const mcpServer = acpBridge.mcpServerForSession("bridge-design", designTools);
       expect(mcpServer && "type" in mcpServer ? mcpServer.type : undefined).toBe("http");
       if (mcpServer && "type" in mcpServer && mcpServer.type === "http") {
         const res = await fetch(mcpServer.url, {
@@ -567,30 +554,30 @@ export default definePipeline({
       runtime.enqueue(async ({ input, callAction }) => {
         expect(input).toContain("Design for acme/demo#42 (source=github-webhook)");
 
-        const rejected = (await callAction("pipeline_next", {
+        const rejected = await callAction("pipeline_next", {
           summary: "missing data",
           content: "forgot data",
-        })) as { success: boolean; error?: string };
-        expect(rejected.success).toBe(false);
+        });
+        expect(rejected.ok).toBe(false);
 
-        const accepted = (await callAction("pipeline_next", {
+        const accepted = await callAction("pipeline_next", {
           summary: "Design ready",
           content: "Use feat/issue-42",
           data: { suggestedBranch: "feat/issue-42" },
           metadata: { designTag: "v1" },
-        })) as { success: boolean };
-        expect(accepted.success).toBe(true);
+        });
+        expect(accepted.ok).toBe(true);
       });
 
       //    Turn 2 (implement attempt #1): receives {{ data.suggestedBranch }}, advances to untyped_step
       runtime.enqueue(async ({ input, callAction }) => {
         expect(input).toContain("Implement on branch feat/issue-42");
-        const ok = (await callAction("pipeline_next", {
+        const ok = await callAction("pipeline_next", {
           summary: "Implemented v1",
           content: "Code done",
           metadata: { commitSha: "abc123" },
-        })) as { success: boolean };
-        expect(ok.success).toBe(true);
+        });
+        expect(ok.ok).toBe(true);
       });
 
       //    Turn 3 (implement attempt #2 after watch_pr prev rework):
@@ -598,12 +585,12 @@ export default definePipeline({
       runtime.enqueue(async ({ input, callAction }) => {
         expect(input).toContain("Implement on branch feat/issue-42");
         expect(input).toContain("Fix formatting on PR #99");
-        const ok = (await callAction("pipeline_next", {
+        const ok = await callAction("pipeline_next", {
           summary: "Implemented v2",
           content: "Lint fixed",
           metadata: { commitSha: "def456" },
-        })) as { success: boolean };
-        expect(ok.success).toBe(true);
+        });
+        expect(ok.ok).toBe(true);
       });
 
       const started = await engine.startRun({
@@ -693,16 +680,6 @@ export default definePipeline({
 
     const store = new MemoryStore();
     const logger = new Logger({ level: "error" });
-    const actionRegistry = new ActionRegistry(logger, store);
-    actionRegistry.registerAll(builtinActions);
-
-    // Scope isolation: visible in conversation & task, hidden in pipeline
-    expect(actionRegistry.list("conversation").map((a) => a.name)).toContain("list_project_pipelines");
-    expect(actionRegistry.list("conversation").map((a) => a.name)).toContain("dispatch_pipeline_run");
-    expect(actionRegistry.list("task").map((a) => a.name)).toContain("list_project_pipelines");
-    expect(actionRegistry.list("task").map((a) => a.name)).toContain("dispatch_pipeline_run");
-    expect(actionRegistry.list("pipeline").map((a) => a.name)).not.toContain("list_project_pipelines");
-    expect(actionRegistry.list("pipeline").map((a) => a.name)).not.toContain("dispatch_pipeline_run");
 
     const project: ProjectConfig = {
       id: "dispatch-demo",
@@ -728,7 +705,7 @@ export default definePipeline({
     );
     await workspaces.syncBase(project);
 
-    const runtime = new InspectableScriptedRuntime(actionRegistry);
+    const runtime = new InspectableScriptedRuntime();
     const artifacts = new ArtifactStore(artifactDir, store);
     const pipelineHub = new PipelineEventHub();
     const projectRuntime = new ProjectRuntime(
@@ -742,106 +719,88 @@ export default definePipeline({
       undefined,
       undefined,
       { pipelineEventHub: pipelineHub },
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      actionRegistry,
     );
     await projectRuntime.start();
 
     try {
-      const convCtx = projectRuntime["createActionContext"]({
-        sessionId: "ses_chat_1",
-        workspacePath: repoDir,
-        scope: "conversation",
-      });
+      const chat: SessionTools = projectRuntime["sessionTools"]("ses_chat_1", repoDir, undefined);
+      type Listed = {
+        pipelines: Array<{ id: string; entryInputSchema?: { required?: string[] } }>;
+      };
+      type Dispatched = { created: boolean; runId: string; status: string; currentNodeId: string };
 
       // 1. list_project_pipelines hides disabled by default and exposes entryInputSchema
-      const listEnabled = await actionRegistry.execute<{
-        projectId: string;
-        pipelines: Array<{ id: string; entryInputSchema?: { required?: string[] } }>;
-      }>("list_project_pipelines", {}, convCtx);
-      expect(listEnabled.success).toBe(true);
-      expect(listEnabled.data?.pipelines.map((p) => p.id)).toEqual(["release"]);
-      expect(listEnabled.data?.pipelines[0]?.entryInputSchema?.required).toContain("version");
+      const listEnabled = await chat.call("list_project_pipelines", {});
+      expect(listEnabled.ok).toBe(true);
+      const enabled = listEnabled.data as Listed;
+      expect(enabled.pipelines.map((p) => p.id)).toEqual(["release"]);
+      expect(enabled.pipelines[0]?.entryInputSchema?.required).toContain("version");
 
-      const listAll = await actionRegistry.execute<{
-        pipelines: Array<{ id: string; enabled: boolean }>;
-      }>("list_project_pipelines", { includeDisabled: true }, convCtx);
-      expect(listAll.success).toBe(true);
-      expect(listAll.data?.pipelines.map((p) => p.id).sort()).toEqual(["paused", "release"]);
+      const listAll = await chat.call("list_project_pipelines", { includeDisabled: true });
+      expect(listAll.ok).toBe(true);
+      expect((listAll.data as Listed).pipelines.map((p) => p.id).sort()).toEqual([
+        "paused",
+        "release",
+      ]);
 
       // 2. dispatch_pipeline_run fails with clear validation error when entry `data` is missing
-      const invalidDispatch = await actionRegistry.execute(
-        "dispatch_pipeline_run",
-        { pipelineId: "release", title: "Bad Release", data: {} },
-        convCtx,
-      );
-      expect(invalidDispatch.success).toBe(false);
+      const invalidDispatch = await chat.call("dispatch_pipeline_run", {
+        pipelineId: "release",
+        title: "Bad Release",
+        data: {},
+      });
+      expect(invalidDispatch.ok).toBe(false);
       expect(invalidDispatch.error).toContain("version");
 
       // 3. Valid dispatch creates run, applies defaults, stores metadata, and sets createdBy
-      const first = await actionRegistry.execute<{
-        created: boolean;
-        runId: string;
-        status: string;
-        currentNodeId: string;
-      }>(
-        "dispatch_pipeline_run",
-        {
-          pipelineId: "release",
-          title: "Release v1.2.0",
-          externalKey: "rel:1.2.0",
-          data: { version: "1.2.0" },
-          metadata: { requestedBy: "alice" },
-        },
-        convCtx,
-      );
-      expect(first.success).toBe(true);
-      expect(first.data?.created).toBe(true);
-      expect(first.data?.status).toBe("waiting_confirmation");
-      expect(first.data?.currentNodeId).toBe("approve");
+      const first = await chat.call("dispatch_pipeline_run", {
+        pipelineId: "release",
+        title: "Release v1.2.0",
+        externalKey: "rel:1.2.0",
+        data: { version: "1.2.0" },
+        metadata: { requestedBy: "alice" },
+      });
+      expect(first.ok).toBe(true);
+      const firstRun = first.data as Dispatched;
+      expect(firstRun.created).toBe(true);
+      expect(firstRun.status).toBe("waiting_confirmation");
+      expect(firstRun.currentNodeId).toBe("approve");
 
-      const storedRun = await store.pipelines.getRun(first.data!.runId);
+      const storedRun = await store.pipelines.getRun(firstRun.runId);
       expect(storedRun?.data).toEqual({ version: "1.2.0", dryRun: false });
       expect(storedRun?.metadata).toEqual({ requestedBy: "alice" });
       expect(storedRun?.createdBy).toBe("session:ses_chat_1");
 
       // 4. Duplicate externalKey returns existing run idempotently
-      const dup = await actionRegistry.execute<{ created: boolean; runId: string }>(
-        "dispatch_pipeline_run",
-        {
-          pipelineId: "release",
-          title: "Release v1.2.0 dup",
-          externalKey: "rel:1.2.0",
-          data: { version: "1.2.0" },
-        },
-        convCtx,
-      );
-      expect(dup.success).toBe(true);
-      expect(dup.data?.created).toBe(false);
-      expect(dup.data?.runId).toBe(first.data?.runId);
-
-      // 5. Task scope sets createdBy to task:<taskKey>
-      const taskCtx = projectRuntime["createActionContext"]({
-        sessionId: "ses_task_1",
-        taskKey: "dispatch-demo:nightly",
-        workspacePath: repoDir,
-        scope: "task",
+      const dup = await chat.call("dispatch_pipeline_run", {
+        pipelineId: "release",
+        title: "Release v1.2.0 dup",
+        externalKey: "rel:1.2.0",
+        data: { version: "1.2.0" },
       });
-      const fromTask = await actionRegistry.execute<{ created: boolean; runId: string }>(
-        "dispatch_pipeline_run",
-        {
-          pipelineId: "release",
-          title: "Nightly Release",
-          data: { version: "1.2.1-nightly", dryRun: true },
-        },
-        taskCtx,
+      expect(dup.ok).toBe(true);
+      expect(dup.data).toMatchObject({ created: false, runId: firstRun.runId });
+
+      // 5. A task's session also starts runs; the run is created by that session
+      const nightly: TaskOrigin = {
+        kind: "task",
+        taskId: "nightly",
+        taskKey: "dispatch-demo:nightly",
+        executionId: "exec_1",
+      };
+      const taskSession: SessionTools = projectRuntime["sessionTools"](
+        "ses_task_1",
+        repoDir,
+        nightly,
       );
-      expect(fromTask.success).toBe(true);
-      const taskRun = await store.pipelines.getRun(fromTask.data!.runId);
-      expect(taskRun?.createdBy).toBe("task:dispatch-demo:nightly");
+      const fromTask = await taskSession.call("dispatch_pipeline_run", {
+        pipelineId: "release",
+        title: "Nightly Release",
+        data: { version: "1.2.1-nightly", dryRun: true },
+      });
+      expect(fromTask.ok).toBe(true);
+      const taskRun = await store.pipelines.getRun((fromTask.data as Dispatched).runId);
+      expect(taskRun?.createdBy).toBe("session:ses_task_1");
     } finally {
       await projectRuntime.stop();
     }

@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { z } from "zod";
-import { buildPipelineNextParams } from "../actions/builtin/pipeline.ts";
+import { pipelineNextInput } from "../tools/builtin/pipeline-node.ts";
 import type { ArtifactStore } from "../artifacts/store.ts";
+import type { PipelineOrigin } from "../domain/origin.ts";
 import type { ProjectConfig, SessionRoute } from "../domain/types.ts";
 import type { McpClientFactory } from "../mcp/index.ts";
 import type { NotificationOutbox } from "../notifications/index.ts";
@@ -39,6 +40,7 @@ import type {
   NewPipelineNodeRun,
   PipelineActionContextPayload,
   PipelineActionName,
+  PipelineHistoryFilter,
   PipelineActionRecord,
   PipelineDefinition,
   PipelineFlowActionName,
@@ -62,7 +64,8 @@ export interface PipelineSessionPort {
   create(params: {
     readonly workspacePath: string;
     readonly title: string;
-    readonly metadata: Record<string, unknown>;
+    /** The node run the session's agent works on. */
+    readonly owner: PipelineOrigin;
     readonly runtimeOverride?: PipelineNodeRuntimeConfig | undefined;
   }): Promise<SessionRoute>;
   /** Queues a turn under the given id, so the engine can record it before the turn can finish. */
@@ -198,18 +201,16 @@ export class PipelineEngine {
    * Tailors `pipeline_next` natively to the next node's declared `input` schema (or omits `data`
    * when the next node does not declare an input contract).
    */
-  getActionParameterOverridesForNode(
-    pipelineId: string,
-    nodeId: string,
-  ): Readonly<Record<string, z.ZodObject<z.ZodRawShape>>> {
+  /**
+   * The `pipeline_next` input for an agent at `nodeId`: its `data` follows the next node's
+   * declared input. Undefined when the pipeline or node is unknown.
+   */
+  pipelineNextInput(pipelineId: string, nodeId: string): z.ZodObject | undefined {
     const def = this.definitions.get(pipelineId);
-    if (!def) return {};
+    if (!def) return undefined;
     const index = def.nodes.findIndex((n) => n.id === nodeId);
-    if (index < 0) return {};
-    const nextNode = def.nodes[index + 1];
-    return {
-      pipeline_next: buildPipelineNextParams(nextNode?.inputSchema),
-    };
+    if (index < 0) return undefined;
+    return pipelineNextInput(def.nodes[index + 1]?.inputSchema);
   }
 
   async listPipelinesWithVersions(): Promise<PipelineSummaryWithVersions[]> {
@@ -353,29 +354,26 @@ export class PipelineEngine {
   // Agent sessions
   // =====================================================================
 
-  async getContextForSession(sessionId: string): Promise<PipelineGlobalContextView> {
-    const nodeRun = await this.requireSessionNodeRun(sessionId);
+  async getContextForNodeRun(nodeRunId: string): Promise<PipelineGlobalContextView> {
+    const nodeRun = await this.requireNodeRun(nodeRunId);
     const run = await this.requireRun(nodeRun.runId);
     return buildGlobalContext(this.deps.store, run, await this.nodesOfRun(run), nodeRun);
   }
 
-  async listHistoryForSession(
-    sessionId: string,
-    filter?: {
-      readonly nodeId?: string | undefined;
-      readonly action?: PipelineActionName | undefined;
-    },
+  async listHistory(
+    runId: string,
+    filter?: PipelineHistoryFilter,
   ): Promise<PipelineHistoryEntrySummary[]> {
-    const nodeRun = await this.requireSessionNodeRun(sessionId);
-    return listHistory(this.deps.store, nodeRun.runId, filter);
+    await this.requireRun(runId);
+    return listHistory(this.deps.store, runId, filter);
   }
 
-  async getHistoryDetailForSession(
-    sessionId: string,
+  async getHistoryDetail(
+    runId: string,
     query: PipelineHistoryQuery,
   ): Promise<PipelineActionRecord | null> {
-    const nodeRun = await this.requireSessionNodeRun(sessionId);
-    return getHistoryDetail(this.deps.store, nodeRun.runId, query);
+    await this.requireRun(runId);
+    return getHistoryDetail(this.deps.store, runId, query);
   }
 
   /**
@@ -383,12 +381,12 @@ export class PipelineEngine {
    * call within the same turn, and applied when the turn finishes.
    */
   async registerAgentDecision(params: {
-    readonly sessionId: string;
+    readonly nodeRunId: string;
     readonly turnId?: string | undefined;
     readonly action: PipelineFlowActionName;
     readonly context: PipelineActionContextPayload;
   }): Promise<Record<string, unknown>> {
-    const nodeRun = await this.requireSessionNodeRun(params.sessionId);
+    const nodeRun = await this.requireNodeRun(params.nodeRunId);
     await this.transition(nodeRun.runId, {
       nodeRunId: nodeRun.nodeRunId,
       command: {
@@ -772,11 +770,12 @@ export class PipelineEngine {
     const session = await sessions.create({
       workspacePath: run.workspacePath!,
       title: `[${run.pipelineId}/${node.name}] ${run.title}`,
-      metadata: {
+      owner: {
+        kind: "pipeline",
         pipelineId: run.pipelineId,
-        pipelineRunId: run.runId,
-        pipelineNodeId: node.id,
-        pipelineNodeRunId: state.nodeRun.nodeRunId,
+        runId: run.runId,
+        nodeId: node.id,
+        nodeRunId: state.nodeRun.nodeRunId,
       },
       ...(node.runtime ? { runtimeOverride: node.runtime } : {}),
     });
@@ -976,10 +975,10 @@ export class PipelineEngine {
     return run;
   }
 
-  private async requireSessionNodeRun(sessionId: string): Promise<PipelineNodeRunRecord> {
-    const nodeRun = await this.deps.store.findNodeRunBySession(sessionId);
-    if (!nodeRun) {
-      throw new PipelineNotFoundError(`no pipeline node run bound to session ${sessionId}`);
+  private async requireNodeRun(nodeRunId: string): Promise<PipelineNodeRunRecord> {
+    const nodeRun = await this.deps.store.getNodeRun(nodeRunId);
+    if (nodeRun?.projectId !== this.deps.project.id) {
+      throw new PipelineNotFoundError(`pipeline node run not found: ${nodeRunId}`);
     }
     return nodeRun;
   }

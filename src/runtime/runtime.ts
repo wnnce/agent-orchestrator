@@ -1,6 +1,5 @@
-import type { z } from "zod";
 import type { ProjectConfig } from "../domain/types.ts";
-import type { ActionContext, ActionScope } from "../actions/types.ts";
+import type { SessionTools } from "../tools/types.ts";
 import type {
   CanonicalEventType,
   CanonicalEventPayloadMap,
@@ -48,24 +47,17 @@ export interface RuntimeCapabilities {
 export interface RuntimeContext {
   project: ProjectConfig;
   workspacePath: string;
-  taskKey?: string;
-  /** Explicit action scope override (e.g. `"pipeline"`). Defaults to `"task"` if `taskKey` is set else `"conversation"`. */
-  actionScope?: ActionScope;
   /**
-   * Optional per-session Zod parameter schema overrides keyed by action name
-   * (e.g. tailoring `pipeline_next` to the next pipeline node's declared `input` contract).
+   * The orchestrator tools this session's agent is offered. A runtime exposes `tools.specs` to
+   * its agent in its own way and runs calls through `tools.call`.
    */
-  actionParameterOverrides?: Readonly<Record<string, z.ZodObject<z.ZodRawShape>>>;
+  tools?: SessionTools;
   /**
    * The agent may only read: no file edits and no shell commands (the global project). Each
    * runtime enforces it with its own means, e.g. a read-only sandbox or read-only tools.
    */
   readOnly?: boolean;
   onEvent: (event: RuntimeEvent) => Promise<void> | void;
-  createActionContext?: (params: {
-    turnId?: string | undefined;
-    signal?: AbortSignal | undefined;
-  }) => ActionContext;
 }
 
 export const FAKE_CAPABILITIES: RuntimeCapabilities = {

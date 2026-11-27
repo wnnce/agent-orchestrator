@@ -8,13 +8,11 @@ import {
   TaskEngine,
   TaskExecutorRegistry,
   ScriptTaskExecutor,
-  ActionTaskExecutor,
   AgentTaskExecutor,
   type AgentSessionRunner,
   type TaskDefinition,
 } from "../src/task/index.ts";
 import { MockTaskExecutor } from "./helpers/mock-executor.ts";
-import { ActionRegistry } from "../src/actions/index.ts";
 import { ProjectRuntime } from "../src/project/runtime.ts";
 import { FakeRuntime } from "../src/runtime/runtime.ts";
 import { WorkspaceManager } from "../src/workspace/workspace.ts";
@@ -408,6 +406,7 @@ describe("Task Real-World Scenarios Simulation", () => {
       };
 
       const result = await executor.execute({
+        executionId: "exec_test",
         task,
         stateBefore: {},
       });
@@ -436,6 +435,7 @@ describe("Task Real-World Scenarios Simulation", () => {
       };
 
       const result = await executor.execute({
+        executionId: "exec_test",
         task,
         stateBefore: { initialSetup: true },
       });
@@ -457,6 +457,7 @@ describe("Task Real-World Scenarios Simulation", () => {
       };
 
       const result = await executor.execute({
+        executionId: "exec_test",
         task,
         stateBefore: { count: 1 },
       });
@@ -476,6 +477,7 @@ describe("Task Real-World Scenarios Simulation", () => {
       };
 
       const result = await executor.execute({
+        executionId: "exec_test",
         task,
         stateBefore: {},
       });
@@ -496,6 +498,7 @@ describe("Task Real-World Scenarios Simulation", () => {
       };
 
       const result = await executor.execute({
+        executionId: "exec_test",
         task,
         stateBefore: {},
       });
@@ -509,88 +512,6 @@ describe("Task Real-World Scenarios Simulation", () => {
   // --------------------------------------------------------------------------
   // Scenario 6: Action Task Invocations & Fault Injections
   // --------------------------------------------------------------------------
-  describe("Scenario 6: ActionTaskExecutor Direct Invocations & Fault Injections", () => {
-    it("handles Zod schema parameter validation rejection", async () => {
-      const registry = new ActionRegistry();
-      registry.register({
-        name: "send_alert",
-        description: "Sends an alert with priority",
-        parameters: z.object({
-          priority: z.enum(["low", "medium", "high"]),
-          message: z.string().min(5),
-        }),
-        async handler(params) {
-          return { sent: true, params };
-        },
-      });
-
-      const executor = new ActionTaskExecutor(registry);
-      const task: TaskDefinition = {
-        ...baseTask,
-        type: "action",
-        action: "send_alert",
-        actionParams: {
-          priority: "urgent", // Invalid enum value
-          message: "Hi", // Too short
-        },
-      };
-
-      const result = await executor.execute({
-        task,
-        stateBefore: {},
-      });
-
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("Argument validation failed");
-    });
-
-    it("handles exceptions thrown inside Action handlers", async () => {
-      const registry = new ActionRegistry();
-      registry.register({
-        name: "failing_action",
-        description: "Throws exception",
-        parameters: { type: "object" },
-        async handler() {
-          throw new Error("Downstream PostgreSQL connection refused");
-        },
-      });
-
-      const executor = new ActionTaskExecutor(registry);
-      const task: TaskDefinition = {
-        ...baseTask,
-        type: "action",
-        action: "failing_action",
-      };
-
-      const result = await executor.execute({
-        task,
-        stateBefore: { safe: true },
-      });
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBe("Downstream PostgreSQL connection refused");
-      expect(result.stateAfter).toEqual({ safe: true });
-    });
-
-    it("returns descriptive error when action is not registered", async () => {
-      const registry = new ActionRegistry();
-      const executor = new ActionTaskExecutor(registry);
-      const task: TaskDefinition = {
-        ...baseTask,
-        type: "action",
-        action: "unregistered_action_foo",
-      };
-
-      const result = await executor.execute({
-        task,
-        stateBefore: {},
-      });
-
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('Action "unregistered_action_foo" not found');
-    });
-  });
-
   // --------------------------------------------------------------------------
   // Scenario 7: Agent Task Lifecycle Resilience & Fault Injections
   // --------------------------------------------------------------------------
@@ -620,6 +541,7 @@ describe("Task Real-World Scenarios Simulation", () => {
       };
 
       const result = await executor.execute({
+        executionId: "exec_test",
         task,
         stateBefore: { cursor: "12345" },
       });
@@ -649,6 +571,7 @@ describe("Task Real-World Scenarios Simulation", () => {
       const task: TaskDefinition = { ...baseTask, type: "agent" };
 
       const result = await executor.execute({
+        executionId: "exec_test",
         task,
         stateBefore: { preserved: 1 },
       });
@@ -675,6 +598,7 @@ describe("Task Real-World Scenarios Simulation", () => {
 
       // Should complete without uncaught rejection
       const result = await executor.execute({
+        executionId: "exec_test",
         task,
         stateBefore: {},
       });
@@ -688,7 +612,7 @@ describe("Task Real-World Scenarios Simulation", () => {
   // Scenario 8: Hybrid Project Runtime with Multiple Task Types
   // --------------------------------------------------------------------------
   describe("Scenario 8: Multi-Type Hybrid Project Runtime Integration", () => {
-    it("dispatches and executes script, action, and agent tasks side-by-side in one project", async () => {
+    it("dispatches and executes script and agent tasks side-by-side in one project", async () => {
       const tmpDir = await mkdtemp(path.join(os.tmpdir(), "hybrid-task-"));
       const store = new MemoryStore();
       const logger = new Logger({ level: "error" });
@@ -708,7 +632,7 @@ describe("Task Real-World Scenarios Simulation", () => {
       );
       const artifactStore = new ArtifactStore(path.join(tmpDir, "artifacts"), store);
 
-      // Create tasks directory with 3 markdown definitions
+      // Create tasks directory with 2 markdown definitions
       const tasksDir = path.join(tmpDir, "tasks");
       await mkdir(tasksDir, { recursive: true });
 
@@ -725,20 +649,7 @@ command: 'echo "{\\"synced\\": 100}"'
 `,
       );
 
-      // Task 2: action task
-      await writeFile(
-        path.join(tasksDir, "metric-action.md"),
-        `---
-id: metric-action
-name: Metric Action Task
-cron: "*/10 * * * *"
-type: action
-action: report_metrics
----
-`,
-      );
-
-      // Task 3: agent task
+      // Task 2: agent task
       await writeFile(
         path.join(tasksDir, "analyze-agent.md"),
         `---
@@ -751,18 +662,6 @@ Analyze system status.
 `,
       );
 
-      const actionRegistry = new ActionRegistry();
-      let metricReported = false;
-      actionRegistry.register({
-        name: "report_metrics",
-        description: "Direct metric reporter",
-        parameters: { type: "object" },
-        async handler() {
-          metricReported = true;
-          return { status: "healthy", state: { lastMetricCheck: "ok" } };
-        },
-      });
-
       const runtime = new ProjectRuntime(
         projectConfig,
         store,
@@ -771,21 +670,13 @@ Analyze system status.
         artifactStore,
         undefined,
         logger,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        actionRegistry,
       );
 
       await runtime.start();
 
       try {
         const loadedTasks = await runtime.listTasks();
-        expect(loadedTasks).toHaveLength(3);
+        expect(loadedTasks).toHaveLength(2);
 
         // 1. Run Script Task
         const ranScript = await runtime.runTask("sync-script");
@@ -797,18 +688,7 @@ Analyze system status.
         expect(scriptExecs[0]?.status).toBe("success");
         expect(scriptExecs[0]?.stateAfter).toEqual({ synced: 100 });
 
-        // 2. Run Action Task
-        const ranAction = await runtime.runTask("metric-action");
-        expect(ranAction).toBe(true);
-        await runtime.taskEngine.drain();
-
-        expect(metricReported).toBe(true);
-        const actionExecs = await store.listTaskExecutions("hybrid-proj:metric-action");
-        expect(actionExecs).toHaveLength(1);
-        expect(actionExecs[0]?.status).toBe("success");
-        expect(actionExecs[0]?.stateAfter).toEqual({ lastMetricCheck: "ok" });
-
-        // 3. Run Agent Task (runs through FakeRuntime)
+        // 2. Run Agent Task (runs through FakeRuntime)
         const ranAgent = await runtime.runTask("analyze-agent");
         expect(ranAgent).toBe(true);
         await runtime.taskEngine.drain();

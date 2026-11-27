@@ -4,7 +4,7 @@ import { NOT_DELETED, ScheduledJobStatus } from "../src/domain/types.ts";
 import { createDrizzleDb } from "../src/persistence/db.ts";
 import { PostgresStore, MemoryStore, newSessionRoute } from "../src/persistence/store.ts";
 import {
-  toActionExecutionRecord,
+  toToolExecutionRecord,
   toSessionRoute,
   toTurnRecord,
 } from "../src/persistence/postgres/mappers.ts";
@@ -224,6 +224,7 @@ describe("PostgresStore with Drizzle ORM", () => {
       externalThreadId: null,
       lastActiveAt: now,
       cursors: { feishu: 5 },
+      owner: null,
       metadata: { runtime: "codex" },
       createdAt: now,
       updatedAt: now,
@@ -234,6 +235,7 @@ describe("PostgresStore with Drizzle ORM", () => {
     expect("title" in session).toBe(false);
     expect("externalThreadId" in session).toBe(false);
     expect(session.cursors).toEqual({ feishu: 5 });
+    expect("owner" in session).toBe(false);
     expect(session.workspacePath).toBe("/ws/ses_7");
     expect(session.model).toBe("gpt-5.6-terra");
     expect(session.reasoningEffort).toBe("high");
@@ -300,15 +302,15 @@ describe("PostgresStore with Drizzle ORM", () => {
       contextWindowTokens: 1048576,
     });
 
-    const action = toActionExecutionRecord({
+    const action = toToolExecutionRecord({
       id: 11,
-      executionId: "act_11",
+      executionId: "tex_11",
       projectId: "proj",
       sessionId: "ses_7",
       turnId: null,
-      taskKey: null,
-      caller: "agent",
-      actionName: "send_notification",
+      ownerKind: null,
+      ownerId: null,
+      toolName: "send_notification",
       parameters: { title: "hi" },
       status: "success",
       result: { delivered: true },
@@ -319,6 +321,7 @@ describe("PostgresStore with Drizzle ORM", () => {
     expect(typeof action.id).toBe("number");
     expect(action.id).toBe(11);
     expect("errorMessage" in action).toBe(false);
+    expect("ownerKind" in action).toBe(false);
   });
 });
 

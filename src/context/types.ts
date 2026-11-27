@@ -5,6 +5,7 @@ import type { NotificationMessage, NotificationOptions } from "../notifications/
 import type { Logger } from "../observability/logger.ts";
 import type {
   PipelineRunRecord,
+  PipelineSummaryWithVersions,
   StartPipelineRunParams,
   StartPipelineRunResult,
 } from "../pipeline/types.ts";
@@ -30,6 +31,15 @@ export interface ProjectContext {
 
   /** Renders a prompt template with `project`, `vars`, `now` and the origin's own variables. */
   render(template: string, extra?: Readonly<Record<string, unknown>>): string;
+}
+
+/** A task's persistent state, carried from one execution to the next. */
+export interface TaskState<S extends object = Record<string, unknown>> {
+  get(): Readonly<S>;
+  /** Replaces the state. */
+  set(next: S): void;
+  /** Shallow-merges `patch` into the state. */
+  merge(patch: Partial<S>): void;
 }
 
 export interface ProjectInfo {
@@ -88,6 +98,8 @@ export interface ProjectPipelines {
   /** Starts a run, or returns the existing one with the same `externalKey`. */
   start(params: StartPipelineRunParams): Promise<StartPipelineRunResult>;
   find(query: { pipelineId: string; externalKey: string }): Promise<PipelineRunRecord | null>;
+  /** The project's pipelines with their versions and entry input schemas. */
+  list(): Promise<PipelineSummaryWithVersions[]>;
   /** Wakes the run's waiting node so it checks its `waitUntil` condition now. */
   signal(query: PipelineRunQuery): Promise<{ woken: boolean }>;
 }

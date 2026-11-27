@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { ActionRegistry } from "../src/actions/registry.ts";
 import type { ProjectConfig, ProjectRuntimeConfig } from "../src/domain/types.ts";
 import {
   buildQueryOptions,
-  createActionServer,
+  createToolServer,
   type QueryOptionsParams,
 } from "../src/runtime/claude/index.ts";
+import { fakeSessionTools } from "./helpers/session-tools.ts";
 
 const project = (runtime: ProjectRuntimeConfig = {}): ProjectConfig => ({
   id: "p",
@@ -79,19 +79,14 @@ describe("Claude Code options", () => {
     expect(options({ plugins: [] })).not.toHaveProperty("plugins");
   });
 
-  test("orchestrator actions are offered through an in-process MCP server", () => {
-    const registry = new ActionRegistry();
-    const site = () => ({ project: project(), workspacePath: "/work", sessionId: "s" });
-    expect(createActionServer(registry, undefined, site)).toBeUndefined();
+  test("orchestrator tools are offered through an in-process MCP server", () => {
+    expect(createToolServer(fakeSessionTools([]).tools)).toBeUndefined();
 
-    registry.register({
-      name: "ping",
-      description: "Replies pong",
-      parameters: z.object({ text: z.string() }),
-      handler: async () => ({ pong: true }),
-    });
-    const server = createActionServer(registry, undefined, site);
+    const { tools } = fakeSessionTools([
+      { name: "ping", input: z.object({ text: z.string() }), run: () => ({ pong: true }) },
+    ]);
+    const server = createToolServer(tools);
     expect(server).toMatchObject({ type: "sdk", name: "orchestrator" });
-    expect(options({ actionServer: server }).mcpServers?.orchestrator).toBe(server!);
+    expect(options({ toolServer: server }).mcpServers?.orchestrator).toBe(server!);
   });
 });

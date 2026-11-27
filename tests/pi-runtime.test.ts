@@ -5,17 +5,12 @@ import { join } from "node:path";
 import { z } from "zod";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
-import { ActionRegistry } from "../src/actions/registry.ts";
 import { Logger } from "../src/observability/logger.ts";
-import {
-  PI_CAPABILITIES,
-  PiNormalizer,
-  PiRuntime,
-  bridgeActionsToPiTools,
-} from "../src/runtime/pi/index.ts";
+import { PI_CAPABILITIES, PiNormalizer, PiRuntime, piToolsFor } from "../src/runtime/pi/index.ts";
 import { defaultRuntimeRegistry } from "../src/runtime/registry.ts";
 import type { RuntimeContext, RuntimeEvent } from "../src/runtime/runtime.ts";
 import type { ProjectConfig } from "../src/domain/types.ts";
+import { fakeSessionTools } from "./helpers/session-tools.ts";
 
 async function createMockModelRuntime(responseTokens: string[] = ["Hello", " world", "!"]) {
   const mr = (ModelRuntime as any).create ? await (ModelRuntime as any).create() : undefined;
@@ -313,27 +308,21 @@ describe("Pi Agent Native SDK Runtime", () => {
     });
   });
 
-  describe("Action & Tool Bridging", () => {
-    it("bridges ActionRegistry actions to Pi ToolDefinitions and executes correctly", async () => {
-      const registry = new ActionRegistry(new Logger());
-      registry.register({
-        name: "calculate_sum",
-        description: "Sums two numbers",
-        parameters: z.object({
-          a: z.number(),
-          b: z.number(),
-        }),
-        handler: async (params) => {
-          return { sum: params.a + params.b };
+  describe("Tool Bridging", () => {
+    it("offers the session's tools to Pi and runs calls through them", async () => {
+      const { tools: sessionTools } = fakeSessionTools([
+        {
+          name: "calculate_sum",
+          description: "Sums two numbers",
+          input: z.object({ a: z.number(), b: z.number() }),
+          run: (args) => {
+            const { a, b } = args as { a: number; b: number };
+            return { sum: a + b };
+          },
         },
-      });
+      ]);
 
-      const tools = bridgeActionsToPiTools(registry, () => ({
-        project: DUMMY_PROJECT,
-        workspacePath: "/tmp",
-        sessionId: "ses_test",
-        turnId: "turn_test",
-      }));
+      const tools = piToolsFor(sessionTools);
 
       expect(tools).toHaveLength(1);
       expect(tools[0]!.name).toBe("calculate_sum");
@@ -353,7 +342,7 @@ describe("Pi Agent Native SDK Runtime", () => {
         const mockModelRuntime = await createMockModelRuntime(["Pi", " Agent", " operational"]);
 
         const events: RuntimeEvent[] = [];
-        const runtime = new PiRuntime(new Logger(), undefined, undefined, mockModelRuntime);
+        const runtime = new PiRuntime(new Logger(), undefined, mockModelRuntime);
 
         const context: RuntimeContext = {
           project: DUMMY_PROJECT,
@@ -416,7 +405,6 @@ describe("Pi Agent Native SDK Runtime", () => {
         const runtime = new PiRuntime(
           new Logger({ sink: () => {} }),
           undefined,
-          undefined,
           await createMockModelRuntime(["one", " two", " three", " four"]),
         );
         const delivered: string[] = [];
@@ -469,7 +457,6 @@ describe("Pi Agent Native SDK Runtime", () => {
         const runtime = new PiRuntime(
           new Logger({ sink: () => {} }),
           undefined,
-          undefined,
           await createMockModelRuntime(),
         );
         const context: RuntimeContext = {
@@ -492,7 +479,7 @@ describe("Pi Agent Native SDK Runtime", () => {
       try {
         const mockModelRuntime = await createMockModelRuntime(["long", " run"]);
         const events: RuntimeEvent[] = [];
-        const runtime = new PiRuntime(new Logger(), undefined, undefined, mockModelRuntime);
+        const runtime = new PiRuntime(new Logger(), undefined, mockModelRuntime);
 
         const context: RuntimeContext = {
           project: DUMMY_PROJECT,
@@ -526,7 +513,7 @@ describe("Pi Agent Native SDK Runtime", () => {
       try {
         const mockModelRuntime = await createMockModelRuntime(["hello"]);
         const events: RuntimeEvent[] = [];
-        const runtime = new PiRuntime(new Logger(), undefined, undefined, mockModelRuntime);
+        const runtime = new PiRuntime(new Logger(), undefined, mockModelRuntime);
 
         const context: RuntimeContext = {
           project: DUMMY_PROJECT,
@@ -595,7 +582,7 @@ describe("Pi Agent Native SDK Runtime", () => {
         await mr.setRuntimeApiKey("failing-provider", "key");
 
         const events: RuntimeEvent[] = [];
-        const runtime = new PiRuntime(new Logger(), undefined, undefined, mr);
+        const runtime = new PiRuntime(new Logger(), undefined, mr);
 
         const context: RuntimeContext = {
           project: {
@@ -671,7 +658,7 @@ describe("Pi Agent Native SDK Runtime", () => {
       const tmpWorkspace = mkdtempSync(join(tmpdir(), "pi-rt-usage-"));
       try {
         const mockMR = await createMockModelRuntime(["Usage ", "check"]);
-        const runtime = new PiRuntime(new Logger({ sink: () => {} }), undefined, undefined, mockMR);
+        const runtime = new PiRuntime(new Logger({ sink: () => {} }), undefined, mockMR);
         const events: RuntimeEvent[] = [];
         const context: RuntimeContext = {
           project: DUMMY_PROJECT,

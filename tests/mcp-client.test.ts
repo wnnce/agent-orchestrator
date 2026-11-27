@@ -9,6 +9,7 @@ import {
 } from "../src/mcp/index.ts";
 import { TsTaskExecutor } from "../src/task/executors/ts.ts";
 import type { TaskDefinition } from "../src/task/types.ts";
+import { contextFactory, testContextServices, testProject } from "./helpers/project-context.ts";
 
 describe("unwrapMcpToolResult", () => {
   it("prefers structuredContent, falls back to parsed JSON text, then plain text", () => {
@@ -267,9 +268,11 @@ describe("createSdkMcpClient + TsTaskExecutor integration", () => {
         type: "ts",
       };
 
-      const executor = new TsTaskExecutor({
-        getMcpServers: () => mcpServers,
+      const services = testContextServices(testProject({ runtime: { type: "fake", mcpServers } }), {
         mcpClientFactory: createSdkMcpClient,
+      });
+      const executor = new TsTaskExecutor({
+        createContext: contextFactory(services),
         resolveHandler: async () => async (ctx) => {
           const tools = await ctx.listMcpTools("mock");
           const first = await ctx.callMcpTool<{ callIndex: number; args: { page: number } }>(

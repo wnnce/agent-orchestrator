@@ -1,11 +1,5 @@
 import { z } from "zod";
-import type {
-  ActionResult,
-  CreateArtifactParams,
-  DispatchTaskParams,
-  DispatchTaskResult,
-  UpdateTaskStateOptions,
-} from "../actions/types.ts";
+import type { CreateArtifactParams, StartSessionParams, StartedSession } from "../context/types.ts";
 import type { ArtifactRecord, ProjectVarValue } from "../domain/types.ts";
 import type { McpToolCallOptions, McpToolInfo, McpToolResult } from "../mcp/index.ts";
 import type { NotificationMessage, NotificationOptions } from "../notifications/index.ts";
@@ -50,7 +44,7 @@ export interface TaskRunContext {
   /** Update the task's incremental state (shallow-merged by default). */
   updateState(
     delta: Record<string, unknown>,
-    options?: UpdateTaskStateOptions,
+    options?: { readonly merge?: boolean | undefined },
   ): Promise<Record<string, unknown>>;
 
   /** Send a notification through the project's configured NotificationOutbox. */
@@ -59,20 +53,11 @@ export interface TaskRunContext {
   /** Persist an artifact to ArtifactStore. */
   createArtifact(params: CreateArtifactParams): Promise<ArtifactRecord>;
 
-  /** Emit a custom event on the project's EventHub. */
-  emit(type: string, payload: unknown): Promise<void>;
-
   /**
    * Dispatch a new independent Agent session in the current project.
    * Dispatched sessions always follow the project's default runtime, model, and reasoningEffort.
    */
-  dispatchTask(params: DispatchTaskParams): Promise<DispatchTaskResult>;
-
-  /** Invoke any registered Action in the project's ActionRegistry. */
-  invokeAction<T = unknown>(
-    name: string,
-    params: Record<string, unknown>,
-  ): Promise<ActionResult<T>>;
+  dispatchTask(params: StartSessionParams): Promise<StartedSession>;
 
   /**
    * Call a tool on a project-configured MCP server (from `project.yaml` `runtime.mcpServers`).

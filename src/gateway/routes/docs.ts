@@ -22,7 +22,7 @@ export function createDocsRouter(app: OpenAPIHono, options: DocsRouterOptions = 
   const version = options.version ?? "0.1.0";
   const description =
     options.description ??
-    "HTTP and SSE gateway API for coordinating agent runtimes, sessions, scheduled tasks, actions, and webhooks.";
+    "HTTP and SSE gateway API for coordinating agent runtimes, sessions, scheduled tasks, tools, and webhooks.";
   const specUrl = options.specUrl ?? "/openapi.json";
 
   // Register shared OpenAPI components on the root OpenAPIHono registry

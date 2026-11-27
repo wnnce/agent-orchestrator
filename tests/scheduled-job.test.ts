@@ -3,11 +3,8 @@ import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { MemoryStore } from "../src/persistence/store.ts";
-import {
-  ActionRegistry,
-  createActionContext,
-  defaultActionRegistry,
-} from "../src/actions/index.ts";
+import type { SessionOrigin } from "../src/domain/origin.ts";
+import type { ToolContext } from "../src/tools/index.ts";
 import {
   ScheduledJobStatus,
   type ProjectConfig,
@@ -57,32 +54,30 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
     await rm(tempRoot, { recursive: true, force: true });
   });
 
-  test("Action scope isolation: schedule_job and cancel_job are available only in conversation, not in task", () => {
-    const convActions = defaultActionRegistry.list("conversation").map((a) => a.name);
-    const taskActions = defaultActionRegistry.list("task").map((a) => a.name);
-
-    expect(convActions).toContain("schedule_job");
-    expect(convActions).toContain("cancel_job");
-
-    expect(taskActions).not.toContain("schedule_job");
-    expect(taskActions).not.toContain("cancel_job");
-  });
+  /** A tool context for a session of a project runtime over `store`, as the session's turn sees it. */
+  function toolContext(store: MemoryStore, sessionId: string, turnId?: string) {
+    const runtime = new ProjectRuntime(
+      dummyProject,
+      store,
+      new FakeRuntime(),
+      new WorkspaceManager(path.join(tempRoot, "ws_tools"), path.join(tempRoot, "bases_tools")),
+      new ArtifactStore(path.join(tempRoot, "art_tools"), store),
+    );
+    const origin: SessionOrigin = { kind: "session", sessionId, ...(turnId ? { turnId } : {}) };
+    const { context } = runtime.createContext(origin, { signal: new AbortController().signal });
+    const ctx: ToolContext = {
+      ...context,
+      origin,
+      session: runtime["toolSession"](origin, "/tmp", context.logger),
+    };
+    return { tools: runtime.tools, ctx };
+  }
 
   test("schedule_job enqueues job with monotonic integer status 1 (PENDING) and records createdTurnId", async () => {
     const store = new MemoryStore();
-    const ctx = createActionContext({
-      projectId: "proj_delay",
-      sessionId: "ses_001",
-      turnId: "turn_init_1",
-      services: { store },
-    });
+    const { tools, ctx } = toolContext(store, "ses_001", "turn_init_1");
 
-    const result = await defaultActionRegistry.execute<{
-      jobId: string;
-      name: string;
-      delayMinutes: number;
-      triggerAt: string;
-    }>(
+    const result = await tools.call(
       "schedule_job",
       {
         name: "check_pipeline",
@@ -93,9 +88,8 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
       ctx,
     );
 
-    expect(result.success).toBe(true);
-    expect(result.data?.name).toBe("check_pipeline");
-    expect(result.data?.delayMinutes).toBe(10);
+    expect(result.ok).toBe(true);
+    expect(result.data).toMatchObject({ name: "check_pipeline", delayMinutes: 10 });
 
     // Verify persisted job record
     const dueJobs = await store.listDueScheduledJobs(
@@ -114,13 +108,9 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
 
   test("cancel_job transitions pending job to status 3 (CANCELLED)", async () => {
     const store = new MemoryStore();
-    const ctx = createActionContext({
-      projectId: "proj_delay",
-      sessionId: "ses_cancel",
-      services: { store },
-    });
+    const { tools, ctx } = toolContext(store, "ses_cancel");
 
-    await defaultActionRegistry.execute(
+    await tools.call(
       "schedule_job",
       {
         name: "remind_review",
@@ -131,14 +121,10 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
     );
 
     // Cancel job actively
-    const cancelRes = await defaultActionRegistry.execute<{ success: boolean; name: string }>(
-      "cancel_job",
-      { name: "remind_review" },
-      ctx,
-    );
+    const cancelRes = await tools.call("cancel_job", { name: "remind_review" }, ctx);
 
-    expect(cancelRes.success).toBe(true);
-    expect(cancelRes.data?.success).toBe(true);
+    expect(cancelRes.ok).toBe(true);
+    expect(cancelRes.data).toMatchObject({ success: true });
 
     // After cancellation, scan for due jobs should return empty (status is now CANCELLED)
     const due = await store.listDueScheduledJobs("proj_delay", new Date(Date.now() + 10 * 60_000));

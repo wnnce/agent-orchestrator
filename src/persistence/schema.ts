@@ -1,4 +1,4 @@
-import type { OriginKind } from "../domain/origin.ts";
+import type { OriginKind, SessionOwner } from "../domain/origin.ts";
 import { sql } from "drizzle-orm";
 import {
   bigint,
@@ -17,7 +17,7 @@ import {
 import {
   NOT_DELETED,
   ScheduledJobStatus,
-  type ActionExecutionRecord,
+  type ToolExecutionRecord,
   type NotificationConfig,
   type NotificationDelivery,
   type NotificationDeliveryDetail,
@@ -63,6 +63,7 @@ export const sessions = pgTable(
     externalThreadId: varchar("external_thread_id", { length: 255 }),
     lastActiveAt: timestamp("last_active_at", { withTimezone: true }).notNull().defaultNow(),
     cursors: jsonb("cursors").$type<Record<string, number>>().notNull().default({}),
+    owner: jsonb("owner").$type<SessionOwner>(),
     metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -259,29 +260,30 @@ export const scheduledJobs = pgTable(
   ],
 );
 
-export const actionExecutions = pgTable(
-  "action_executions",
+export const toolExecutions = pgTable(
+  "tool_executions",
   {
     id: bigserial("id", { mode: "number" }).primaryKey(),
     executionId: varchar("execution_id", { length: 100 }).notNull(),
     projectId: varchar("project_id", { length: 100 }).notNull(),
-    sessionId: varchar("session_id", { length: 100 }),
+    sessionId: varchar("session_id", { length: 100 }).notNull(),
     turnId: varchar("turn_id", { length: 100 }),
-    taskKey: varchar("task_key", { length: 255 }),
-    caller: varchar("caller", { length: 50 }).notNull().default("unknown"),
-    actionName: varchar("action_name", { length: 100 }).notNull(),
+    ownerKind: varchar("owner_kind", { length: 20 }).$type<OriginKind>(),
+    ownerId: varchar("owner_id", { length: 100 }),
+    toolName: varchar("tool_name", { length: 100 }).notNull(),
     parameters: jsonb("parameters").$type<Record<string, unknown>>().notNull().default({}),
-    status: varchar("status", { length: 20 }).$type<ActionExecutionRecord["status"]>().notNull(),
+    status: varchar("status", { length: 20 }).$type<ToolExecutionRecord["status"]>().notNull(),
     result: jsonb("result").$type<unknown>(),
     errorMessage: text("error_message"),
     durationMs: integer("duration_ms").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex("idx_action_executions_exec_id").on(table.executionId),
-    index("idx_action_executions_session").on(table.sessionId, table.id.desc()),
-    index("idx_action_executions_project").on(table.projectId, table.id.desc()),
-    index("idx_action_executions_name").on(table.actionName, table.id.desc()),
+    uniqueIndex("idx_tool_executions_exec_id").on(table.executionId),
+    index("idx_tool_executions_session").on(table.sessionId, table.id.desc()),
+    index("idx_tool_executions_project").on(table.projectId, table.id.desc()),
+    index("idx_tool_executions_name").on(table.toolName, table.id.desc()),
+    index("idx_tool_executions_owner").on(table.ownerKind, table.ownerId, table.id.desc()),
   ],
 );
 
@@ -487,7 +489,7 @@ export const schema = {
   taskExecutions,
   taskExecutionLogs,
   scheduledJobs,
-  actionExecutions,
+  toolExecutions,
   pipelineRevisions,
   pipelineRuns,
   pipelineNodeRuns,
@@ -507,7 +509,7 @@ export type TaskExecutionRow = typeof taskExecutions.$inferSelect;
 export type TaskExecutionLogRow = typeof taskExecutionLogs.$inferSelect;
 export type NewTaskExecutionLogRow = typeof taskExecutionLogs.$inferInsert;
 export type ScheduledJobRow = typeof scheduledJobs.$inferSelect;
-export type ActionExecutionRow = typeof actionExecutions.$inferSelect;
+export type ToolExecutionRow = typeof toolExecutions.$inferSelect;
 export type PipelineRevisionRow = typeof pipelineRevisions.$inferSelect;
 export type PipelineRunRow = typeof pipelineRuns.$inferSelect;
 export type PipelineNodeRunRow = typeof pipelineNodeRuns.$inferSelect;

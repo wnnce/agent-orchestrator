@@ -1,6 +1,6 @@
 export * from "./events.ts";
 export * from "./origin.ts";
-import type { OriginKind } from "./origin.ts";
+import type { OriginKind, SessionOwner } from "./origin.ts";
 
 export type SessionStatus =
   | "active"
@@ -211,6 +211,8 @@ export interface SessionRoute extends BaseEntity {
   configRevision: number;
   status: SessionStatus;
   source?: string;
+  /** The task execution or pipeline node this session works for; fixed at creation. */
+  owner?: SessionOwner;
   externalChannel?: string;
   externalConversationId?: string;
   externalThreadId?: string;
@@ -389,15 +391,17 @@ export interface ScheduledJobRecord extends BaseEntity {
   readonly finishedAt?: string | undefined;
 }
 
-export interface ActionExecutionRecord {
+/** One call an agent made to an orchestrator tool. */
+export interface ToolExecutionRecord {
   readonly id?: string | number | undefined;
   readonly executionId: string;
   readonly projectId: string;
-  readonly sessionId?: string | undefined;
+  readonly sessionId: string;
   readonly turnId?: string | undefined;
-  readonly taskKey?: string | undefined;
-  readonly caller: string;
-  readonly actionName: string;
+  /** The task execution or pipeline node run the session works for, if any. */
+  readonly ownerKind?: OriginKind | undefined;
+  readonly ownerId?: string | undefined;
+  readonly toolName: string;
   readonly parameters: Record<string, unknown>;
   readonly status: "success" | "failure";
   readonly result?: unknown | undefined;
@@ -406,9 +410,11 @@ export interface ActionExecutionRecord {
   readonly createdAt?: string | undefined;
 }
 
-export interface ActionExecutionFilter {
+export interface ToolExecutionFilter {
   readonly projectId?: string | undefined;
   readonly sessionId?: string | undefined;
-  readonly actionName?: string | undefined;
+  readonly toolName?: string | undefined;
+  readonly ownerKind?: OriginKind | undefined;
+  readonly ownerId?: string | undefined;
   readonly limit?: number | undefined;
 }

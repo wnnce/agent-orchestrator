@@ -21,6 +21,7 @@ export interface TaskOrigin {
 
 export interface PipelineOrigin {
   readonly kind: "pipeline";
+  readonly pipelineId: string;
   readonly runId: string;
   readonly nodeId: string;
   readonly nodeRunId: string;
@@ -33,6 +34,9 @@ export interface HookOrigin {
 }
 
 export type OriginKind = Origin["kind"];
+
+/** The task execution or pipeline node a session works for. Ordinary sessions have none. */
+export type SessionOwner = TaskOrigin | PipelineOrigin;
 
 /** How a record stores its origin: the kind and the most specific identifier of that kind. */
 export interface OriginRef {
@@ -75,7 +79,12 @@ export function originLogFields(origin: Origin): Record<string, string> {
     case "task":
       return { taskId: origin.taskId, executionId: origin.executionId };
     case "pipeline":
-      return { runId: origin.runId, nodeId: origin.nodeId, nodeRunId: origin.nodeRunId };
+      return {
+        pipelineId: origin.pipelineId,
+        runId: origin.runId,
+        nodeId: origin.nodeId,
+        nodeRunId: origin.nodeRunId,
+      };
     case "hook":
       return {
         hookId: origin.hookId,
@@ -96,6 +105,7 @@ export function originSpanAttributes(origin: Origin): Record<string, string> {
       return { "task.id": origin.taskId, "task.execution_id": origin.executionId };
     case "pipeline":
       return {
+        "pipeline.id": origin.pipelineId,
         "pipeline.run_id": origin.runId,
         "pipeline.node_id": origin.nodeId,
         "pipeline.node_run_id": origin.nodeRunId,

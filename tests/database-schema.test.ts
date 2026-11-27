@@ -12,7 +12,7 @@ describe("database schema definition", () => {
 
     expect(tableNames).toEqual(
       [
-        "action_executions",
+        "tool_executions",
         "artifacts",
         "events",
         "inbound_messages",

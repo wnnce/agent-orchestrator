@@ -1,8 +1,8 @@
 import type { OriginRef } from "../../domain/origin.ts";
 import { Pool } from "pg";
 import type {
-  ActionExecutionFilter,
-  ActionExecutionRecord,
+  ToolExecutionFilter,
+  ToolExecutionRecord,
   ArtifactRecord,
   EventRecord,
   InboundMessageRecord,
@@ -224,12 +224,12 @@ export class PostgresStore implements Store {
     return this.taskAuditRepo.updateScheduledJobStatus(jobId, status, summary, finishedAt);
   }
 
-  recordActionExecution(record: ActionExecutionRecord): Promise<void> {
-    return this.taskAuditRepo.recordActionExecution(record);
+  recordToolExecution(record: ToolExecutionRecord): Promise<void> {
+    return this.taskAuditRepo.recordToolExecution(record);
   }
 
-  listActionExecutions(filter?: ActionExecutionFilter): Promise<ActionExecutionRecord[]> {
-    return this.taskAuditRepo.listActionExecutions(filter);
+  listToolExecutions(filter?: ToolExecutionFilter): Promise<ToolExecutionRecord[]> {
+    return this.taskAuditRepo.listToolExecutions(filter);
   }
 
   getProjectOverview(

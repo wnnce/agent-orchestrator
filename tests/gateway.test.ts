@@ -351,15 +351,16 @@ describe("Gateway with Hono", () => {
     }
   });
 
-  it("lists action executions via GET /api/v1/action-executions", async () => {
+  it("lists tool executions via GET /api/v1/tool-executions", async () => {
     const { gateway, store } = createTestGateway();
 
-    await store.recordActionExecution({
-      executionId: "act_test_gw_1",
+    await store.recordToolExecution({
+      executionId: "tex_test_gw_1",
       projectId: "test-proj",
       sessionId: "ses_gw_1",
-      caller: "model",
-      actionName: "send_notification",
+      ownerKind: "task",
+      ownerId: "exec_1",
+      toolName: "send_notification",
       parameters: { title: "Test Alert" },
       status: "success",
       result: { sent: 1 },
@@ -367,13 +368,14 @@ describe("Gateway with Hono", () => {
     });
 
     const res = await gateway.handle(
-      new Request("http://localhost/api/v1/action-executions?projectId=test-proj"),
+      new Request("http://localhost/api/v1/tool-executions?projectId=test-proj&ownerKind=task"),
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as any;
     expect(body.executions).toHaveLength(1);
-    expect(body.executions[0].executionId).toBe("act_test_gw_1");
-    expect(body.executions[0].actionName).toBe("send_notification");
+    expect(body.executions[0].executionId).toBe("tex_test_gw_1");
+    expect(body.executions[0].toolName).toBe("send_notification");
+    expect(body.executions[0].ownerId).toBe("exec_1");
     expect(body.executions[0].durationMs).toBe(42);
   });
 

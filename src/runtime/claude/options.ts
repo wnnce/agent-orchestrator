@@ -7,8 +7,8 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import type { McpServerConfig, ProjectConfig } from "../../domain/types.ts";
 
-/** Name of the in-process MCP server that exposes orchestrator actions. */
-export const ACTION_SERVER_NAME = "orchestrator";
+/** Name of the in-process MCP server that exposes orchestrator tools. */
+export const TOOL_SERVER_NAME = "orchestrator";
 
 /** Built-in tools of a read-only session. */
 export const CLAUDE_READ_ONLY_TOOLS = ["Read", "Grep", "Glob"];
@@ -22,7 +22,7 @@ export interface QueryOptionsParams {
   resume: boolean;
   /** Only Claude Code's read-only tools are offered. */
   readOnly?: boolean | undefined;
-  actionServer?: SdkMcpServerConfig | undefined;
+  toolServer?: SdkMcpServerConfig | undefined;
   /** Local plugins carrying the project's skills. */
   plugins?: SdkPluginConfig[] | undefined;
   canUseTool: CanUseTool;
@@ -39,7 +39,7 @@ export function buildQueryOptions(params: QueryOptionsParams): Options {
   const runtime = params.project.runtime;
   const effort = runtime?.reasoningEffort;
   const mcpServers = toSdkMcpServers(runtime?.mcpServers ?? []);
-  if (params.actionServer) mcpServers[ACTION_SERVER_NAME] = params.actionServer;
+  if (params.toolServer) mcpServers[TOOL_SERVER_NAME] = params.toolServer;
 
   return {
     cwd: params.workspacePath,

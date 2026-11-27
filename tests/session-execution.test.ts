@@ -241,8 +241,11 @@ describe("session execution and control", () => {
     expect((await store.getSession(sessionId))?.status).toBe("closed");
   });
   test("dispatched sessions are regular sessions", async () => {
-    const context = runtime.createActionContext({ sessionId });
-    const dispatched = await context.dispatchTask({
+    const { context } = runtime.createContext(
+      { kind: "session", sessionId },
+      { signal: new AbortController().signal },
+    );
+    const dispatched = await context.sessions.start({
       title: "Child",
       prompt: "work",
       metadata: { taskKey: "spoofed" },
@@ -279,6 +282,38 @@ describe("session execution and control", () => {
     await agent.finish(0);
     await runtime.waitForIdle(started.sessionId);
     expect((await store.getTurn(started.turnId))?.status).toBe("completed");
+  });
+  test("a task's session updates the task's state through its tools", async () => {
+    runtime.taskEngine.updateState("execution:nightly", { cursor: 1 });
+    const route = await runtime.createSession({ title: "Task: nightly" }, "task", undefined, {
+      owner: {
+        kind: "task",
+        taskId: "nightly",
+        taskKey: "execution:nightly",
+        executionId: "exec_1",
+      },
+    });
+    expect((await store.getSession(route.sessionId))?.owner).toMatchObject({ kind: "task" });
+
+    await runtime.turn(route.sessionId, "sync");
+    await agent.started(1);
+    const tools = agent.starts[0]!.context.tools!;
+    expect(tools.specs.map((spec) => spec.name)).toContain("update_task_state");
+    const result = await tools.call("update_task_state", { state: { since: "t1" } });
+    expect(result.ok).toBe(true);
+    expect(await runtime.taskEngine.getState("execution:nightly")).toEqual({
+      cursor: 1,
+      since: "t1",
+    });
+    const [audit] = await store.listToolExecutions({ sessionId: route.sessionId });
+    expect(audit).toMatchObject({
+      toolName: "update_task_state",
+      turnId: agent.starts[0]!.id.replace("runtime-", ""),
+      ownerKind: "task",
+      ownerId: "exec_1",
+    });
+    await agent.finish(0);
+    await runtime.waitForIdle(route.sessionId);
   });
   test("start cleans up task sessions abandoned by a previous run", async () => {
     const task = await runtime.createSession({ taskKey: "execution:nightly" }, "task");

@@ -3,56 +3,26 @@ import {
   type McpSdkServerConfigWithInstance,
   tool,
 } from "@anthropic-ai/claude-agent-sdk";
-import { z } from "zod";
-import type { ActionRegistry } from "../../actions/registry.ts";
-import type { ActionScope } from "../../actions/types.ts";
-import {
-  type ActionCallSite,
-  actionContextFor,
-  actionResultText,
-  resolveActionsForSite,
-} from "../action-bridge.ts";
-import type { RuntimeContext } from "../runtime.ts";
-import { ACTION_SERVER_NAME } from "./options.ts";
+import type { SessionTools } from "../../tools/types.ts";
+import { TOOL_SERVER_NAME } from "./options.ts";
 
 /**
- * Exposes orchestrator actions to Claude Code as an in-process MCP server; Claude sees them as
- * `mcp__orchestrator__<action>`. Returns undefined when there is nothing to expose.
+ * Exposes the session's orchestrator tools to Claude Code as an in-process MCP server; Claude
+ * sees them as `mcp__orchestrator__<tool>`. Returns undefined when there is nothing to expose.
+ * Calls go to `current()`, the tools of the session's latest context.
  */
-export function createActionServer(
-  actionRegistry: ActionRegistry,
-  taskKey: string | undefined,
-  getSite: () => ActionCallSite,
-  actionScope?: ActionScope,
-  actionParameterOverrides?: RuntimeContext["actionParameterOverrides"],
+export function createToolServer(
+  tools: SessionTools,
+  current: () => SessionTools | undefined = () => tools,
 ): McpSdkServerConfigWithInstance | undefined {
-  const actions = resolveActionsForSite(actionRegistry, {
-    taskKey,
-    actionScope,
-    actionParameterOverrides,
-  });
-  if (actions.length === 0) return undefined;
+  if (tools.specs.length === 0) return undefined;
   return createSdkMcpServer({
-    name: ACTION_SERVER_NAME,
-    tools: actions.map((action) =>
-      tool(action.name, action.description, inputShape(action.parameters), async (args) => {
-        const site = getSite();
-        const result = await actionRegistry.execute(action.name, args, actionContextFor(site), {
-          parameterOverride: site.actionParameterOverrides?.[action.name],
-        });
-        return {
-          content: [{ type: "text", text: actionResultText(result) }],
-          isError: !result.success,
-        };
+    name: TOOL_SERVER_NAME,
+    tools: tools.specs.map((spec) =>
+      tool(spec.name, spec.description, spec.input.shape, async (args) => {
+        const result = await (current() ?? tools).call(spec.name, args);
+        return { content: [{ type: "text", text: result.text }], isError: !result.ok };
       }),
     ),
   });
-}
-
-/**
- * The SDK describes tool inputs as a zod object shape. Actions declared with a plain JSON Schema
- * get an open shape; `ActionRegistry.execute` still validates their arguments.
- */
-function inputShape(parameters: unknown): z.ZodRawShape {
-  return parameters instanceof z.ZodObject ? parameters.shape : {};
 }

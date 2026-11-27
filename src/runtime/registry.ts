@@ -1,7 +1,6 @@
 import { fileURLToPath } from "node:url";
 import type { AppConfig } from "../config/config.ts";
 import type { ProjectConfig } from "../domain/types.ts";
-import type { ActionRegistry } from "../actions/registry.ts";
 import { Logger } from "../observability/logger.ts";
 import type { AgentRuntime, RuntimeCapabilities } from "./runtime.ts";
 import { FAKE_CAPABILITIES, FakeRuntime } from "./runtime.ts";
@@ -44,7 +43,6 @@ export interface RuntimeFactoryContext {
   project: ProjectConfig;
   logger: Logger;
   config: AppConfig;
-  actionRegistry?: ActionRegistry | undefined;
   globalProject?: ProjectConfig | undefined;
 }
 
@@ -219,7 +217,7 @@ export function createDefaultRuntimeRegistry(logger = new Logger()): RuntimeRegi
     "codex",
     (ctx) => {
       const codexBinary = fileURLToPath(import.meta.resolve("@openai/codex/bin/codex.js"));
-      return new CodexRuntime(codexBinary, ctx.logger, ctx.globalProject, ctx.actionRegistry);
+      return new CodexRuntime(codexBinary, ctx.logger, ctx.globalProject);
     },
     {
       description: "OpenAI Codex app-server runtime adapter",
@@ -229,21 +227,16 @@ export function createDefaultRuntimeRegistry(logger = new Logger()): RuntimeRegi
     },
   );
 
-  registry.register(
-    "pi",
-    (ctx) => new PiRuntime(ctx.logger, ctx.globalProject, ctx.actionRegistry),
-    {
-      description: "Pi Agent native TypeScript SDK in-process runtime adapter",
-      capabilities: PI_CAPABILITIES,
-      defaultReasoningEfforts: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
-      listModels: createPiModelLister({ logger }),
-    },
-  );
+  registry.register("pi", (ctx) => new PiRuntime(ctx.logger, ctx.globalProject), {
+    description: "Pi Agent native TypeScript SDK in-process runtime adapter",
+    capabilities: PI_CAPABILITIES,
+    defaultReasoningEfforts: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+    listModels: createPiModelLister({ logger }),
+  });
 
   registry.register(
     "claude",
-    (ctx) =>
-      new ClaudeRuntime(ctx.logger, ctx.globalProject, ctx.actionRegistry, ctx.config.dataDir),
+    (ctx) => new ClaudeRuntime(ctx.logger, ctx.globalProject, ctx.config.dataDir),
     {
       description: "Claude Code runtime adapter (Claude Agent SDK)",
       capabilities: CLAUDE_CAPABILITIES,

@@ -1,7 +1,6 @@
 import { z } from "zod";
-import type { PipelineEngine } from "../../pipeline/engine.ts";
-import type { PipelineActionName, PipelineInputSchema } from "../../pipeline/types.ts";
-import type { ActionContext, ActionDefinition } from "../types.ts";
+import type { PipelineInputSchema } from "../../pipeline/types.ts";
+import { defineTool, type PipelineOwner, type ToolContext, type ToolSite } from "../types.ts";
 
 const nonEmptyText = z.string().trim().min(1);
 const metadataSchema = z
@@ -14,7 +13,7 @@ const metadataSchema = z
  * - When the next node declares an `input` schema, `data` is required and typed directly to it.
  * - When the next node declares no `input` schema (or is terminal), `data` is omitted completely.
  */
-export function buildPipelineNextParams(
+export function pipelineNextInput(
   nextInputSchema?: PipelineInputSchema,
 ): z.ZodObject<z.ZodRawShape> {
   const base = {
@@ -112,175 +111,131 @@ const pipelineGetHistoryDetailParams = z.object({
   attempt: z.number().int().positive().optional().describe("Attempt number for nodeId"),
 });
 
-function requirePipelineEngine(context: ActionContext): PipelineEngine {
-  return context.requireService("pipelineEngine");
+/** Pipeline node tools are offered to the agent of a pipeline node, and only to it. */
+const runsPipelineNode = (site: ToolSite): boolean => site.owner?.kind === "pipeline";
+
+function pipelineOwner(ctx: ToolContext): PipelineOwner {
+  if (ctx.owner?.kind !== "pipeline") throw new Error("this session does not run a pipeline node");
+  return ctx.owner;
 }
 
-export const pipelineNextAction: ActionDefinition<z.infer<typeof pipelineNextParams>, unknown> = {
+export const pipelineNextTool = defineTool({
   name: "pipeline_next",
   description:
     "Advance this pipeline run to the fixed next node (or pause for manual confirmation when gate=manual). Requires non-empty summary and content.",
-  parameters: pipelineNextParams,
-  scopes: ["pipeline"],
-  async handler(params, context) {
-    const engine = requirePipelineEngine(context);
-    return engine.registerAgentDecision({
-      sessionId: context.sessionId,
-      turnId: context.turnId,
-      action: "pipeline_next",
-      context: {
-        summary: params.summary,
-        content: params.content,
-        artifacts: params.artifacts,
-        data: params.data,
-        metadata: params.metadata,
-      },
-    });
-  },
-};
+  input: pipelineNextParams,
+  when: runsPipelineNode,
+  run: (input, ctx) =>
+    pipelineOwner(ctx).decide("pipeline_next", {
+      summary: input.summary,
+      content: input.content,
+      artifacts: input.artifacts,
+      data: input.data,
+      metadata: input.metadata,
+    }),
+});
 
-export const pipelinePrevAction: ActionDefinition<z.infer<typeof pipelinePrevParams>, unknown> = {
+export const pipelinePrevTool = defineTool({
   name: "pipeline_prev",
   description:
     "Reject and route this pipeline run back to an allowed upstream node with explicit reason and actionable feedback.",
-  parameters: pipelinePrevParams,
-  scopes: ["pipeline"],
-  async handler(params, context) {
-    const engine = requirePipelineEngine(context);
-    return engine.registerAgentDecision({
-      sessionId: context.sessionId,
-      turnId: context.turnId,
-      action: "pipeline_prev",
-      context: {
-        reason: params.reason,
-        feedback: params.feedback,
-        targetNodeId: params.targetNodeId,
-        data: params.data,
-        metadata: params.metadata,
-      },
-    });
-  },
-};
+  input: pipelinePrevParams,
+  when: runsPipelineNode,
+  run: (input, ctx) =>
+    pipelineOwner(ctx).decide("pipeline_prev", {
+      reason: input.reason,
+      feedback: input.feedback,
+      targetNodeId: input.targetNodeId,
+      data: input.data,
+      metadata: input.metadata,
+    }),
+});
 
-export const pipelineRequestConfirmationAction: ActionDefinition<
-  z.infer<typeof pipelineRequestConfirmationParams>,
-  unknown
-> = {
+export const pipelineRequestConfirmationTool = defineTool({
   name: "pipeline_request_confirmation",
   description:
     "Pause this agent node in waiting_confirmation and ask a human to review, answer a question, or approve before proceeding.",
-  parameters: pipelineRequestConfirmationParams,
-  scopes: ["pipeline"],
-  async handler(params, context) {
-    const engine = requirePipelineEngine(context);
-    return engine.registerAgentDecision({
-      sessionId: context.sessionId,
-      turnId: context.turnId,
-      action: "pipeline_request_confirmation",
-      context: {
-        summary: params.summary,
-        question: params.question,
-        options: params.options,
-        content: params.content,
-        artifacts: params.artifacts,
-        data: params.data,
-        metadata: params.metadata,
-      },
-    });
-  },
-};
+  input: pipelineRequestConfirmationParams,
+  when: runsPipelineNode,
+  run: (input, ctx) =>
+    pipelineOwner(ctx).decide("pipeline_request_confirmation", {
+      summary: input.summary,
+      question: input.question,
+      options: input.options,
+      content: input.content,
+      artifacts: input.artifacts,
+      data: input.data,
+      metadata: input.metadata,
+    }),
+});
 
-export const pipelineFailAction: ActionDefinition<z.infer<typeof pipelineFailParams>, unknown> = {
+export const pipelineFailTool = defineTool({
   name: "pipeline_fail",
   description:
     "Mark this pipeline node as failed due to an unrecoverable blocker. Preserves the workspace for human inspection, retry, or cancellation.",
-  parameters: pipelineFailParams,
-  scopes: ["pipeline"],
-  async handler(params, context) {
-    const engine = requirePipelineEngine(context);
-    return engine.registerAgentDecision({
-      sessionId: context.sessionId,
-      turnId: context.turnId,
-      action: "pipeline_fail",
-      context: {
-        reason: params.reason,
-        summary: params.summary,
-        data: params.data,
-        metadata: params.metadata,
-      },
-    });
-  },
-};
+  input: pipelineFailParams,
+  when: runsPipelineNode,
+  run: (input, ctx) =>
+    pipelineOwner(ctx).decide("pipeline_fail", {
+      reason: input.reason,
+      summary: input.summary,
+      data: input.data,
+      metadata: input.metadata,
+    }),
+});
 
-export const pipelineGetContextAction: ActionDefinition<
-  z.infer<typeof pipelineGetContextParams>,
-  unknown
-> = {
+export const pipelineGetContextTool = defineTool({
   name: "pipeline_get_context",
   description:
     "Read the current pipeline run overview, branch, node topology, direct upstream handoff context, and latest summaries of prior nodes.",
-  parameters: pipelineGetContextParams,
-  scopes: ["pipeline"],
-  async handler(_params, context) {
-    const engine = requirePipelineEngine(context);
-    return engine.getContextForSession(context.sessionId);
-  },
-};
+  input: pipelineGetContextParams,
+  when: runsPipelineNode,
+  run: (_input, ctx) => pipelineOwner(ctx).context(),
+});
 
-export const pipelineListHistoryAction: ActionDefinition<
-  z.infer<typeof pipelineListHistoryParams>,
-  unknown
-> = {
+export const pipelineListHistoryTool = defineTool({
   name: "pipeline_list_history",
   description:
     "List all recorded pipeline actions and transitions for this run in chronological order, optionally filtered by nodeId or action.",
-  parameters: pipelineListHistoryParams,
-  scopes: ["pipeline"],
-  async handler(params, context) {
-    const engine = requirePipelineEngine(context);
-    const entries = await engine.listHistoryForSession(context.sessionId, {
-      nodeId: params.nodeId,
-      action: params.action as PipelineActionName | undefined,
-    });
-    return { entries };
-  },
-};
+  input: pipelineListHistoryParams,
+  when: runsPipelineNode,
+  run: async (input, ctx) => ({
+    entries: await pipelineOwner(ctx).history.list({
+      nodeId: input.nodeId,
+      action: input.action,
+    }),
+  }),
+});
 
-export const pipelineGetHistoryDetailAction: ActionDefinition<
-  z.infer<typeof pipelineGetHistoryDetailParams>,
-  unknown
-> = {
+export const pipelineGetHistoryDetailTool = defineTool({
   name: "pipeline_get_history_detail",
   description:
     "Read the full saved context (content, feedback, artifacts, data, humanNote) and engine result of a specific historical pipeline action record.",
-  parameters: pipelineGetHistoryDetailParams,
-  scopes: ["pipeline"],
-  async handler(params, context) {
-    if (!params.recordId && !params.sequence && !params.nodeId) {
+  input: pipelineGetHistoryDetailParams,
+  when: runsPipelineNode,
+  async run(input, ctx) {
+    if (!input.recordId && !input.sequence && !input.nodeId) {
       throw new Error(
         "Provide at least one selector: recordId, sequence, or nodeId (with optional attempt).",
       );
     }
-    const engine = requirePipelineEngine(context);
-    const record = await engine.getHistoryDetailForSession(context.sessionId, {
-      recordId: params.recordId,
-      sequence: params.sequence,
-      nodeId: params.nodeId,
-      attempt: params.attempt,
+    const record = await pipelineOwner(ctx).history.get({
+      recordId: input.recordId,
+      sequence: input.sequence,
+      nodeId: input.nodeId,
+      attempt: input.attempt,
     });
-    if (!record) {
-      throw new Error("Matching pipeline history record not found.");
-    }
+    if (!record) throw new Error("Matching pipeline history record not found.");
     return { record };
   },
-};
+});
 
-export const pipelineActions: readonly ActionDefinition<unknown, unknown>[] = [
-  pipelineNextAction as ActionDefinition<unknown, unknown>,
-  pipelinePrevAction as ActionDefinition<unknown, unknown>,
-  pipelineRequestConfirmationAction as ActionDefinition<unknown, unknown>,
-  pipelineFailAction as ActionDefinition<unknown, unknown>,
-  pipelineGetContextAction as ActionDefinition<unknown, unknown>,
-  pipelineListHistoryAction as ActionDefinition<unknown, unknown>,
-  pipelineGetHistoryDetailAction as ActionDefinition<unknown, unknown>,
+export const pipelineNodeTools = [
+  pipelineNextTool,
+  pipelinePrevTool,
+  pipelineRequestConfirmationTool,
+  pipelineFailTool,
+  pipelineGetContextTool,
+  pipelineListHistoryTool,
+  pipelineGetHistoryDetailTool,
 ];

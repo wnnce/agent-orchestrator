@@ -1,17 +1,9 @@
-import { createActionContext } from "../../actions/context.ts";
-import type { ActionRegistry } from "../../actions/registry.ts";
-import type { ActionContext, ActionResult } from "../../actions/types.ts";
-import type { McpServerConfig, ProjectVars, TaskExecutionLogRecord } from "../../domain/types.ts";
-import { ProjectMcpClientPool, type McpClientFactory } from "../../mcp/index.ts";
+import type { ContextOptions, ScopedContext } from "../../context/index.ts";
+import type { TaskOrigin } from "../../domain/origin.ts";
+import type { TaskExecutionLogRecord } from "../../domain/types.ts";
 import { Logger } from "../../observability/logger.ts";
-import {
-  buildNowPromptScope,
-  renderPromptTemplate,
-  type ProjectPromptScope,
-} from "../../prompt/template.ts";
 import { TaskLogBuffer } from "../log-buffer.ts";
 import type { TaskRunContext, TsTaskHandler, TsTaskResult } from "../sdk.ts";
-import type { StartPipelineRunParams, StartPipelineRunResult } from "../../pipeline/types.ts";
 import type {
   ITaskExecutor,
   TaskDefinition,
@@ -21,30 +13,13 @@ import type {
 
 export interface TsTaskExecutorOptions {
   readonly resolveHandler: (task: TaskDefinition) => Promise<TsTaskHandler>;
-  readonly actionRegistry?: ActionRegistry | undefined;
-  readonly getEnv?: ((projectId: string) => Record<string, string> | undefined) | undefined;
-  readonly getVars?: ((projectId: string) => ProjectVars | undefined) | undefined;
-  readonly getProjectScope?:
-    | ((projectId: string) => ProjectPromptScope | Record<string, unknown> | undefined)
-    | undefined;
-  readonly getWorkdir?: ((projectId: string) => string | undefined) | undefined;
-  readonly getMcpServers?:
-    | ((projectId: string) => readonly McpServerConfig[] | undefined)
-    | undefined;
-  readonly mcpClientFactory?: McpClientFactory | undefined;
-  readonly createActionContext?:
-    | ((context: TaskExecutionContext) => ActionContext)
-    | undefined;
-  readonly appendLogs?:
-    | ((logs: readonly TaskExecutionLogRecord[]) => Promise<void>)
-    | undefined;
+  /** The project's capabilities acting for one task execution. */
+  readonly createContext: (origin: TaskOrigin, options: ContextOptions) => ScopedContext;
+  readonly appendLogs?: ((logs: readonly TaskExecutionLogRecord[]) => Promise<void>) | undefined;
   readonly logFlushThreshold?: number | undefined;
   readonly logMaxBatchSize?: number | undefined;
   readonly logMaxConsecutiveFailures?: number | undefined;
   readonly defaultTimeoutMs?: number | undefined;
-  readonly startPipelineRun?:
-    | ((params: StartPipelineRunParams) => Promise<StartPipelineRunResult>)
-    | undefined;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -71,20 +46,6 @@ export class TsTaskExecutor implements ITaskExecutor {
     const started = Date.now();
     const { task } = context;
 
-    const workdir =
-      (this.options.getWorkdir ? this.options.getWorkdir(task.projectId) : undefined) ??
-      context.workspacePath ??
-      process.cwd();
-    const env: Readonly<Record<string, string>> = Object.freeze({
-      ...(this.options.getEnv ? (this.options.getEnv(task.projectId) ?? {}) : {}),
-    });
-    const vars: Readonly<ProjectVars> = Object.freeze({
-      ...(this.options.getVars ? (this.options.getVars(task.projectId) ?? {}) : {}),
-    });
-    const projectScope = this.options.getProjectScope
-      ? this.options.getProjectScope(task.projectId)
-      : { id: task.projectId };
-
     // Combine parent AbortSignal (from TaskEngine timeoutMs) with optional defaultTimeoutMs.
     const abortController = new AbortController();
     let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
@@ -110,98 +71,49 @@ export class TsTaskExecutor implements ITaskExecutor {
     const effectiveContext: TaskExecutionContext = { ...context, signal };
 
     let localState: Record<string, unknown> = { ...context.stateBefore };
-
-    const actionContext: ActionContext = this.options.createActionContext
-      ? this.options.createActionContext(effectiveContext)
-      : context.createActionContext
-        ? context.createActionContext({
-            sessionId: `task_ts_${task.taskId}`,
-            signal,
-          })
-        : createActionContext({
-            projectId: task.projectId,
-            sessionId: `task_ts_${task.taskId}`,
-            taskKey: task.taskKey,
-            workspacePath: workdir,
-            logger: this.logger,
-            signal,
-            onGetTaskState: async () => ({ ...localState }),
-            onUpdateTaskState: async (delta, opts) => {
-              localState = opts?.merge === false ? { ...delta } : { ...localState, ...delta };
-              context.updateState?.(localState);
-              return { ...localState };
-            },
-          });
-
-    const getState = async (): Promise<Record<string, unknown>> => {
-      const current = await actionContext.getTaskState();
-      localState = { ...current };
-      return { ...current };
-    };
-
+    const getState = async (): Promise<Record<string, unknown>> => ({ ...localState });
     const updateState = async (
       delta: Record<string, unknown>,
       opts?: { merge?: boolean | undefined },
     ): Promise<Record<string, unknown>> => {
-      const updated = await actionContext.updateTaskState(delta, opts);
-      localState = { ...updated };
+      localState = opts?.merge === false ? { ...delta } : { ...localState, ...delta };
       context.updateState?.(localState);
-      return { ...updated };
+      return { ...localState };
     };
 
-    const logBuffer =
-      context.executionId && this.options.appendLogs
-        ? new TaskLogBuffer({
-            executionId: context.executionId,
-            projectId: task.projectId,
-            taskKey: task.taskKey,
-            writer: this.options.appendLogs,
-            flushThreshold: this.options.logFlushThreshold,
-            maxBatchSize: this.options.logMaxBatchSize,
-            maxConsecutiveFailures: this.options.logMaxConsecutiveFailures,
-            hostLogger: this.logger,
-          })
-        : undefined;
+    const logBuffer = this.options.appendLogs
+      ? new TaskLogBuffer({
+          executionId: context.executionId,
+          projectId: task.projectId,
+          taskKey: task.taskKey,
+          writer: this.options.appendLogs,
+          flushThreshold: this.options.logFlushThreshold,
+          maxBatchSize: this.options.logMaxBatchSize,
+          maxConsecutiveFailures: this.options.logMaxConsecutiveFailures,
+          hostLogger: this.logger,
+        })
+      : undefined;
 
     const taskLogger = logBuffer
       ? this.logger.withListener(
-          {
-            projectId: task.projectId,
-            taskKey: task.taskKey,
-            ...(context.executionId ? { executionId: context.executionId } : {}),
-          },
+          { projectId: task.projectId, taskKey: task.taskKey, executionId: context.executionId },
           (entry) => logBuffer.push(entry),
           { captureAllLevels: true },
         )
       : this.logger.child({ projectId: task.projectId, taskKey: task.taskKey });
 
-    const mcpServers = this.options.getMcpServers
-      ? (this.options.getMcpServers(task.projectId) ?? [])
-      : [];
-    const mcpPool = new ProjectMcpClientPool({
-      servers: mcpServers,
-      workdir,
-      env,
-      signal,
-      logger: taskLogger,
-      ...(this.options.mcpClientFactory ? { clientFactory: this.options.mcpClientFactory } : {}),
-    });
-
-    const runContext: TaskRunContext = {
-      projectId: task.projectId,
-      taskId: task.taskId,
-      taskKey: task.taskKey,
-      taskName: task.name,
-      workdir,
-      env,
-      vars,
-      logger: taskLogger,
-      signal,
-      state: Object.freeze({ ...context.stateBefore }),
-      renderPrompt: (template, extraScopes) =>
-        renderPromptTemplate(template, {
-          ...(projectScope ? { project: projectScope } : {}),
-          vars,
+    const scoped = this.options.createContext(
+      {
+        kind: "task",
+        taskId: task.taskId,
+        taskKey: task.taskKey,
+        executionId: context.executionId,
+      },
+      {
+        signal,
+        logger: taskLogger,
+        timezone: task.timezone,
+        renderScopes: () => ({
           task: {
             id: task.taskId,
             key: task.taskKey,
@@ -210,47 +122,39 @@ export class TsTaskExecutor implements ITaskExecutor {
             timezone: task.timezone ?? "",
           },
           state: localState,
-          now: buildNowPromptScope(task.timezone),
-          ...(extraScopes ?? {}),
-        }).rendered,
+        }),
+      },
+    );
+    const project = scoped.context;
+
+    const runContext: TaskRunContext = {
+      projectId: task.projectId,
+      taskId: task.taskId,
+      taskKey: task.taskKey,
+      taskName: task.name,
+      workdir: project.project.dir,
+      env: project.project.env,
+      vars: project.project.vars,
+      logger: project.logger,
+      signal,
+      state: Object.freeze({ ...context.stateBefore }),
+      renderPrompt: (template, extraScopes) => project.render(template, extraScopes),
       getState,
       updateState,
-      notify: (message, options) => actionContext.notify(message, options),
-      createArtifact: (params) => actionContext.createArtifact(params),
-      emit: (type, payload) => actionContext.emit(type, payload),
-      dispatchTask: (params) => actionContext.dispatchTask(params),
-      invokeAction: async <T = unknown>(
-        name: string,
-        params: Record<string, unknown>,
-      ): Promise<ActionResult<T>> => {
-        if (!this.options.actionRegistry) {
-          throw new Error("ActionRegistry is not configured for TS task execution");
-        }
-        return this.options.actionRegistry.execute<T>(name, params, actionContext);
-      },
-      callMcpTool: <T = unknown>(
-        serverName: string,
-        toolName: string,
-        args?: Record<string, unknown>,
-        callOptions?: { readonly timeoutMs?: number | undefined; readonly signal?: AbortSignal | undefined },
-      ) => mcpPool.callTool<T>(serverName, toolName, args, callOptions),
-      listMcpTools: (serverName, callOptions) => mcpPool.listTools(serverName, callOptions),
-      startPipelineRun: async (params: StartPipelineRunParams): Promise<StartPipelineRunResult> => {
-        if (!this.options.startPipelineRun) {
-          throw new Error("PipelineEngine is not configured for TS task execution");
-        }
-        return this.options.startPipelineRun({
-          ...params,
-          createdBy: params.createdBy ?? `task:${task.taskKey}`,
-        });
-      },
+      notify: (message, options) => project.notify(message, options),
+      createArtifact: (params) => project.artifacts.create(params),
+      dispatchTask: (params) => project.sessions.start(params),
+      callMcpTool: (serverName, toolName, args, callOptions) =>
+        project.mcp.call(serverName, toolName, args, callOptions),
+      listMcpTools: (serverName, callOptions) => project.mcp.list(serverName, callOptions),
+      startPipelineRun: (params) => project.pipelines.start(params),
     };
 
     try {
       const handler = await this.options.resolveHandler(task);
 
       this.logger.info("starting ts task execution", {
-        ...(context.executionId ? { executionId: context.executionId } : {}),
+        executionId: context.executionId,
         taskKey: task.taskKey,
         taskId: task.taskId,
         projectId: task.projectId,
@@ -287,7 +191,7 @@ export class TsTaskExecutor implements ITaskExecutor {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.error("ts task execution failed", {
-        ...(context.executionId ? { executionId: context.executionId } : {}),
+        executionId: context.executionId,
         taskKey: task.taskKey,
         error: msg,
       });
@@ -304,7 +208,7 @@ export class TsTaskExecutor implements ITaskExecutor {
       if (context.signal && onParentAbort) {
         context.signal.removeEventListener("abort", onParentAbort);
       }
-      await mcpPool.close();
+      await scoped.dispose();
       if (logBuffer) {
         await logBuffer.flush();
       }

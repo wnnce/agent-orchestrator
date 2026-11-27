@@ -111,8 +111,6 @@ export function parseTaskMarkdown(
     type: executorType,
     ...(result.data.executor !== undefined ? { executor: result.data.executor } : {}),
     ...(result.data.command !== undefined ? { command: result.data.command } : {}),
-    ...(result.data.action !== undefined ? { action: result.data.action } : {}),
-    ...(result.data.actionParams !== undefined ? { actionParams: result.data.actionParams } : {}),
     ...(result.data.timeoutMs !== undefined ? { timeoutMs: result.data.timeoutMs } : {}),
     ...(taskRuntime ? { runtime: taskRuntime } : {}),
   };

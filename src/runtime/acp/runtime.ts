@@ -8,7 +8,6 @@ import {
   type SessionNotification,
   type ToolKind,
 } from "@agentclientprotocol/sdk";
-import { ActionRegistry, defaultActionRegistry } from "../../actions/index.ts";
 import type { ApprovalRequestedPayload } from "../../domain/events.ts";
 import type { ProjectConfig } from "../../domain/types.ts";
 import { Logger } from "../../observability/logger.ts";
@@ -23,7 +22,7 @@ import {
   type RuntimeTurn,
 } from "../runtime.ts";
 import { ACPClient } from "./client.ts";
-import { ACPMcpBridge, ACP_ACTION_SERVER_NAME } from "./mcp-bridge.ts";
+import { ACPMcpBridge, ACP_TOOL_SERVER_NAME } from "./mcp-bridge.ts";
 import { ACPNormalizer } from "./normalizer.ts";
 import {
   resolveStandardConfigUpdates,
@@ -68,7 +67,7 @@ interface PendingACPPermission {
 }
 
 const READ_ONLY_TOOL_KINDS: ReadonlySet<ToolKind> = new Set(["read", "search", "think"]);
-const MCP_ORCHESTRATOR_PREFIX = `mcp__${ACP_ACTION_SERVER_NAME}__`;
+const MCP_ORCHESTRATOR_PREFIX = `mcp__${ACP_TOOL_SERVER_NAME}__`;
 
 function selectPermissionOption(
   options: readonly PermissionOption[],
@@ -123,13 +122,12 @@ export class ACPRuntime implements AgentRuntime {
     private readonly profile: ACPProfile,
     private readonly logger = new Logger(),
     private readonly globalProject?: ProjectConfig | undefined,
-    private readonly actionRegistry: ActionRegistry = defaultActionRegistry,
     private readonly dataDir = ".data",
   ) {
     this.name = profile.name;
     this.type = profile.type;
     this.capabilities = profile.capabilities;
-    this.mcpBridge = new ACPMcpBridge(this.actionRegistry);
+    this.mcpBridge = new ACPMcpBridge();
   }
 
   async startSession(context: RuntimeContext): Promise<RuntimeSession> {
@@ -149,17 +147,7 @@ export class ACPRuntime implements AgentRuntime {
       eventChain: Promise.resolve(),
     };
 
-    this.mcpBridge.registerSession(bridgeSessionId, () => ({
-      project: managed.context.project,
-      workspacePath: managed.context.workspacePath,
-      sessionId: managed.sessionId,
-      turnId: managed.activeTurn?.turnId,
-      taskKey: managed.context.taskKey,
-      actionScope: managed.context.actionScope,
-      actionParameterOverrides: managed.context.actionParameterOverrides,
-      createActionContext: managed.context.createActionContext,
-      logger: this.logger,
-    }));
+    this.mcpBridge.registerSession(bridgeSessionId, () => managed.context.tools);
 
     try {
       const response = await client.newSession({
@@ -209,17 +197,7 @@ export class ACPRuntime implements AgentRuntime {
       eventChain: Promise.resolve(),
     };
 
-    this.mcpBridge.registerSession(bridgeSessionId, () => ({
-      project: managed.context.project,
-      workspacePath: managed.context.workspacePath,
-      sessionId: runtimeSessionId,
-      turnId: managed.activeTurn?.turnId,
-      taskKey: managed.context.taskKey,
-      actionScope: managed.context.actionScope,
-      actionParameterOverrides: managed.context.actionParameterOverrides,
-      createActionContext: managed.context.createActionContext,
-      logger: this.logger,
-    }));
+    this.mcpBridge.registerSession(bridgeSessionId, () => managed.context.tools);
 
     try {
       const caps = client.agentCapabilities;
@@ -691,15 +669,11 @@ export class ACPRuntime implements AgentRuntime {
     bridgeSessionId: string,
   ): { mcpServers: McpServer[]; orchestratorTools: Set<string> } {
     const projectServers = toACPMcpServers(context.project.runtime?.mcpServers ?? []);
-    const bridgeServer = this.mcpBridge.mcpServerForSession(
-      bridgeSessionId,
-      context.taskKey,
-      context.actionScope,
-    );
+    const bridgeServer = this.mcpBridge.mcpServerForSession(bridgeSessionId, context.tools);
     const mcpServers = bridgeServer ? [...projectServers, bridgeServer] : projectServers;
-    const orchestratorTools = bridgeServer
-      ? this.mcpBridge.toolNamesForScope(context.taskKey, context.actionScope)
-      : new Set<string>();
+    const orchestratorTools = new Set(
+      bridgeServer ? (context.tools?.specs ?? []).map((spec) => spec.name) : [],
+    );
     return { mcpServers, orchestratorTools };
   }
 

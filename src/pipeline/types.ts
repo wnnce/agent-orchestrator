@@ -426,6 +426,11 @@ export interface PipelineReworkInfo {
   readonly feedback: string;
 }
 
+export interface PipelineHistoryFilter {
+  readonly nodeId?: string | undefined;
+  readonly action?: PipelineActionName | undefined;
+}
+
 export interface PipelineGlobalContextView {
   readonly runId: string;
   readonly projectId: string;

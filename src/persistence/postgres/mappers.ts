@@ -1,5 +1,5 @@
 import type {
-  ActionExecutionRecord,
+  ToolExecutionRecord,
   ArtifactRecord,
   EventRecord,
   NotificationDelivery,
@@ -11,7 +11,7 @@ import type {
   TurnUsage,
 } from "../../domain/types.ts";
 import type {
-  ActionExecutionRow,
+  ToolExecutionRow,
   ArtifactRow,
   EventRow,
   NotificationDeliveryRow,
@@ -42,6 +42,7 @@ export function toSessionRoute(row: SessionRow): SessionRoute {
     configRevision: row.configRevision,
     status: row.status,
     source: row.source ?? "unknown",
+    ...(row.owner !== null ? { owner: row.owner } : {}),
     ...(row.externalChannel !== null ? { externalChannel: row.externalChannel } : {}),
     ...(row.externalConversationId !== null
       ? { externalConversationId: row.externalConversationId }
@@ -193,16 +194,16 @@ export function toScheduledJobRecord(row: ScheduledJobRow): ScheduledJobRecord {
   };
 }
 
-export function toActionExecutionRecord(row: ActionExecutionRow): ActionExecutionRecord {
+export function toToolExecutionRecord(row: ToolExecutionRow): ToolExecutionRecord {
   return {
     id: row.id,
     executionId: row.executionId,
     projectId: row.projectId,
-    ...(row.sessionId !== null ? { sessionId: row.sessionId } : {}),
+    sessionId: row.sessionId,
     ...(row.turnId !== null ? { turnId: row.turnId } : {}),
-    ...(row.taskKey !== null ? { taskKey: row.taskKey } : {}),
-    caller: row.caller,
-    actionName: row.actionName,
+    ...(row.ownerKind !== null ? { ownerKind: row.ownerKind } : {}),
+    ...(row.ownerId !== null ? { ownerId: row.ownerId } : {}),
+    toolName: row.toolName,
     parameters: row.parameters ?? {},
     status: row.status,
     ...(row.result !== null ? { result: row.result } : {}),

@@ -2,7 +2,7 @@ import { test, expect } from "bun:test";
 import { mkdir, mkdtemp, writeFile, chmod, rm, realpath } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { ActionRegistry } from "../src/actions/registry.ts";
+import { fakeSessionTools } from "./helpers/session-tools.ts";
 import { CodexRuntime } from "../src/runtime/codex/index.ts";
 import type { RuntimeEvent } from "../src/runtime/runtime.ts";
 import type { ProjectConfig } from "../src/domain/types.ts";
@@ -144,20 +144,19 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 `,
     { mode: 0o755 },
   );
-  const actions = new ActionRegistry(new Logger({ sink: () => {} }));
-  actions.register({
-    name: "echo",
-    description: "Echo",
-    parameters: z.object({ text: z.string() }),
-    async handler(params: { text: string }) {
-      return { echoed: params.text };
+  const { tools, calls } = fakeSessionTools([
+    {
+      name: "echo",
+      input: z.object({ text: z.string() }),
+      run: (args) => ({ echoed: (args as { text: string }).text }),
     },
-  });
-  const runtime = new CodexRuntime(script, new Logger({ sink: () => {} }), undefined, actions);
+  ]);
+  const runtime = new CodexRuntime(script, new Logger({ sink: () => {} }));
   const events: RuntimeEvent[] = [];
   const context = {
     project,
     workspacePath: root,
+    tools,
     onEvent: (event: RuntimeEvent) => {
       events.push(event);
     },
@@ -177,6 +176,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       "call-1",
     ]);
     expect(toolEvents[1]!.payload).toMatchObject({ toolName: "echo", status: "success" });
+    expect(calls).toEqual([{ name: "echo", args: { text: "hi" } }]);
   } finally {
     await runtime.stop();
     await rm(root, { recursive: true, force: true });

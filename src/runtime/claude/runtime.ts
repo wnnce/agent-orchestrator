@@ -1,7 +1,6 @@
 import path from "node:path";
 import { mkdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { query as sdkQuery, type SdkPluginConfig } from "@anthropic-ai/claude-agent-sdk";
-import type { ActionRegistry } from "../../actions/registry.ts";
 import type { ProjectConfig } from "../../domain/types.ts";
 import { Logger } from "../../observability/logger.ts";
 import type {
@@ -15,7 +14,7 @@ import type {
 import { CLAUDE_CAPABILITIES } from "./capabilities.ts";
 import { buildQueryOptions } from "./options.ts";
 import { ClaudeSession, type ClaudeQueryFn } from "./session.ts";
-import { createActionServer } from "./tools.ts";
+import { createToolServer } from "./tools.ts";
 import { projectSkillSources, type SkillSource } from "../skills.ts";
 
 /**
@@ -34,7 +33,6 @@ export class ClaudeRuntime implements AgentRuntime {
   constructor(
     private readonly logger = new Logger(),
     private readonly globalProject?: ProjectConfig | undefined,
-    private readonly actionRegistry?: ActionRegistry | undefined,
     /** Service data directory; skill plugins are generated under <dataDir>/claude-plugins. */
     private readonly dataDir = ".data",
     private readonly query: ClaudeQueryFn = sdkQuery,
@@ -138,24 +136,7 @@ export class ClaudeRuntime implements AgentRuntime {
           resume,
           readOnly: context.readOnly,
           plugins,
-          actionServer:
-            this.actionRegistry &&
-            createActionServer(
-              this.actionRegistry,
-              context.taskKey,
-              () => ({
-                project: session.context.project,
-                workspacePath: session.context.workspacePath,
-                sessionId,
-                taskKey: session.context.taskKey,
-                actionScope: session.context.actionScope,
-                actionParameterOverrides: session.context.actionParameterOverrides,
-                createActionContext: session.context.createActionContext,
-                logger: this.logger,
-              }),
-              context.actionScope,
-              context.actionParameterOverrides,
-            ),
+          toolServer: context.tools && createToolServer(context.tools, () => session.context.tools),
           canUseTool,
           stderr: (data) => this.logger.debug("claude code stderr", { sessionId, data }),
         }),

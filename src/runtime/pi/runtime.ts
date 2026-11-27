@@ -12,7 +12,6 @@ import {
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { Model } from "@earendil-works/pi-ai/compat";
-import type { ActionRegistry } from "../../actions/registry.ts";
 import type { ProjectConfig, TurnUsage } from "../../domain/types.ts";
 import { Logger } from "../../observability/logger.ts";
 import type {
@@ -28,7 +27,7 @@ import { projectSkillSources } from "../skills.ts";
 import { buildTurnUsage, normalizeTokenUsage } from "../usage.ts";
 import { PI_CAPABILITIES } from "./capabilities.ts";
 import { PiNormalizer, asAssistantMessage, assistantText } from "./normalizer.ts";
-import { bridgeActionsToPiTools } from "./tools.ts";
+import { piToolsFor } from "./tools.ts";
 import { PI_THINKING_LEVELS, type PiSessionWrapper } from "./types.ts";
 
 /** Built-in tools of a read-only session. */
@@ -38,7 +37,7 @@ export const PI_READ_ONLY_TOOLS = ["read", "grep", "find", "ls"];
  * Pi Agent (@earendil-works/pi-coding-agent) in process. Pi reads its own configuration from its
  * agent directory (PI_CODING_AGENT_DIR, by default ~/.pi/agent): settings, models.json, auth.json,
  * extensions and sessions. A session adds only what the project sets: model, thinking level, MCP
- * servers, orchestrator actions and skills, and read-only tools for a read-only session.
+ * servers, orchestrator tools and skills, and read-only tools for a read-only session.
  */
 export class PiRuntime implements AgentRuntime {
   readonly name = "pi";
@@ -51,7 +50,6 @@ export class PiRuntime implements AgentRuntime {
   constructor(
     private readonly logger = new Logger(),
     private readonly globalProject?: ProjectConfig | undefined,
-    private readonly actionRegistry?: ActionRegistry | undefined,
     modelRuntime?: ModelRuntime | undefined,
   ) {
     if (modelRuntime) this.models = Promise.resolve(modelRuntime);
@@ -252,21 +250,7 @@ export class PiRuntime implements AgentRuntime {
     const model = this.resolveModel(context.project, modelRuntime);
     const thinkingLevel = this.thinkingLevel(context.project);
 
-    const wrapperHolder: { wrapper?: PiSessionWrapper } = {};
-
-    let customTools: ToolDefinition[] = [];
-    if (this.actionRegistry) {
-      customTools = bridgeActionsToPiTools(this.actionRegistry, () => ({
-        project: context.project,
-        workspacePath: context.workspacePath,
-        sessionId: wrapperHolder.wrapper?.sessionId ?? existingSessionId ?? "",
-        turnId: wrapperHolder.wrapper?.currentTurnId,
-        taskKey: context.taskKey,
-        actionScope: context.actionScope,
-        actionParameterOverrides: context.actionParameterOverrides,
-        createActionContext: context.createActionContext,
-      }));
-    }
+    const customTools: ToolDefinition[] = context.tools ? piToolsFor(context.tools) : [];
 
     let sessionManager = SessionManager.create(context.workspacePath);
     if (existingSessionId) {
@@ -334,7 +318,6 @@ export class PiRuntime implements AgentRuntime {
       context,
       deliveries: Promise.resolve(),
     };
-    wrapperHolder.wrapper = wrapper;
 
     const unsubscribe = session.subscribe((event) => {
       // Bookkeeping runs as Pi emits, while the event's turn is still the current one.

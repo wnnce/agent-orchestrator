@@ -1,7 +1,7 @@
 import type { OriginRef } from "../../domain/origin.ts";
 import type {
-  ActionExecutionFilter,
-  ActionExecutionRecord,
+  ToolExecutionFilter,
+  ToolExecutionRecord,
   ArtifactRecord,
   EventRecord,
   InboundMessageRecord,
@@ -82,8 +82,8 @@ export class MemoryStore implements Store {
     return this.taskAuditStore.scheduledJobs;
   }
 
-  get actionExecutions(): ActionExecutionRecord[] {
-    return this.taskAuditStore.actionExecutions;
+  get toolExecutions(): ToolExecutionRecord[] {
+    return this.taskAuditStore.toolExecutions;
   }
 
   createSession(route: SessionRoute): Promise<SessionRoute> {
@@ -238,12 +238,12 @@ export class MemoryStore implements Store {
     return this.taskAuditStore.updateScheduledJobStatus(jobId, status, summary, finishedAt);
   }
 
-  recordActionExecution(record: ActionExecutionRecord): Promise<void> {
-    return this.taskAuditStore.recordActionExecution(record);
+  recordToolExecution(record: ToolExecutionRecord): Promise<void> {
+    return this.taskAuditStore.recordToolExecution(record);
   }
 
-  listActionExecutions(filter?: ActionExecutionFilter): Promise<ActionExecutionRecord[]> {
-    return this.taskAuditStore.listActionExecutions(filter);
+  listToolExecutions(filter?: ToolExecutionFilter): Promise<ToolExecutionRecord[]> {
+    return this.taskAuditStore.listToolExecutions(filter);
   }
 
   getProjectOverview(

@@ -10,7 +10,7 @@ import type {
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import { ActionRegistry } from "../src/actions/registry.ts";
+import { fakeSessionTools } from "./helpers/session-tools.ts";
 import { Logger } from "../src/observability/logger.ts";
 import { createGlobalProjectConfig } from "../src/project/global.ts";
 import type { ProjectConfig } from "../src/domain/types.ts";
@@ -145,7 +145,7 @@ describe("ClaudeRuntime", () => {
         events.push(event);
       },
     };
-    runtime = new ClaudeRuntime(quiet, undefined, undefined, root, (params) => {
+    runtime = new ClaudeRuntime(quiet, undefined, root, (params) => {
       const query = new ScriptedQuery(params.options, params.prompt, failInit);
       queries.push(query);
       return query;
@@ -301,20 +301,16 @@ describe("ClaudeRuntime", () => {
     );
   });
 
-  test("orchestrator actions are offered to the session and never need approval", async () => {
-    const registry = new ActionRegistry();
-    registry.register({
-      name: "ping",
-      description: "Replies pong",
-      parameters: z.object({ text: z.string() }),
-      handler: async () => ({ pong: true }),
-    });
-    const withActions = new ClaudeRuntime(quiet, undefined, registry, root, (params) => {
+  test("orchestrator tools are offered to the session and never need approval", async () => {
+    const { tools } = fakeSessionTools([
+      { name: "ping", input: z.object({ text: z.string() }), run: () => ({ pong: true }) },
+    ]);
+    const withActions = new ClaudeRuntime(quiet, undefined, root, (params) => {
       const query = new ScriptedQuery(params.options, params.prompt);
       queries.push(query);
       return query;
     });
-    await withActions.startSession(context);
+    await withActions.startSession({ ...context, tools });
     expect(queries[0]!.options.mcpServers?.orchestrator).toMatchObject({ type: "sdk" });
     const canUseTool = queries[0]!.options.canUseTool as CanUseTool;
     const decision = await canUseTool("mcp__orchestrator__ping", { text: "hi" }, {
@@ -332,7 +328,7 @@ describe("ClaudeRuntime", () => {
     await mkdir(join(globalDir, ".skills", "shared"), { recursive: true });
     await mkdir(join(projectDir, ".skills", "deploy"), { recursive: true });
     const globalProject = createGlobalProjectConfig(globalDir, "claude");
-    const withSkills = new ClaudeRuntime(quiet, globalProject, undefined, root, (params) => {
+    const withSkills = new ClaudeRuntime(quiet, globalProject, root, (params) => {
       const query = new ScriptedQuery(params.options, params.prompt);
       queries.push(query);
       return query;

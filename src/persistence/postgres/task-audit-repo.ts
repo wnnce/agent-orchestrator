@@ -2,8 +2,8 @@ import { and, asc, desc, eq, gt, isNotNull, lt, lte, or } from "drizzle-orm";
 import {
   NOT_DELETED,
   ScheduledJobStatus,
-  type ActionExecutionFilter,
-  type ActionExecutionRecord,
+  type ToolExecutionFilter,
+  type ToolExecutionRecord,
   type ListTaskExecutionLogsFilter,
   type ListTaskExecutionsOptions,
   type NotificationDelivery,
@@ -14,7 +14,7 @@ import {
 } from "../../domain/types.ts";
 import type { DrizzleDatabase } from "../db.ts";
 import {
-  actionExecutions,
+  toolExecutions,
   notificationDeliveries,
   scheduledJobs,
   taskExecutionLogs,
@@ -26,7 +26,7 @@ import {
   type ListScheduledJobsFilter,
 } from "../types.ts";
 import {
-  toActionExecutionRecord,
+  toToolExecutionRecord,
   toNotificationDelivery,
   toScheduledJobRecord,
   toTaskExecutionLogRecord,
@@ -327,15 +327,15 @@ export class PostgresTaskAuditRepo {
       .where(and(eq(scheduledJobs.jobId, jobId), eq(scheduledJobs.deletedAt, NOT_DELETED)));
   }
 
-  async recordActionExecution(record: ActionExecutionRecord): Promise<void> {
-    await this.db.insert(actionExecutions).values({
+  async recordToolExecution(record: ToolExecutionRecord): Promise<void> {
+    await this.db.insert(toolExecutions).values({
       executionId: record.executionId,
       projectId: record.projectId,
-      sessionId: record.sessionId ?? null,
+      sessionId: record.sessionId,
       turnId: record.turnId ?? null,
-      taskKey: record.taskKey ?? null,
-      caller: record.caller ?? "unknown",
-      actionName: record.actionName,
+      ownerKind: record.ownerKind ?? null,
+      ownerId: record.ownerId ?? null,
+      toolName: record.toolName,
       parameters: record.parameters ?? {},
       status: record.status,
       result: record.result ?? null,
@@ -345,25 +345,31 @@ export class PostgresTaskAuditRepo {
     });
   }
 
-  async listActionExecutions(filter?: ActionExecutionFilter): Promise<ActionExecutionRecord[]> {
+  async listToolExecutions(filter?: ToolExecutionFilter): Promise<ToolExecutionRecord[]> {
     const conditions = [];
     if (filter?.projectId) {
-      conditions.push(eq(actionExecutions.projectId, filter.projectId));
+      conditions.push(eq(toolExecutions.projectId, filter.projectId));
     }
     if (filter?.sessionId) {
-      conditions.push(eq(actionExecutions.sessionId, filter.sessionId));
+      conditions.push(eq(toolExecutions.sessionId, filter.sessionId));
     }
-    if (filter?.actionName) {
-      conditions.push(eq(actionExecutions.actionName, filter.actionName));
+    if (filter?.toolName) {
+      conditions.push(eq(toolExecutions.toolName, filter.toolName));
+    }
+    if (filter?.ownerKind) {
+      conditions.push(eq(toolExecutions.ownerKind, filter.ownerKind));
+    }
+    if (filter?.ownerId) {
+      conditions.push(eq(toolExecutions.ownerId, filter.ownerId));
     }
 
     const rows = await this.db
       .select()
-      .from(actionExecutions)
+      .from(toolExecutions)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
-      .orderBy(desc(actionExecutions.id))
+      .orderBy(desc(toolExecutions.id))
       .limit(clampLimit(filter?.limit, 50, 200));
 
-    return rows.map(toActionExecutionRecord);
+    return rows.map(toToolExecutionRecord);
   }
 }

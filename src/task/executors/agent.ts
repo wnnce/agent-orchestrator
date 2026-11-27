@@ -10,7 +10,8 @@ import type {
  * Agent runtime delegate interface decoupling task execution from ProjectRuntime.
  */
 export interface AgentSessionRunner {
-  createSession(task: TaskDefinition): Promise<{ sessionId: string }>;
+  /** Creates the session that runs one execution of `task`; the task is its owner. */
+  createSession(task: TaskDefinition, executionId: string): Promise<{ sessionId: string }>;
   renderPrompt(
     template: string,
     data: {
@@ -58,8 +59,8 @@ export class AgentTaskExecutor implements ITaskExecutor {
 
     let sessionId: string | undefined;
     try {
-      // 1. Create isolated session with taskKey for task-scoped actions
-      const created = await this.runner.createSession(task);
+      // 1. Create the session that works for this task execution
+      const created = await this.runner.createSession(task, context.executionId);
       sessionId = created.sessionId;
 
       // 2. Render prompt from template

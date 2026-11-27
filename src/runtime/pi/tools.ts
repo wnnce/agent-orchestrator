@@ -1,49 +1,21 @@
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { ActionRegistry } from "../../actions/registry.ts";
-import {
-  type ActionCallSite,
-  actionContextFor,
-  actionResultText,
-  actionToJsonSchema,
-  resolveActionsForSite,
-} from "../action-bridge.ts";
+import type { SessionTools } from "../../tools/types.ts";
 
-export { actionToJsonSchema };
-
-/** Reads the session's current call site when a tool runs. */
-export type ActionBridgeContextGetter = () => ActionCallSite;
-
-/**
- * Bridges Agent Orchestrator ActionRegistry actions into native Pi ToolDefinitions.
- */
-export function bridgeActionsToPiTools(
-  actionRegistry: ActionRegistry,
-  getContext: ActionBridgeContextGetter,
-): ToolDefinition[] {
-  const initialSite = getContext();
-  const actions = resolveActionsForSite(actionRegistry, initialSite);
-
-  return actions.map((action) => {
-    const jsonSchema = actionToJsonSchema(action.parameters);
-
-    return {
-      name: action.name,
-      label: action.name,
-      description: action.description,
-      // Pi accepts plain JSON Schema here; its type expects a TypeBox schema object.
-      parameters: jsonSchema as unknown as ToolDefinition["parameters"],
-      execute: async (_toolCallId: string, params: unknown, signal?: AbortSignal) => {
-        const site = getContext();
-        const actionContext = actionContextFor(site, signal);
-        const result = await actionRegistry.execute(action.name, params, actionContext, {
-          parameterOverride: site.actionParameterOverrides?.[action.name],
-        });
-        return {
-          content: [{ type: "text" as const, text: actionResultText(result) }],
-          isError: !result.success,
-          details: result.success ? result.data : { error: result.error },
-        };
-      },
-    };
-  });
+/** Offers the session's orchestrator tools to Pi as native tool definitions. */
+export function piToolsFor(tools: SessionTools): ToolDefinition[] {
+  return tools.specs.map((spec) => ({
+    name: spec.name,
+    label: spec.name,
+    description: spec.description,
+    // Pi accepts plain JSON Schema here; its type expects a TypeBox schema object.
+    parameters: spec.inputSchema as unknown as ToolDefinition["parameters"],
+    execute: async (_toolCallId: string, params: unknown, signal?: AbortSignal) => {
+      const result = await tools.call(spec.name, params, { signal });
+      return {
+        content: [{ type: "text" as const, text: result.text }],
+        isError: !result.ok,
+        details: result.ok ? result.data : { error: result.error },
+      };
+    },
+  }));
 }

@@ -1,17 +1,8 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { McpServer } from "@agentclientprotocol/sdk";
-import type { ActionRegistry } from "../../actions/registry.ts";
-import type { ActionScope } from "../../actions/types.ts";
-import {
-  type ActionCallSite,
-  actionContextFor,
-  actionResultText,
-  actionScopeFor,
-  actionToJsonSchema,
-  resolveActionsForSite,
-} from "../action-bridge.ts";
+import type { SessionTools } from "../../tools/types.ts";
 
-export const ACP_ACTION_SERVER_NAME = "orchestrator";
+export const ACP_TOOL_SERVER_NAME = "orchestrator";
 
 interface JsonRpcRequest {
   jsonrpc?: unknown;
@@ -20,55 +11,38 @@ interface JsonRpcRequest {
   params?: unknown;
 }
 
-interface MCPToolDescriptor {
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-}
-
 /**
- * Lightweight loopback HTTP MCP server exposing `ActionRegistry` tools to ACP agent subprocesses.
- * Lazily bound on `127.0.0.1:0` and protected by a per-instance random bearer token.
+ * Lightweight loopback HTTP MCP server exposing each session's orchestrator tools to ACP agent
+ * subprocesses. Lazily bound on `127.0.0.1:0` and protected by a per-instance random bearer token.
  */
 export class ACPMcpBridge {
   private readonly authToken = randomBytes(24).toString("hex");
   private readonly tokenBuf = Buffer.from(`Bearer ${this.authToken}`, "utf8");
-  private readonly sessions = new Map<string, () => ActionCallSite>();
-  private readonly toolCache = new Map<ActionScope, MCPToolDescriptor[]>();
+  private readonly sessions = new Map<string, () => SessionTools | undefined>();
   private server: Bun.Server<undefined> | undefined;
 
-  constructor(private readonly actionRegistry: ActionRegistry) {}
-
-  /** Registers a session's call-site getter for incoming MCP `tools/call` requests. */
-  registerSession(bridgeSessionId: string, getSite: () => ActionCallSite): void {
-    this.sessions.set(bridgeSessionId, getSite);
+  /** Registers how to find a session's current tools for incoming MCP requests. */
+  registerSession(bridgeSessionId: string, tools: () => SessionTools | undefined): void {
+    this.sessions.set(bridgeSessionId, tools);
   }
 
   unregisterSession(bridgeSessionId: string): void {
     this.sessions.delete(bridgeSessionId);
   }
 
-  /** Lists orchestrator action names visible in this session's scope. */
-  toolNamesForScope(taskKey: string | undefined, explicitScope?: ActionScope): Set<string> {
-    return new Set(this.toolsForScope(actionScopeFor(taskKey, explicitScope)).map((t) => t.name));
-  }
-
   /**
    * Returns an ACP HTTP `McpServer` descriptor for the session, starting the bridge if needed.
-   * Returns `undefined` when no actions exist for the session's scope.
+   * Returns `undefined` when the session has no orchestrator tools.
    */
   mcpServerForSession(
     bridgeSessionId: string,
-    taskKey: string | undefined,
-    explicitScope?: ActionScope,
+    tools: SessionTools | undefined,
   ): McpServer | undefined {
-    if (this.toolsForScope(actionScopeFor(taskKey, explicitScope)).length === 0) {
-      return undefined;
-    }
+    if (!tools || tools.specs.length === 0) return undefined;
     const server = this.ensureStarted();
     return {
       type: "http",
-      name: ACP_ACTION_SERVER_NAME,
+      name: ACP_TOOL_SERVER_NAME,
       url: `http://127.0.0.1:${server.port}/mcp/${encodeURIComponent(bridgeSessionId)}`,
       headers: [{ name: "Authorization", value: `Bearer ${this.authToken}` }],
     };
@@ -76,7 +50,6 @@ export class ACPMcpBridge {
 
   stop(): void {
     this.sessions.clear();
-    this.toolCache.clear();
     if (this.server) {
       this.server.stop(true);
       this.server = undefined;
@@ -91,29 +64,6 @@ export class ACPMcpBridge {
       fetch: (req) => this.handleRequest(req),
     });
     return this.server;
-  }
-
-  private toolsForSite(site: ActionCallSite): MCPToolDescriptor[] {
-    if (site.actionParameterOverrides && Object.keys(site.actionParameterOverrides).length > 0) {
-      return resolveActionsForSite(this.actionRegistry, site).map((action) => ({
-        name: action.name,
-        description: action.description,
-        inputSchema: actionToJsonSchema(action.parameters),
-      }));
-    }
-    return this.toolsForScope(actionScopeFor(site.taskKey, site.actionScope));
-  }
-
-  private toolsForScope(scope: ActionScope): MCPToolDescriptor[] {
-    const cached = this.toolCache.get(scope);
-    if (cached) return cached;
-    const tools = this.actionRegistry.list(scope).map((action) => ({
-      name: action.name,
-      description: action.description,
-      inputSchema: actionToJsonSchema(action.parameters),
-    }));
-    this.toolCache.set(scope, tools);
-    return tools;
   }
 
   private isAuthorized(req: Request): boolean {
@@ -139,8 +89,8 @@ export class ACPMcpBridge {
     }
 
     const bridgeSessionId = decodeURIComponent(match[1]);
-    const getSite = this.sessions.get(bridgeSessionId);
-    if (!getSite) {
+    const tools = this.sessions.get(bridgeSessionId)?.();
+    if (!tools) {
       return Response.json({ error: "unknown_session" }, { status: 404 });
     }
 
@@ -161,7 +111,7 @@ export class ACPMcpBridge {
           result: {
             protocolVersion: "2025-03-26",
             capabilities: { tools: {} },
-            serverInfo: { name: ACP_ACTION_SERVER_NAME, version: "0.1.0" },
+            serverInfo: { name: ACP_TOOL_SERVER_NAME, version: "0.1.0" },
           },
         });
 
@@ -174,39 +124,22 @@ export class ACPMcpBridge {
         return Response.json({ jsonrpc: "2.0", id, result: {} });
 
       case "tools/list": {
-        const site = getSite();
-        const tools = this.toolsForSite(site);
-        return Response.json({ jsonrpc: "2.0", id, result: { tools } });
+        const list = tools.specs.map((spec) => ({
+          name: spec.name,
+          description: spec.description,
+          inputSchema: spec.inputSchema,
+        }));
+        return Response.json({ jsonrpc: "2.0", id, result: { tools: list } });
       }
 
       case "tools/call": {
         const params = (body.params ?? {}) as { name?: unknown; arguments?: unknown };
         const name = typeof params.name === "string" ? params.name : "";
-        const site = getSite();
-        const allowed = this.toolsForSite(site).some((t) => t.name === name);
-        if (!name || !allowed) {
-          return Response.json({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              content: [{ type: "text", text: JSON.stringify({ error: `Unknown action: ${name}` }) }],
-              isError: true,
-            },
-          });
-        }
-        const result = await this.actionRegistry.execute(
-          name,
-          params.arguments ?? {},
-          actionContextFor(site),
-          { parameterOverride: site.actionParameterOverrides?.[name] },
-        );
+        const result = await tools.call(name, params.arguments ?? {});
         return Response.json({
           jsonrpc: "2.0",
           id,
-          result: {
-            content: [{ type: "text", text: actionResultText(result) }],
-            isError: !result.success,
-          },
+          result: { content: [{ type: "text", text: result.text }], isError: !result.ok },
         });
       }
 

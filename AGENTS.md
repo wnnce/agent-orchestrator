@@ -17,7 +17,8 @@ web interface.
 - `src/gateway/`: HTTP routes, SSE endpoints, and application orchestration.
 - `src/runtime/`: runtime adapters and canonical event normalization.
 - `src/project/`, `src/session/`, `src/workspace/`: project, session, and workspace lifecycle.
-- `src/actions/`, `src/task/`: actions, task execution, and scheduling.
+- `src/context/`: the project context that tasks, pipeline nodes, tools, and hooks act through.
+- `src/tools/`, `src/task/`: agent tools, task execution, and scheduling.
 - `src/persistence/`: Drizzle ORM schema, `Store`, `MemoryStore`, and `PostgresStore` implementations.
 - `database/migrations/`: Drizzle Kit SQL migrations and metadata snapshots generated from `src/persistence/schema.ts`.
 - `scripts/`: explicit operational scripts such as database initialization.

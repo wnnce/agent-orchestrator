@@ -10,16 +10,11 @@ import {
   TaskScheduler,
   TaskExecutorRegistry,
   ScriptTaskExecutor,
-  ActionTaskExecutor,
   AgentTaskExecutor,
   type AgentSessionRunner,
   type TaskDefinition,
 } from "../src/task/index.ts";
 import { MockTaskExecutor } from "./helpers/mock-executor.ts";
-import {
-  createUpdateTaskStateAction,
-  ActionRegistry,
-} from "../src/actions/index.ts";
 import { ProjectRuntime } from "../src/project/runtime.ts";
 import { FakeRuntime } from "../src/runtime/runtime.ts";
 import { WorkspaceManager } from "../src/workspace/workspace.ts";
@@ -475,52 +470,6 @@ describe("TaskScheduler", () => {
   });
 });
 
-describe("update_task_state Action", () => {
-  it("rejects execution if context is not within a taskKey", async () => {
-    const engine = new TaskEngine();
-    const action = createUpdateTaskStateAction(engine);
-    const registry = new ActionRegistry().register(action);
-
-    const result = await registry.execute(
-      "update_task_state",
-      { state: { cursor: 123 } },
-      { projectId: "p1", sessionId: "ses_1" }, // no taskKey
-    );
-
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("taskKey is missing");
-  });
-
-  it("merges incremental state into TaskEngine and respects merge=false", async () => {
-    const engine = new TaskEngine();
-    engine.updateState("p1:sync", { page: 1, limit: 10 });
-    const action = createUpdateTaskStateAction(engine);
-    const registry = new ActionRegistry().register(action);
-
-    // Merge update
-    const result1 = await registry.execute(
-      "update_task_state",
-      { state: { page: 2 } },
-      { projectId: "p1", sessionId: "ses_1", taskKey: "p1:sync" },
-    );
-    expect(result1.success).toBe(true);
-
-    const merged = await engine.getState("p1:sync");
-    expect(merged).toEqual({ page: 2, limit: 10 });
-
-    // Non-merge overwrite
-    const result2 = await registry.execute(
-      "update_task_state",
-      { state: { complete: true }, merge: false },
-      { projectId: "p1", sessionId: "ses_1", taskKey: "p1:sync" },
-    );
-    expect(result2.success).toBe(true);
-
-    const overwritten = await engine.getState("p1:sync");
-    expect(overwritten).toEqual({ complete: true });
-  });
-});
-
 describe("ProjectRuntime Task Integration", () => {
   it("renders prompt templates with standard variables and field extractions", () => {
     const store = new MemoryStore();
@@ -834,6 +783,7 @@ Sync daily updates.
       };
 
       const result = await executor.execute({
+        executionId: "exec_test",
         task,
         stateBefore: { initial: true },
       });
@@ -856,6 +806,7 @@ Sync daily updates.
       };
 
       const result = await executor.execute({
+        executionId: "exec_test",
         task,
         stateBefore: {},
       });
@@ -876,56 +827,13 @@ Sync daily updates.
       };
 
       const result = await executor.execute({
+        executionId: "exec_test",
         task,
         stateBefore: {},
       });
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("timed out");
-    });
-
-    it("ActionTaskExecutor executes registered action directly without LLM or Session", async () => {
-      const actionRegistry = new ActionRegistry();
-      let invokedWith: {
-        params: Record<string, unknown>;
-        context: Record<string, unknown>;
-      } | null = null;
-
-      actionRegistry.register({
-        name: "sync_github_prs",
-        description: "Direct action for testing",
-        parameters: { type: "object" },
-        async handler(params, context) {
-          invokedWith = {
-            params: params as Record<string, unknown>,
-            context: context as unknown as Record<string, unknown>,
-          };
-          return { count: 5, state: { lastSyncedPr: 105 } };
-        },
-      });
-
-      const executor = new ActionTaskExecutor(actionRegistry);
-      const task: TaskDefinition = {
-        ...dummyTask,
-        taskKey: "p1:action-test",
-        taskId: "action-test",
-        type: "action",
-        action: "sync_github_prs",
-        actionParams: { repo: "wnnce/shortlink" },
-      };
-
-      const result = await executor.execute({
-        task,
-        stateBefore: { cursor: "abc" },
-      });
-
-      expect(result.success).toBe(true);
-      expect(invokedWith !== null).toBe(true);
-      if (!invokedWith) throw new Error("Action was not invoked");
-      const record = invokedWith as { params: Record<string, unknown>; context: Record<string, unknown> };
-      expect(record.params["repo"]).toBe("wnnce/shortlink");
-      expect(record.params["cursor"]).toBe("abc");
-      expect(result.stateAfter).toEqual({ cursor: "abc", lastSyncedPr: 105 });
     });
 
     it("AgentTaskExecutor orchestrates session lifecycle and guarantees cleanup", async () => {
@@ -961,6 +869,7 @@ Sync daily updates.
       };
 
       const result = await executor.execute({
+        executionId: "exec_test",
         task,
         stateBefore: {},
       });
@@ -996,6 +905,7 @@ Sync daily updates.
       };
 
       const result = await executor.execute({
+        executionId: "exec_test",
         task,
         stateBefore: {},
       });

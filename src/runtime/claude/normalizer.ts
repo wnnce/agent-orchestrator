@@ -6,14 +6,14 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import type { PlanStepItem } from "../../domain/events.ts";
 import type { RuntimeEvent } from "../runtime.ts";
-import { ACTION_SERVER_NAME } from "./options.ts";
+import { TOOL_SERVER_NAME } from "./options.ts";
 
 /** How a Claude Code tool call is shown: as a command, a file change, a plan or a tool call. */
 export type ToolKind =
   | { kind: "command" }
   | { kind: "file_change"; change: "create" | "modify" }
   | { kind: "plan" }
-  | { kind: "action"; actionName: string }
+  | { kind: "orchestrator"; orchestratorTool: string }
   | { kind: "mcp"; serverName: string; toolName: string }
   | { kind: "tool" };
 
@@ -33,8 +33,8 @@ export function toolKind(name: string): ToolKind {
   const mcp = /^mcp__(.+?)__(.+)$/.exec(name);
   if (!mcp) return { kind: "tool" };
   const [, serverName = "", toolName = ""] = mcp;
-  return serverName === ACTION_SERVER_NAME
-    ? { kind: "action", actionName: toolName }
+  return serverName === TOOL_SERVER_NAME
+    ? { kind: "orchestrator", orchestratorTool: toolName }
     : { kind: "mcp", serverName, toolName };
 }
 
@@ -159,11 +159,11 @@ export class ClaudeNormalizer {
         ];
       case "plan":
         return [this.event("plan.updated", turnId, { planId: itemId, steps: planSteps(input) })];
-      case "action":
+      case "orchestrator":
         return [
           this.event("tool.call.started", turnId, {
             itemId,
-            toolName: kind.actionName,
+            toolName: kind.orchestratorTool,
             args: input,
           }),
         ];
@@ -235,11 +235,11 @@ export class ClaudeNormalizer {
         ];
       case "plan":
         return [];
-      case "action":
+      case "orchestrator":
         return [
           this.event("tool.called", turnId, {
             itemId,
-            toolName: call.kind.actionName,
+            toolName: call.kind.orchestratorTool,
             args: call.input,
             status,
             ...outcome,

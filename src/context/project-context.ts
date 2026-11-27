@@ -6,6 +6,7 @@ import type { NotificationOutbox } from "../notifications/index.ts";
 import type { Logger } from "../observability/logger.ts";
 import type {
   PipelineRunRecord,
+  PipelineSummaryWithVersions,
   StartPipelineRunParams,
   StartPipelineRunResult,
 } from "../pipeline/types.ts";
@@ -28,6 +29,7 @@ export interface ProjectContextServices {
   readonly pipelines: {
     start(params: StartPipelineRunParams): Promise<StartPipelineRunResult>;
     find(pipelineId: string, externalKey: string): Promise<PipelineRunRecord | null>;
+    list(): Promise<PipelineSummaryWithVersions[]>;
     signal(runId: string): Promise<{ woken: boolean }>;
   };
   readonly mcpClientFactory?: McpClientFactory | undefined;
@@ -139,6 +141,10 @@ export function createProjectContext(
       async find(query) {
         signal.throwIfAborted();
         return services.pipelines.find(query.pipelineId, query.externalKey);
+      },
+      async list() {
+        signal.throwIfAborted();
+        return services.pipelines.list();
       },
       async signal(query) {
         signal.throwIfAborted();

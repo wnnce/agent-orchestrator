@@ -16,7 +16,6 @@ import type { NotificationConfig } from "../src/domain/types.ts";
 import { notificationConfigSchema } from "../src/domain/schemas.ts";
 import { MemoryStore } from "../src/persistence/store.ts";
 import { Logger } from "../src/observability/logger.ts";
-import { createActionContext } from "../src/actions/context.ts";
 import { mergeNotifications } from "../src/project/manager.ts";
 
 describe("NotificationRegistry", () => {
@@ -196,17 +195,10 @@ describe("NotificationOutbox & ActionContext Integration", () => {
       { name: "wecom-channel", type: "wecom", enabled: true },
     ];
 
-    // Queue targeted notification via action context
-    const ctx = createActionContext({
-      projectId: "proj_target",
-      sessionId: "ses_target",
-      services: {
-        notifications: outbox,
-      },
-      projectNotifications: configs,
-    });
-
-    await ctx.notify(
+    await outbox.queue(
+      "proj_target",
+      { kind: "session", id: "ses_target" },
+      configs,
       { title: "Targeted to WeCom", text: "Special notification" },
       { target: "wecom" },
     );
@@ -218,7 +210,11 @@ describe("NotificationOutbox & ActionContext Integration", () => {
 
     const deliveries = await store.listNotificationDeliveries({ projectId: "proj_target" });
     expect(deliveries.length).toBe(1);
-    expect(deliveries[0]?.status).toBe("sent");
+    expect(deliveries[0]).toMatchObject({
+      status: "sent",
+      originKind: "session",
+      originId: "ses_target",
+    });
     expect(deliveries[0]?.details.length).toBe(1);
     expect(deliveries[0]?.details[0]?.name).toBe("wecom-channel");
     expect(deliveries[0]?.details[0]?.success).toBe(true);

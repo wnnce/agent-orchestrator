@@ -1,5 +1,4 @@
 import { z } from "zod";
-import type { ActionContext } from "../actions/types.ts";
 import { REASONING_EFFORTS, type ReasoningEffort } from "../domain/types.ts";
 import type { Context } from "../observability/tracing.ts";
 
@@ -42,18 +41,13 @@ export const taskFrontmatterSchema = z.object({
     .string()
     .min(1)
     .optional()
-    .describe("Executor type identifier: agent, script, action, or custom registered executor"),
+    .describe("Executor type identifier: agent, script, or custom registered executor"),
   executor: z
     .string()
     .min(1)
     .optional()
     .describe("Custom executor alias or class identifier (alias of type)"),
   command: z.string().optional().describe("Executable shell command when type is script"),
-  action: z.string().optional().describe("Action name when type is action"),
-  actionParams: z
-    .record(z.string(), z.unknown())
-    .optional()
-    .describe("Invocation parameters when type is action"),
   timeoutMs: z.number().positive().optional().describe("Task execution timeout in milliseconds"),
   runtime: taskRuntimeSchema
     .optional()
@@ -83,8 +77,6 @@ export interface TaskDefinition {
   readonly type?: string | undefined;
   readonly executor?: string | undefined;
   readonly command?: string | undefined;
-  readonly action?: string | undefined;
-  readonly actionParams?: Record<string, unknown> | undefined;
   readonly timeoutMs?: number | undefined;
   readonly runtime?: TaskRuntimeConfig | undefined;
 }
@@ -106,17 +98,12 @@ export interface QueuedTask {
  * Task execution context.
  */
 export interface TaskExecutionContext {
-  readonly executionId?: string | undefined;
+  readonly executionId: string;
   readonly task: TaskDefinition;
   readonly stateBefore: Record<string, unknown>;
   readonly signal?: AbortSignal | undefined;
   readonly updateState?: ((state: Record<string, unknown>) => void) | undefined;
   readonly workspacePath?: string | undefined;
-  readonly createActionContext?: ((params?: {
-    sessionId?: string | undefined;
-    turnId?: string | undefined;
-    signal?: AbortSignal | undefined;
-  }) => ActionContext) | undefined;
 }
 
 /**

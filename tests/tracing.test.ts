@@ -10,7 +10,10 @@ import {
   type SpanExporter,
 } from "@opentelemetry/sdk-trace";
 import { z } from "zod";
-import { ActionRegistry, pipelineActions } from "../src/actions/index.ts";
+import { createProjectContext } from "../src/context/index.ts";
+import type { SessionOrigin } from "../src/domain/origin.ts";
+import { defineTool, type ToolContext, ToolRegistry } from "../src/tools/index.ts";
+import { testContextServices, testProject } from "./helpers/project-context.ts";
 import { ArtifactStore } from "../src/artifacts/store.ts";
 import type { AppConfig } from "../src/config/config.ts";
 import { loadConfig } from "../src/config/service.ts";
@@ -92,15 +95,15 @@ async function tempDir(prefix: string): Promise<string> {
   return dir;
 }
 
-const echoAction = {
+const echoTool = defineTool({
   name: "echo",
   description: "Echo",
-  parameters: z.object({ fail: z.boolean().default(false) }),
-  async handler(params: { fail: boolean }) {
-    if (params.fail) throw new Error("echo failed");
+  input: z.object({ fail: z.boolean().default(false) }),
+  async run(input) {
+    if (input.fail) throw new Error("echo failed");
     return { ok: true };
   },
-};
+});
 
 describe("tracing setup", () => {
   test("everything is a no-op until tracing is enabled", async () => {
@@ -242,10 +245,6 @@ class ToolCallingRuntime extends FakeRuntime {
   private gate = Promise.resolve();
   private openGate: () => void = () => {};
 
-  constructor(private readonly actions: ActionRegistry) {
-    super();
-  }
-
   /** Makes the next turns wait until `release()`. */
   hold(): void {
     this.gate = new Promise((resolve) => {
@@ -271,7 +270,7 @@ class ToolCallingRuntime extends FakeRuntime {
         await gate;
         await emit("agent.message.delta", { delta: "Working" });
         await emit("tool.call.started", { itemId: "tool-1", toolName: "echo", args: {} });
-        await this.actions.execute("echo", {}, context.createActionContext!({ turnId }));
+        await context.tools!.call("echo", {});
         await emit("tool.called", {
           itemId: "tool-1",
           toolName: "echo",
@@ -311,9 +310,7 @@ describe("agent turn tracing", () => {
     const root = await tempDir("ao-tracing-turn-");
     const store = new MemoryStore();
     const logger = new Logger({ sink: () => {} });
-    const actions = new ActionRegistry(logger);
-    actions.register(echoAction);
-    const agent = new ToolCallingRuntime(actions);
+    const agent = new ToolCallingRuntime();
     const project: ProjectConfig = {
       id: "traced",
       displayName: "Traced",
@@ -330,6 +327,9 @@ describe("agent turn tracing", () => {
       new ArtifactStore(path.join(root, "artifacts"), store),
       undefined,
       logger,
+      undefined,
+      undefined,
+      { tools: [echoTool] },
     );
     cleanups.push(() => runtime.stop());
     const sessionId = (await runtime.createSession()).sessionId;
@@ -364,8 +364,8 @@ describe("agent turn tracing", () => {
     const tool = only("execute_tool echo");
     expect(isChild(tool, turn)).toBe(true);
     expect(tool.attributes["gen_ai.tool.call.id"]).toBe("tool-1");
-    // Called from outside any trace, the action still lands in the turn that called it.
-    expect(isChild(only("action echo"), turn)).toBe(true);
+    // Called from outside any trace, the tool call still lands in the turn that made it.
+    expect(isChild(only("tool echo"), turn)).toBe(true);
 
     const command = only("command");
     expect(isChild(command, turn)).toBe(true);
@@ -391,22 +391,41 @@ describe("agent turn tracing", () => {
   });
 });
 
-describe("action and task tracing", () => {
-  test("a failed action marks its span as an error", async () => {
+describe("tool and task tracing", () => {
+  test("a failed tool call marks its span as an error", async () => {
     enableTracing();
-    const actions = new ActionRegistry(new Logger({ sink: () => {} }));
-    actions.register(echoAction);
-
-    const result = await actions.execute(
-      "echo",
-      { fail: true },
-      { projectId: "p", sessionId: "s", scope: "conversation" },
+    const tools = new ToolRegistry([echoTool], new Logger({ sink: () => {} }));
+    const origin: SessionOrigin = { kind: "session", sessionId: "s" };
+    const { context } = createProjectContext(
+      testContextServices(testProject({ id: "p" })),
+      origin,
+      {
+        signal: new AbortController().signal,
+      },
     );
+    const ctx: ToolContext = {
+      ...context,
+      origin,
+      session: {
+        id: "s",
+        workspace: "/tmp",
+        schedule: async () => {
+          throw new Error("unused");
+        },
+        cancelSchedule: async () => false,
+      },
+    };
 
-    expect(result.success).toBe(false);
-    const span = only("action echo");
+    const result = await tools.call("echo", { fail: true }, ctx);
+
+    expect(result.ok).toBe(false);
+    const span = only("tool echo");
     expect(span.status).toMatchObject({ code: 2, message: "echo failed" });
-    expect(span.attributes).toMatchObject({ "action.name": "echo", "project.id": "p" });
+    expect(span.attributes).toMatchObject({
+      "gen_ai.tool.name": "echo",
+      "project.id": "p",
+      "session.id": "s",
+    });
   });
 
   test("each queued task continues the trace that dispatched it", async () => {
@@ -447,10 +466,6 @@ describe("action and task tracing", () => {
 
 /** Ends every agent turn by calling `pipeline_next`, from outside any trace. */
 class AdvancingRuntime extends FakeRuntime {
-  constructor(private readonly actions: ActionRegistry) {
-    super();
-  }
-
   override async startTurn(
     context: RuntimeContext,
     sessionId: string,
@@ -459,12 +474,7 @@ class AdvancingRuntime extends FakeRuntime {
     const runtimeTurnId = `rt_${turnId}`;
     setTimeout(() =>
       detached(async () => {
-        await this.actions.execute(
-          "pipeline_next",
-          { summary: "Drafted", content: "Draft done" },
-          context.createActionContext!({ turnId }),
-          { parameterOverride: context.actionParameterOverrides?.pipeline_next },
-        );
+        await context.tools!.call("pipeline_next", { summary: "Drafted", content: "Draft done" });
         await context.onEvent({
           type: "turn.completed",
           sessionId,
@@ -505,8 +515,6 @@ export default definePipeline({
     );
     const store = new MemoryStore();
     const logger = new Logger({ sink: () => {} });
-    const actions = new ActionRegistry(logger, store);
-    actions.registerAll(pipelineActions);
     const project: ProjectConfig = {
       id: "traced",
       displayName: "Traced",
@@ -520,7 +528,7 @@ export default definePipeline({
     const runtime = new ProjectRuntime(
       project,
       store,
-      new AdvancingRuntime(actions),
+      new AdvancingRuntime(),
       new WorkspaceManager(
         path.join(dataDir, "projects"),
         path.join(dataDir, "bases"),
@@ -534,11 +542,6 @@ export default definePipeline({
       undefined,
       undefined,
       {},
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      actions,
     );
     await runtime.start();
     cleanups.push(() => runtime.stop());
@@ -568,7 +571,7 @@ export default definePipeline({
     // The agent's turn runs in the node's trace; its pipeline_next call lands in the turn.
     const turn = only("invoke_agent fake");
     expect(isChild(turn, draftNode)).toBe(true);
-    expect(isChild(only("action pipeline_next"), turn)).toBe(true);
+    expect(isChild(only("tool pipeline_next"), turn)).toBe(true);
 
     // The turn finishing created the next node run, so the next launch links to the turn.
     const checkNode = only("pipeline.node check");

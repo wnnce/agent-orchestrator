@@ -51,7 +51,6 @@ import {
   TaskExecutorRegistry,
   AgentTaskExecutor,
   ScriptTaskExecutor,
-  ActionTaskExecutor,
   TsTaskExecutor,
   type AgentSessionRunner,
   type ITaskExecutor,
@@ -59,13 +58,15 @@ import {
   type TaskRunResult,
 } from "../task/index.ts";
 import {
-  ActionRegistry,
-  defaultActionRegistry,
-  createActionContext,
-  updateTaskStateAction,
-  type ActionContext,
-  type ActionScope,
-} from "../actions/index.ts";
+  builtinTools,
+  ToolRegistry,
+  type PipelineOwner,
+  type SessionTools,
+  type TaskOwner,
+  type ToolContext,
+  type ToolDefinition,
+  type ToolSession,
+} from "../tools/index.ts";
 import {
   PipelineEngine,
   PipelineEventHub,
@@ -85,7 +86,7 @@ import {
   type StartSessionParams,
   type StartedSession,
 } from "../context/index.ts";
-import type { Origin } from "../domain/origin.ts";
+import type { Origin, SessionOrigin, SessionOwner } from "../domain/origin.ts";
 import type { McpClientFactory } from "../mcp/index.ts";
 
 interface QueuedTurn {
@@ -115,6 +116,8 @@ export interface SessionExecutionOptions {
   pipelineEventHub?: PipelineEventHub | undefined;
   /** Replaces how project contexts connect to MCP servers (tests). */
   mcpClientFactory?: McpClientFactory | undefined;
+  /** Replaces the tools the project's agents are offered (tests). */
+  tools?: readonly ToolDefinition[] | undefined;
 }
 
 function toSessionRuntimeOverride(
@@ -149,15 +152,6 @@ function sessionSourceMetadata(origin: Origin): Record<string, string> {
   }
 }
 
-/** Which actions a session's agent sees: chosen by who created the session. */
-function sessionActionScope(
-  source: string | undefined,
-  taskKey: string | undefined,
-): ActionScope {
-  if (source === "pipeline") return "pipeline";
-  return taskKey ? "task" : "conversation";
-}
-
 export class ProjectRuntime {
   private readonly runtimes = new Map<string, AgentRuntime>();
   private readonly activeTurns = new Map<string, ActiveTurn>();
@@ -177,7 +171,8 @@ export class ProjectRuntime {
   readonly taskEngine: TaskEngine;
   readonly taskScheduler: TaskScheduler;
   readonly taskLoader: TaskLoader;
-  readonly actionRegistry: ActionRegistry;
+  /** The tools this project's agents are offered. */
+  readonly tools: ToolRegistry;
   readonly pipelineEventHub: PipelineEventHub;
   readonly pipelineEngine: PipelineEngine;
 
@@ -199,13 +194,17 @@ export class ProjectRuntime {
     taskEngine?: TaskEngine,
     taskScheduler?: TaskScheduler,
     taskLoader?: TaskLoader,
-    actionRegistry?: ActionRegistry,
   ) {
     this.taskEngine = taskEngine ?? new TaskEngine(store, logger);
     this.taskScheduler =
       taskScheduler ?? new TaskScheduler(this.taskEngine, logger);
     this.taskLoader = taskLoader ?? new TaskLoader(logger);
-    this.actionRegistry = actionRegistry ?? defaultActionRegistry;
+    // The global project only reads; its agents get no tools that act on projects.
+    this.tools = new ToolRegistry(
+      options.tools ?? (project.id === GLOBAL_PROJECT_ID ? [] : builtinTools),
+      logger,
+      (record) => store.recordToolExecution(record),
+    );
     this.pipelineEventHub = options.pipelineEventHub ?? new PipelineEventHub();
     this.pipelineEngine = new PipelineEngine({
       project: this.project,
@@ -216,13 +215,11 @@ export class ProjectRuntime {
       hub: this.pipelineEventHub,
       logger: this.logger,
       sessions: {
-        create: ({ workspacePath, title, metadata, runtimeOverride }) =>
-          this.createSession(
-            { ...metadata, title },
-            "pipeline",
-            toSessionRuntimeOverride(runtimeOverride),
-            { externalWorkspacePath: workspacePath },
-          ),
+        create: ({ workspacePath, title, owner, runtimeOverride }) =>
+          this.createSession({ title }, "pipeline", toSessionRuntimeOverride(runtimeOverride), {
+            externalWorkspacePath: workspacePath,
+            owner,
+          }),
         runTurn: async (sessionId, input, turnId) => {
           await this.enqueueTurn(sessionId, input, turnId);
         },
@@ -234,15 +231,19 @@ export class ProjectRuntime {
 
     const taskRegistry = new TaskExecutorRegistry(logger);
     const agentRunner: AgentSessionRunner = {
-      createSession: async (task) => {
+      createSession: async (task, executionId) => {
         const sessionRoute = await this.createSession(
-          {
-            title: `Task: ${task.name}`,
-            taskKey: task.taskKey,
-            taskId: task.taskId,
-          },
+          { title: `Task: ${task.name}` },
           "task",
           toSessionRuntimeOverride(task.runtime),
+          {
+            owner: {
+              kind: "task",
+              taskId: task.taskId,
+              taskKey: task.taskKey,
+              executionId,
+            },
+          },
         );
         return { sessionId: sessionRoute.sessionId };
       },
@@ -277,16 +278,6 @@ export class ProjectRuntime {
       ),
     );
     taskRegistry.register(
-      new ActionTaskExecutor(this.actionRegistry, logger, (context) =>
-        this.createActionContext({
-          sessionId: `task_action_${context.task.taskId}`,
-          taskKey: context.task.taskKey,
-          signal: context.signal,
-          workspacePath: this.project.projectDir,
-        }),
-      ),
-    );
-    taskRegistry.register(
       new TsTaskExecutor(
         {
           resolveHandler: (task) =>
@@ -294,32 +285,14 @@ export class ProjectRuntime {
               env: this.project.env,
               workdir: this.project.projectDir,
             }),
-          actionRegistry: this.actionRegistry,
+          createContext: (origin, options) => this.createContext(origin, options),
           appendLogs: (logs) => this.store.appendTaskExecutionLogs(logs),
-          getEnv: () => this.project.env,
-          getVars: () => this.project.vars,
-          getProjectScope: () => buildProjectPromptScope(this.project),
-          getMcpServers: () => this.project.runtime?.mcpServers,
-          startPipelineRun: (params) => this.pipelineEngine.startRun(params),
-          ...(this.project.projectDir
-            ? { getWorkdir: () => this.project.projectDir }
-            : {}),
-          createActionContext: (context) =>
-            this.createActionContext({
-              sessionId: `task_ts_${context.task.taskId}`,
-              taskKey: context.task.taskKey,
-              signal: context.signal,
-              workspacePath: this.project.projectDir,
-            }),
         },
         logger,
       ),
     );
 
     this.taskEngine.setRegistry(taskRegistry);
-    if (!this.actionRegistry.has("update_task_state")) {
-      this.actionRegistry.register(updateTaskStateAction);
-    }
   }
 
   /**
@@ -339,6 +312,7 @@ export class ProjectRuntime {
           find: (pipelineId, externalKey) =>
             this.store.pipelines.findRunByExternalKey(this.project.id, pipelineId, externalKey),
           signal: (runId) => this.pipelineEngine.signalRun(runId),
+          list: () => this.pipelineEngine.listPipelinesWithVersions(),
         },
         mcpClientFactory: this.options.mcpClientFactory,
       },
@@ -373,67 +347,126 @@ export class ProjectRuntime {
   }
 
   /**
-   * Create enriched ActionContext (notifications, artifacts, workspace sandbox, task state, DI services)
+   * The tools a session's agent is offered. A call runs as the session's current turn: in its
+   * trace, attributed to it, with its owner's task state or pipeline node.
    */
-  createActionContext(params: {
-    sessionId: string;
-    workspacePath?: string | undefined;
-    turnId?: string | undefined;
-    taskKey?: string | undefined;
-    scope?: ActionScope | undefined;
-    signal?: AbortSignal | undefined;
-    traceContext?: Context | undefined;
-  }): ActionContext {
-    const workspacePath =
-      params.workspacePath ?? this.project.projectDir ?? process.cwd();
-    return createActionContext({
-      projectId: this.project.id,
-      sessionId: params.sessionId,
-      turnId: params.turnId,
-      taskKey: params.taskKey,
-      scope: params.scope ?? (params.taskKey ? "task" : "conversation"),
-      workspacePath,
-      logger: this.logger,
-      signal: params.signal,
-      traceContext: params.traceContext,
-      projectNotifications: this.project.notifications,
-      services: {
-        notifications: this.notifications,
-        artifacts: this.artifactStore,
-        artifactStore: this.artifactStore,
-        store: this.store,
-        taskEngine: this.taskEngine,
-        eventHub: this.eventHub,
-        sessionManager: this.sessionManager,
-        pipelineEngine: this.pipelineEngine,
+  private sessionTools(
+    sessionId: string,
+    workspacePath: string,
+    owner: SessionOwner | undefined,
+  ): SessionTools {
+    const site = { owner };
+    const pipelineNext =
+      owner?.kind === "pipeline"
+        ? this.pipelineEngine.pipelineNextInput(owner.pipelineId, owner.nodeId)
+        : undefined;
+    const inputs = pipelineNext ? { pipeline_next: pipelineNext } : undefined;
+    return {
+      specs: this.tools.specs(site, inputs),
+      call: async (name, args, options) => {
+        const active = this.activeTurns.get(sessionId);
+        const origin: SessionOrigin = {
+          kind: "session",
+          sessionId,
+          ...(active ? { turnId: active.turn.id } : {}),
+        };
+        const scoped = this.createContext(origin, {
+          signal: options?.signal ?? new AbortController().signal,
+        });
+        try {
+          const ctx: ToolContext = {
+            ...scoped.context,
+            origin,
+            session: this.toolSession(origin, workspacePath, scoped.context.logger),
+            ...(owner ? { owner: await this.toolOwner(owner, origin.turnId) } : {}),
+          };
+          return await this.tools.call(name, args, ctx, {
+            input: inputs?.[name as keyof typeof inputs],
+            traceContext: active?.trace.context,
+          });
+        } finally {
+          await scoped.dispose();
+        }
       },
-      onEmit: async (type, payload) => {
-        await this.emit(
-          { projectId: this.project.id, sessionId: params.sessionId },
-          type as any,
-          params.taskKey ? "task" : "gateway",
-          payload,
-        );
+    };
+  }
+
+  private toolSession(origin: SessionOrigin, workspace: string, logger: Logger): ToolSession {
+    const { sessionId, turnId } = origin;
+    return {
+      id: sessionId,
+      ...(turnId ? { turnId } : {}),
+      workspace,
+      schedule: async (job) => {
+        const triggerAt = new Date(Date.now() + job.delayMinutes * 60_000).toISOString();
+        const record: ScheduledJobRecord = {
+          jobId: `job_${randomUUID()}`,
+          projectId: this.project.id,
+          sessionId,
+          name: job.name,
+          createdAt: new Date().toISOString(),
+          delayMinutes: job.delayMinutes,
+          triggerAt,
+          status: ScheduledJobStatus.PENDING,
+          prompt: job.prompt,
+          metadata: { ...(job.metadata ?? {}), ...(turnId ? { createdTurnId: turnId } : {}) },
+        };
+        await this.store.createScheduledJob(record);
+        logger.info("scheduled job created for session", {
+          jobId: record.jobId,
+          name: job.name,
+          delayMinutes: job.delayMinutes,
+          triggerAt,
+        });
+        return record;
       },
-      onDispatchTask: async (dispatchParams) => {
-        // Sessions dispatched via actions intentionally follow the project's default
-        // runtime, model, and reasoningEffort instead of inheriting a task's override.
-        const sessionRoute = await this.createSession(
-          {
-            title: dispatchParams.title,
-            sourceSessionId: params.sessionId,
-            ...(params.taskKey ? { sourceTaskKey: params.taskKey } : {}),
-            ...(dispatchParams.metadata ? { dispatch: dispatchParams.metadata } : {}),
+      cancelSchedule: async (nameOrId) => {
+        const cancelled = await this.store.cancelScheduledJob(sessionId, nameOrId);
+        logger.info("scheduled job cancellation requested", { name: nameOrId, cancelled });
+        return cancelled;
+      },
+    };
+  }
+
+  /** The task or pipeline node a session works for, with what its tools may do to it. */
+  private async toolOwner(
+    owner: SessionOwner,
+    turnId: string | undefined,
+  ): Promise<TaskOwner | PipelineOwner> {
+    if (owner.kind === "task") {
+      const engine = this.taskEngine;
+      let state = await engine.getState(owner.taskKey);
+      return {
+        ...owner,
+        state: {
+          get: () => state,
+          set: (next) => {
+            state = { ...next };
+            engine.updateState(owner.taskKey, state);
           },
-          "dispatch",
-        );
-        const turn = await this.turn(
-          sessionRoute.sessionId,
-          dispatchParams.prompt,
-        );
-        return { sessionId: sessionRoute.sessionId, turnId: turn.id };
+          merge: (patch) => {
+            state = { ...state, ...patch };
+            engine.updateState(owner.taskKey, state);
+          },
+        },
+      };
+    }
+    const engine = this.pipelineEngine;
+    return {
+      ...owner,
+      decide: (action, context) =>
+        engine.registerAgentDecision({
+          nodeRunId: owner.nodeRunId,
+          ...(turnId ? { turnId } : {}),
+          action,
+          context,
+        }),
+      context: () => engine.getContextForNodeRun(owner.nodeRunId),
+      history: {
+        list: (filter) => engine.listHistory(owner.runId, filter),
+        get: (query) => engine.getHistoryDetail(owner.runId, query),
       },
-    });
+    };
   }
 
   get hub(): EventHub {
@@ -533,7 +566,11 @@ export class ProjectRuntime {
     metadata?: Record<string, unknown>,
     source = "api",
     runtimeOverride?: SessionRuntimeOverride,
-    options?: { externalWorkspacePath?: string | undefined },
+    options?: {
+      externalWorkspacePath?: string | undefined;
+      /** The task execution or pipeline node the session works for. */
+      owner?: SessionOwner | undefined;
+    },
   ): Promise<SessionRoute> {
     if (!this.project.repository && this.project.id !== GLOBAL_PROJECT_ID)
       throw new Error(`project ${this.project.id} has no repository`);
@@ -553,19 +590,12 @@ export class ProjectRuntime {
       options?.externalWorkspacePath ??
       (await this.workspaces.ensureSessionWorkspace(this.project, sessionId));
 
-    const taskKey =
-      typeof metadata?.taskKey === "string" ? metadata.taskKey : undefined;
+    const owner = options?.owner;
     const context = this.context(
       workspacePath,
       sessionId,
-      taskKey,
-      {
-        runtime: runtimeName,
-        model,
-        reasoningEffort,
-      },
-      sessionActionScope(source, taskKey),
-      metadata,
+      { runtime: runtimeName, model, reasoningEffort },
+      owner,
     );
     const runtimeSession = await targetRuntime.startSession(context);
     this.boundSessions.add(sessionId);
@@ -584,6 +614,7 @@ export class ProjectRuntime {
       configRevision: this.project.revision ?? 1,
       status: "active",
       source,
+      ...(owner ? { owner } : {}),
       lastActiveAt: new Date().toISOString(),
       metadata: {
         ...(metadata ?? {}),
@@ -983,7 +1014,7 @@ export class ProjectRuntime {
     if (!active?.runtimeId || active.settled) throw new ConflictError("no active turn");
     const runtime = this.runtimeForRoute(route);
     await runtime.steerTurn(
-      this.context(this.workspacePath(route), sessionId, undefined, route),
+      this.context(this.workspacePath(route), sessionId, route, route.owner),
       route.runtimeSessionId ?? "",
       active.runtimeId,
       input,
@@ -1004,7 +1035,7 @@ export class ProjectRuntime {
       if (active.runtimeId) {
         const runtime = this.runtimeForRoute(route);
         await runtime.interruptTurn(
-          this.context(this.workspacePath(route), sessionId, undefined, route),
+          this.context(this.workspacePath(route), sessionId, route, route.owner),
           route.runtimeSessionId ?? "",
           active.runtimeId,
         );
@@ -1023,7 +1054,7 @@ export class ProjectRuntime {
     }
     const runtime = this.runtimeForRoute(route);
     await runtime.compactSession(
-      this.context(this.workspacePath(route), sessionId, undefined, route),
+      this.context(this.workspacePath(route), sessionId, route, route.owner),
       route.runtimeSessionId ?? "",
     );
   }
@@ -1035,7 +1066,7 @@ export class ProjectRuntime {
     const route = await this.loadSession(sessionId);
     const runtime = this.runtimeForRoute(route);
     await runtime.respondToApproval(
-      this.context(this.workspacePath(route), sessionId, undefined, route),
+      this.context(this.workspacePath(route), sessionId, route, route.owner),
       requestId,
       decision,
     );
@@ -1076,24 +1107,13 @@ export class ProjectRuntime {
     const workspacePath = await withSpan("workspace.prepare", {}, () =>
       this.ensureWorkspace(route),
     );
-    const taskKey =
-      typeof route.metadata?.taskKey === "string"
-        ? route.metadata.taskKey
-        : undefined;
     const { runtimeSessionId, runtime: sessionRuntime } = await withSpan(
       "runtime.bind_session",
       {},
-      () => this.bindRuntimeSession(entity, workspacePath, taskKey),
+      () => this.bindRuntimeSession(entity, workspacePath),
     );
     const boundRoute = entity.toRoute();
-    const context = this.context(
-      workspacePath,
-      id,
-      taskKey,
-      boundRoute,
-      sessionActionScope(boundRoute.source, taskKey),
-      boundRoute.metadata,
-    );
+    const context = this.context(workspacePath, id, boundRoute, boundRoute.owner);
     active.trace.bindRuntime(sessionRuntime.type, context.project.runtime?.model);
     if (entity.status !== "closing") await entity.transitionTo("active");
     entity.touch();
@@ -1138,7 +1158,6 @@ export class ProjectRuntime {
   private async bindRuntimeSession(
     entity: SessionEntity,
     workspacePath: string,
-    taskKey?: string,
   ): Promise<{ runtimeSessionId: string; runtime: AgentRuntime }> {
     const route = entity.toRoute();
     const previousId = route.runtimeSessionId;
@@ -1156,14 +1175,12 @@ export class ProjectRuntime {
     const context = this.context(
       workspacePath,
       route.sessionId,
-      taskKey,
       {
         runtime: runtimeName,
         model: resolved ? route.model : undefined,
         reasoningEffort: resolved ? route.reasoningEffort : undefined,
       },
-      sessionActionScope(route.source, taskKey),
-      route.metadata,
+      route.owner,
     );
 
     if (previousId && requestedRuntime && !resolved) {
@@ -1256,7 +1273,7 @@ export class ProjectRuntime {
     if (!route.runtimeSessionId) return;
     const runtime = this.runtimeForRoute(route);
     await runtime.releaseSession(
-      this.context(this.workspacePath(route), route.sessionId, undefined, route),
+      this.context(this.workspacePath(route), route.sessionId, route, route.owner),
       route.runtimeSessionId,
     );
   }
@@ -1293,45 +1310,15 @@ export class ProjectRuntime {
   private context(
     workspacePath: string,
     sessionId: string,
-    taskKey?: string,
     runtimeOverride?: SessionRuntimeOverride,
-    actionScope: ActionScope = sessionActionScope(undefined, taskKey),
-    sessionMetadata?: Record<string, unknown>,
+    owner?: SessionOwner,
   ): RuntimeContext {
-    const metadata = sessionMetadata ?? this.sessionManager.get(sessionId)?.toRoute().metadata;
-    let actionParameterOverrides: RuntimeContext["actionParameterOverrides"];
-    if (actionScope === "pipeline" && this.pipelineEngine) {
-      const pipelineId = typeof metadata?.pipelineId === "string" ? metadata.pipelineId : undefined;
-      const pipelineNodeId =
-        typeof metadata?.pipelineNodeId === "string" ? metadata.pipelineNodeId : undefined;
-      if (pipelineId && pipelineNodeId) {
-        const overrides = this.pipelineEngine.getActionParameterOverridesForNode(
-          pipelineId,
-          pipelineNodeId,
-        );
-        if (Object.keys(overrides).length > 0) {
-          actionParameterOverrides = overrides;
-        }
-      }
-    }
     return {
       project: this.effectiveProjectFor(runtimeOverride),
       workspacePath,
-      ...(taskKey ? { taskKey } : {}),
-      actionScope,
-      ...(actionParameterOverrides ? { actionParameterOverrides } : {}),
+      tools: this.sessionTools(sessionId, workspacePath, owner),
       ...(this.project.id === GLOBAL_PROJECT_ID ? { readOnly: true } : {}),
       onEvent: (event) => this.onRuntimeEvent(sessionId, event),
-      createActionContext: (params) =>
-        this.createActionContext({
-          sessionId,
-          workspacePath,
-          taskKey,
-          scope: actionScope,
-          turnId: this.activeTurns.get(sessionId)?.turn.id ?? params.turnId,
-          signal: params.signal,
-          traceContext: this.activeTurns.get(sessionId)?.trace.context,
-        }),
     };
   }
   private async onRuntimeEvent(id: string, event: RuntimeEvent): Promise<void> {
@@ -1799,31 +1786,6 @@ export class ProjectRuntime {
       );
     }
     return this.taskEngine.dispatch(task);
-  }
-
-  /**
-   * Execute task entrypoint dispatched to TaskExecutorRegistry
-   */
-  async executeTask(
-    task: TaskDefinition,
-    stateBefore: Record<string, unknown>,
-  ): Promise<TaskRunResult> {
-    const registry = this.taskEngine.getRegistry();
-    if (registry) {
-      const executor = registry.resolve(task);
-      return executor.execute({
-        task,
-        stateBefore,
-        updateState: (newState) =>
-          this.taskEngine.updateState(task.taskKey, newState),
-      });
-    }
-    return {
-      success: true,
-      durationMs: 0,
-      stateBefore,
-      stateAfter: stateBefore,
-    };
   }
 
   /**

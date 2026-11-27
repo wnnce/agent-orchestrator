@@ -1,6 +1,5 @@
 import { z } from "zod";
-import type { PipelineEngine } from "../../pipeline/engine.ts";
-import type { ActionContext, ActionDefinition } from "../types.ts";
+import { defineTool, type ToolSite } from "../types.ts";
 
 const nonEmptyText = z.string().trim().min(1);
 
@@ -10,8 +9,6 @@ export const listProjectPipelinesParams = z.object({
     .optional()
     .describe("Include disabled pipelines in the result (default: false)"),
 });
-
-export type ListProjectPipelinesParams = z.infer<typeof listProjectPipelinesParams>;
 
 export const dispatchPipelineRunParams = z.object({
   pipelineId: nonEmptyText.describe(
@@ -39,24 +36,20 @@ export const dispatchPipelineRunParams = z.object({
     .describe("Optional free-form metadata attached to the run"),
 });
 
-export type DispatchPipelineRunParams = z.infer<typeof dispatchPipelineRunParams>;
+/** A pipeline node's agent works within its run; starting other runs is left to people and tasks. */
+const outsidePipelines = (site: ToolSite): boolean => site.owner?.kind !== "pipeline";
 
-function requirePipelineEngine(context: ActionContext): PipelineEngine {
-  return context.requireService<PipelineEngine>("pipelineEngine");
-}
-
-export const listProjectPipelinesAction: ActionDefinition<ListProjectPipelinesParams, unknown> = {
+export const listProjectPipelinesTool = defineTool({
   name: "list_project_pipelines",
   description:
     "List pipelines configured in the current project, including their stages and the entry node's JSON Schema (entryInputSchema) required for dispatch_pipeline_run.",
-  parameters: listProjectPipelinesParams,
-  scopes: ["conversation", "task"],
-  async handler(params, context) {
-    const engine = requirePipelineEngine(context);
-    const all = await engine.listPipelinesWithVersions();
-    const visible = params.includeDisabled ? all : all.filter((p) => p.enabled);
+  input: listProjectPipelinesParams,
+  when: outsidePipelines,
+  async run(input, ctx) {
+    const all = await ctx.pipelines.list();
+    const visible = input.includeDisabled ? all : all.filter((p) => p.enabled);
     return {
-      projectId: context.projectId,
+      projectId: ctx.project.id,
       pipelines: visible.map((p) => ({
         id: p.id,
         name: p.name,
@@ -73,33 +66,24 @@ export const listProjectPipelinesAction: ActionDefinition<ListProjectPipelinesPa
       })),
     };
   },
-};
+});
 
-export const dispatchPipelineRunAction: ActionDefinition<DispatchPipelineRunParams, unknown> = {
+export const dispatchPipelineRunTool = defineTool({
   name: "dispatch_pipeline_run",
   description:
     "Start a new pipeline run in the current project (idempotent when externalKey is provided). Validate `data` against the pipeline's entryInputSchema from list_project_pipelines.",
-  parameters: dispatchPipelineRunParams,
-  scopes: ["conversation", "task"],
-  async handler(params, context) {
-    const engine = requirePipelineEngine(context);
-    const createdBy = context.taskKey
-      ? `task:${context.taskKey}`
-      : context.sessionId
-        ? `session:${context.sessionId}`
-        : "agent";
-
-    const { created, run } = await engine.startRun({
-      pipelineId: params.pipelineId,
-      title: params.title,
-      ...(params.description !== undefined ? { description: params.description } : {}),
-      ...(params.externalKey !== undefined ? { externalKey: params.externalKey } : {}),
-      ...(params.externalUrl !== undefined ? { externalUrl: params.externalUrl } : {}),
-      ...(params.data !== undefined ? { data: params.data } : {}),
-      ...(params.metadata !== undefined ? { metadata: params.metadata } : {}),
-      createdBy,
+  input: dispatchPipelineRunParams,
+  when: outsidePipelines,
+  async run(input, ctx) {
+    const { created, run } = await ctx.pipelines.start({
+      pipelineId: input.pipelineId,
+      title: input.title,
+      ...(input.description !== undefined ? { description: input.description } : {}),
+      ...(input.externalKey !== undefined ? { externalKey: input.externalKey } : {}),
+      ...(input.externalUrl !== undefined ? { externalUrl: input.externalUrl } : {}),
+      ...(input.data !== undefined ? { data: input.data } : {}),
+      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
     });
-
     return {
       created,
       runId: run.runId,
@@ -111,9 +95,4 @@ export const dispatchPipelineRunAction: ActionDefinition<DispatchPipelineRunPara
       ...(run.externalKey !== undefined ? { externalKey: run.externalKey } : {}),
     };
   },
-};
-
-export const pipelineDispatchActions: readonly ActionDefinition<unknown, unknown>[] = [
-  listProjectPipelinesAction as ActionDefinition<unknown, unknown>,
-  dispatchPipelineRunAction as ActionDefinition<unknown, unknown>,
-];
+});

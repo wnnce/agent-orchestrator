@@ -43,7 +43,7 @@ When an Agent runs at node $N$, the orchestrator inspects node $N+1$ and generat
 
 - **If node $N+1$ declares `input`**: `pipeline_next` natively exposes `data` as a **required** parameter with node $N+1$'s exact JSON Schema (types, required keys, descriptions, defaults). The LLM cannot advance without supplying valid structured fields.
 - **If node $N+1$ does NOT declare `input` (or is `node.end`)**: `pipeline_next` omits `data` completely (`{ summary, content, artifacts?, metadata? }`).
-- **Registry fallback**: if a per-session override cannot be resolved (e.g. missing session metadata, deleted/renamed pipeline definition, or direct `ActionRegistry` invocation), `pipeline_next` falls back to its generic registry schema where `data` is an optional JSON object; the engine still validates or drops `data` to `{}` before committing any transition.
+- **Fallback**: if the next node cannot be resolved (e.g. the pipeline definition was deleted or renamed), `pipeline_next` keeps its generic schema where `data` is an optional JSON object; the engine still validates or drops `data` to `{}` before committing any transition.
 
 No prompt-injection hacks or parsing workarounds are needed.
 
@@ -215,8 +215,8 @@ A node's `input` schema is tightly coupled to its live `prompt` (`{{ data.xxx }}
 
 ## 9. Triggering Pipelines from Agent Conversations & Tasks
 
-Two built-in actions are exposed in `conversation` and `task` scopes (and intentionally hidden inside `pipeline` scope to avoid unintended recursive pipeline launches):
+Two built-in tools are offered to conversation and task sessions (and intentionally not to a pipeline node's agent, to avoid unintended recursive pipeline launches):
 
 - **`list_project_pipelines({ includeDisabled? })`**: Lists pipelines configured for the current project along with their stages and `entryInputSchema` (JSON Schema of `nodes[0].input`).
-- **`dispatch_pipeline_run({ pipelineId, title, description?, externalKey?, externalUrl?, data?, metadata? })`**: Starts a new run (idempotent on `externalKey`), validates `data` against `nodes[0].input`, and records `createdBy` as `session:<sessionId>` or `task:<taskKey>`.
+- **`dispatch_pipeline_run({ pipelineId, title, description?, externalKey?, externalUrl?, data?, metadata? })`**: Starts a new run (idempotent on `externalKey`), validates `data` against `nodes[0].input`, and records `createdBy` as `session:<sessionId>` (the session that called the tool).
 

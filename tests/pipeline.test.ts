@@ -3,7 +3,6 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { ActionRegistry, builtinActions, pipelineActions } from "../src/actions/index.ts";
 import { ArtifactStore } from "../src/artifacts/store.ts";
 import type { AppConfig } from "../src/config/config.ts";
 import type { ProjectConfig } from "../src/domain/types.ts";
@@ -22,9 +21,6 @@ import {
 } from "../src/pipeline/index.ts";
 import { ProjectManager } from "../src/project/manager.ts";
 import { ProjectRuntime } from "../src/project/runtime.ts";
-import { actionScopeFor } from "../src/runtime/action-bridge.ts";
-import { ACPMcpBridge } from "../src/runtime/acp/mcp-bridge.ts";
-import { bridgeActionsToPiTools } from "../src/runtime/pi/tools.ts";
 import {
   FAKE_CAPABILITIES,
   type AgentRuntime,
@@ -33,6 +29,7 @@ import {
   type RuntimeSession,
   type RuntimeTurn,
 } from "../src/runtime/runtime.ts";
+import type { ToolCallResult } from "../src/tools/types.ts";
 import { WorkspaceManager } from "../src/workspace/workspace.ts";
 
 const tempDirs: string[] = [];
@@ -77,15 +74,16 @@ async function waitFor<T>(
 }
 
 /**
- * Programmable fake AgentRuntime that executes registered orchestrator actions via
- * `context.createActionContext` so tests exercise the full ActionRegistry + PipelineEngine flow.
+ * Programmable fake AgentRuntime that calls orchestrator tools through `context.tools`, so tests
+ * exercise the full ProjectRuntime tools + PipelineEngine flow.
  */
 class ScriptedAgentRuntime implements AgentRuntime {
   readonly name = "fake";
   readonly type = "fake";
   readonly capabilities = FAKE_CAPABILITIES;
 
-  readonly seenScopes: Array<string | undefined> = [];
+  /** The tools each started session was offered. */
+  readonly seenToolNames: string[][] = [];
   readonly seenPrompts: Array<{ sessionId: string; input: string }> = [];
   readonly seenWorkspaces: string[] = [];
 
@@ -96,11 +94,9 @@ class ScriptedAgentRuntime implements AgentRuntime {
       turnId: string;
       input: string;
       context: RuntimeContext;
-      callAction: (name: string, params: Record<string, unknown>) => Promise<unknown>;
+      callAction: (name: string, params: Record<string, unknown>) => Promise<ToolCallResult>;
     }) => Promise<string | void> | string | void
   > = [];
-
-  constructor(private readonly actionRegistry: ActionRegistry) {}
 
   enqueueTurnHandler(
     handler: (args: {
@@ -108,7 +104,7 @@ class ScriptedAgentRuntime implements AgentRuntime {
       turnId: string;
       input: string;
       context: RuntimeContext;
-      callAction: (name: string, params: Record<string, unknown>) => Promise<unknown>;
+      callAction: (name: string, params: Record<string, unknown>) => Promise<ToolCallResult>;
     }) => Promise<string | void> | string | void,
   ): void {
     this.handlers.push(handler);
@@ -116,7 +112,7 @@ class ScriptedAgentRuntime implements AgentRuntime {
 
   async startSession(context: RuntimeContext): Promise<RuntimeSession> {
     const id = `scripted_${crypto.randomUUID()}`;
-    this.seenScopes.push(context.actionScope);
+    this.seenToolNames.push((context.tools?.specs ?? []).map((spec) => spec.name));
     this.seenWorkspaces.push(context.workspacePath);
     this.sessionContexts.set(id, context);
     return { id, workspacePath: context.workspacePath };
@@ -153,11 +149,8 @@ class ScriptedAgentRuntime implements AgentRuntime {
             input,
             context,
             callAction: async (name, params) => {
-              const actionCtx = context.createActionContext?.({ turnId });
-              if (!actionCtx) throw new Error("missing createActionContext");
-              return this.actionRegistry.execute(name, params, actionCtx, {
-                parameterOverride: context.actionParameterOverrides?.[name],
-              });
+              if (!context.tools) throw new Error("the session has no tools");
+              return context.tools.call(name, params);
             },
           });
           if (typeof maybeText === "string") outputText = maybeText;
@@ -410,57 +403,6 @@ export default definePipeline({
   });
 });
 
-describe("Pipeline ActionScope Isolation across ActionRegistry & Runtime Bridges", () => {
-  it("isolates pipeline_* actions strictly to pipeline scope and hides schedule_job/update_task_state from pipeline", () => {
-    const registry = new ActionRegistry(new Logger({ level: "error" }));
-    registry.registerAll(builtinActions);
-
-    const pipelineNames = registry.list("pipeline").map((a) => a.name);
-    const conversationNames = registry.list("conversation").map((a) => a.name);
-    const taskNames = registry.list("task").map((a) => a.name);
-
-    // Pipeline sees all 7 pipeline_* actions + scopes:["all"] actions
-    for (const action of pipelineActions) {
-      expect(pipelineNames).toContain(action.name);
-      expect(conversationNames).not.toContain(action.name);
-      expect(taskNames).not.toContain(action.name);
-    }
-    expect(pipelineNames).toContain("send_notification");
-    expect(pipelineNames).toContain("create_artifact");
-    expect(pipelineNames).toContain("dispatch_agent_task");
-
-    // Pipeline must NOT see conversation-only or task-only actions
-    expect(pipelineNames).not.toContain("schedule_job");
-    expect(pipelineNames).not.toContain("cancel_job");
-    expect(pipelineNames).not.toContain("update_task_state");
-
-    // Runtime action bridge helpers respect explicit "pipeline" scope
-    expect(actionScopeFor(undefined, "pipeline")).toBe("pipeline");
-    expect(actionScopeFor("some-task", "pipeline")).toBe("pipeline");
-
-    const acpBridge = new ACPMcpBridge(registry);
-    const acpPipelineTools = acpBridge.toolNamesForScope(undefined, "pipeline");
-    expect(acpPipelineTools.has("pipeline_next")).toBe(true);
-    expect(acpPipelineTools.has("schedule_job")).toBe(false);
-    expect(acpBridge.toolNamesForScope(undefined).has("pipeline_next")).toBe(false);
-
-    const piTools = bridgeActionsToPiTools(registry, () => ({
-      project: {
-        id: "p1",
-        displayName: "P1",
-        description: "P1",
-        routing: { projectId: "p1", displayName: "P1", summary: "P1", keywords: [] },
-      },
-      workspacePath: "/tmp",
-      sessionId: "ses_1",
-      actionScope: "pipeline",
-    })).map((t) => t.name);
-    expect(piTools).toContain("pipeline_next");
-    expect(piTools).not.toContain("schedule_job");
-    expect(piTools).not.toContain("update_task_state");
-  });
-});
-
 describe("PipelineEngine End-to-End Lifecycle, Concurrency, Durable TS Steps & Fallback", () => {
   async function createTestProjectRuntime(options?: {
     pipelineCode?: string;
@@ -513,8 +455,6 @@ describe("PipelineEngine End-to-End Lifecycle, Concurrency, Durable TS Steps & F
 
     const store = new MemoryStore();
     const logger = new Logger({ level: "error" });
-    const actionRegistry = new ActionRegistry(logger, store);
-    actionRegistry.registerAll(builtinActions);
 
     const project: ProjectConfig = {
       id: "demo",
@@ -535,7 +475,7 @@ describe("PipelineEngine End-to-End Lifecycle, Concurrency, Durable TS Steps & F
     );
     await workspaces.syncBase(project);
 
-    const runtime = new ScriptedAgentRuntime(actionRegistry);
+    const runtime = new ScriptedAgentRuntime();
     const artifacts = new ArtifactStore(artifactDir, store);
     const pipelineHub = new PipelineEventHub();
     const projectRuntime = new ProjectRuntime(
@@ -549,11 +489,6 @@ describe("PipelineEngine End-to-End Lifecycle, Concurrency, Durable TS Steps & F
       undefined,
       undefined,
       { pipelineEventHub: pipelineHub },
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      actionRegistry,
     );
     await projectRuntime.start();
     return {
@@ -564,7 +499,6 @@ describe("PipelineEngine End-to-End Lifecycle, Concurrency, Durable TS Steps & F
       project,
       store,
       workspaces,
-      actionRegistry,
       runtime,
       pipelineHub,
       projectRuntime,
@@ -638,24 +572,24 @@ export default definePipeline({
     // Turn 1 (design): verifies single-turn decision lock (invalid call does NOT lock; 2nd valid call rejected)
     env.runtime.enqueueTurnHandler(async ({ callAction }) => {
       // Invalid action (design has allowPrev: false) should fail WITHOUT locking turn
-      const invalidPrev = (await callAction("pipeline_prev", {
+      const invalidPrev = await callAction("pipeline_prev", {
         reason: "bad",
         feedback: "nope",
-      })) as { success: boolean };
-      expect(invalidPrev.success).toBe(false);
+      });
+      expect(invalidPrev.ok).toBe(false);
 
       // Valid pipeline_next registers pending decision
-      const okNext = (await callAction("pipeline_next", {
+      const okNext = await callAction("pipeline_next", {
         summary: "Design ready",
         content: "Detailed design doc",
-      })) as { success: boolean };
-      expect(okNext.success).toBe(true);
+      });
+      expect(okNext.ok).toBe(true);
 
       // Second valid flow decision in same turn must be rejected by single-turn lock
-      const duplicate = (await callAction("pipeline_fail", {
+      const duplicate = await callAction("pipeline_fail", {
         reason: "should be rejected",
-      })) as { success: boolean; error?: string };
-      expect(duplicate.success).toBe(false);
+      });
+      expect(duplicate.ok).toBe(false);
       expect(duplicate.error).toContain("already been registered");
       return "Design completed";
     });
@@ -672,12 +606,10 @@ export default definePipeline({
         "hello-shared-worktree\n",
         "utf8",
       );
-      const globalCtx = (await callAction("pipeline_get_context", {})) as {
-        success: boolean;
-        data?: { upstreamContext?: { context?: { humanNote?: string } } };
-      };
-      expect(globalCtx.success).toBe(true);
-      expect(globalCtx.data?.upstreamContext?.context?.humanNote).toBe("Looks great, proceed");
+      const globalCtx = await callAction("pipeline_get_context", {});
+      expect(globalCtx.ok).toBe(true);
+      const view = globalCtx.data as { upstreamContext?: { context?: { humanNote?: string } } };
+      expect(view.upstreamContext?.context?.humanNote).toBe("Looks great, proceed");
       await callAction("pipeline_next", {
         summary: "Implemented v1",
         content: "Wrote feature.txt",
@@ -726,7 +658,9 @@ export default definePipeline({
       expect(atDesign.currentNodeId).toBe("design");
       expect(atDesign.workspacePath).toBeDefined();
       expect(existsSync(atDesign.workspacePath!)).toBe(true);
-      expect(env.runtime.seenScopes[0]).toBe("pipeline");
+      // The node's agent gets the node's flow tools, not a conversation's
+      expect(env.runtime.seenToolNames[0]).toContain("pipeline_next");
+      expect(env.runtime.seenToolNames[0]).not.toContain("schedule_job");
 
       // Pipeline session must be hidden from default listSessions
       const visibleSessions = await env.store.listSessions("demo");
@@ -1111,7 +1045,7 @@ export default function (api) {
         firstCreated: true,
         secondCreated: false,
         sameRun: true,
-        createdBy: "task:demo:scan",
+        createdBy: "task:scan",
       });
     } finally {
       await env.projectRuntime.stop();
@@ -1442,7 +1376,7 @@ export default definePipeline({
 
       await expect(
         engine.registerAgentDecision({
-          sessionId,
+          nodeRunId: nodeRuns[0]!.nodeRunId,
           action: "pipeline_next",
           context: { summary: "sneaky", content: "skip the retry" },
         }),

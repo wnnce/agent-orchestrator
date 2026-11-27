@@ -9,13 +9,6 @@ import type {
   RuntimeTurn,
 } from "../runtime.ts";
 import { RuntimeSessionNotFoundError } from "../runtime.ts";
-import { defaultActionRegistry, ActionRegistry } from "../../actions/index.ts";
-import {
-  actionContextFor,
-  actionResultText,
-  actionToJsonSchema,
-  resolveActionsForSite,
-} from "../action-bridge.ts";
 import { normalizeCodexNotification, notificationThreadId } from "./normalizer.ts";
 import { CodexUsageTracker } from "./usage.ts";
 import { CodexConnection } from "./connection.ts";
@@ -73,7 +66,6 @@ export class CodexRuntime implements AgentRuntime {
     private readonly binary: string,
     private readonly logger = new Logger(),
     private readonly globalProject?: ProjectConfig,
-    private readonly actionRegistry: ActionRegistry = defaultActionRegistry,
   ) {}
 
   async startSession(context: RuntimeContext): Promise<RuntimeSession> {
@@ -367,16 +359,12 @@ export class CodexRuntime implements AgentRuntime {
       ...this.threadOverrides(context),
       serviceName: "agent-orchestrator",
     };
-    // Expose orchestrator actions as Codex dynamic tools (task, pipeline, and conversation scopes differ).
-    const tools = resolveActionsForSite(this.actionRegistry, {
-      taskKey: context.taskKey,
-      actionScope: context.actionScope,
-      actionParameterOverrides: context.actionParameterOverrides,
-    }).map((action) => ({
+    // Orchestrator tools reach Codex as dynamic tools.
+    const tools = (context.tools?.specs ?? []).map((tool) => ({
       type: "function" as const,
-      name: action.name,
-      description: action.description,
-      inputSchema: actionToJsonSchema(action.parameters),
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
     }));
     if (tools.length > 0) params.dynamicTools = tools;
     return params;
@@ -394,30 +382,21 @@ export class CodexRuntime implements AgentRuntime {
     };
   }
 
-  /** Runs an orchestrator action that Codex called as a dynamic tool and returns its result. */
+  /** Runs an orchestrator tool that Codex called as a dynamic tool and returns its result. */
   private async handleDynamicToolCall(
     connection: CodexConnection,
     requestId: RequestId,
     params: DynamicToolCallParams,
   ): Promise<void> {
     const context = this.contexts.get(params.threadId);
-    if (!context) {
-      this.logger.warn("rejecting Codex tool call for a thread nobody is attached to", {
+    const tools = context?.tools;
+    if (!context || !tools) {
+      this.logger.warn("rejecting Codex tool call for a thread without orchestrator tools", {
         threadId: params.threadId,
       });
       connection.respondError(requestId, -32602, `unknown thread ${params.threadId}`);
       return;
     }
-    const actionContext = actionContextFor({
-      project: context.project,
-      workspacePath: context.workspacePath,
-      sessionId: params.threadId,
-      turnId: params.turnId,
-      taskKey: context.taskKey,
-      actionScope: context.actionScope,
-      createActionContext: context.createActionContext,
-      logger: this.logger,
-    });
     this.logger.info("running Codex dynamic tool call", {
       threadId: params.threadId,
       tool: params.tool,
@@ -435,20 +414,10 @@ export class CodexRuntime implements AgentRuntime {
           args: (params.arguments ?? {}) as Record<string, unknown>,
         },
       });
-      const result = await this.actionRegistry.execute(
-        params.tool,
-        params.arguments,
-        actionContext,
-        { parameterOverride: context.actionParameterOverrides?.[params.tool] },
-      );
+      const result = await tools.call(params.tool, params.arguments);
       const response: DynamicToolCallResponse = {
-        success: result.success,
-        contentItems: [
-          {
-            type: "inputText",
-            text: actionResultText(result),
-          },
-        ],
+        success: result.ok,
+        contentItems: [{ type: "inputText", text: result.text }],
       };
       connection.respond(requestId, response);
       await context.onEvent({
@@ -459,7 +428,7 @@ export class CodexRuntime implements AgentRuntime {
           itemId: params.callId,
           toolName: params.tool,
           args: (params.arguments ?? {}) as Record<string, unknown>,
-          status: result.success ? "success" : "failure",
+          status: result.ok ? "success" : "failure",
           result: result.data,
           error: result.error,
           durationMs: Date.now() - startedAt,

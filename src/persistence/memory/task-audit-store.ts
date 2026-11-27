@@ -1,8 +1,8 @@
 import {
   NOT_DELETED,
   ScheduledJobStatus,
-  type ActionExecutionFilter,
-  type ActionExecutionRecord,
+  type ToolExecutionFilter,
+  type ToolExecutionRecord,
   type ListTaskExecutionLogsFilter,
   type ListTaskExecutionsOptions,
   type NotificationDelivery,
@@ -23,7 +23,7 @@ export class MemoryTaskAuditStore {
   readonly taskExecutions: TaskExecutionRecord[] = [];
   readonly taskExecutionLogs = new Map<string, TaskExecutionLogRecord[]>();
   readonly scheduledJobs = new Map<string, ScheduledJobRecord>();
-  readonly actionExecutions: ActionExecutionRecord[] = [];
+  readonly toolExecutions: ToolExecutionRecord[] = [];
   private nextTaskExecutionId = 1;
 
   async recordNotificationDelivery(delivery: NotificationDelivery): Promise<void> {
@@ -223,20 +223,22 @@ export class MemoryTaskAuditStore {
     }
   }
 
-  async recordActionExecution(record: ActionExecutionRecord): Promise<void> {
-    this.actionExecutions.unshift({
+  async recordToolExecution(record: ToolExecutionRecord): Promise<void> {
+    this.toolExecutions.unshift({
       ...structuredClone(record),
       createdAt: record.createdAt ?? new Date().toISOString(),
     });
   }
 
-  async listActionExecutions(filter?: ActionExecutionFilter): Promise<ActionExecutionRecord[]> {
+  async listToolExecutions(filter?: ToolExecutionFilter): Promise<ToolExecutionRecord[]> {
     const max = clampLimit(filter?.limit, 50, 200);
-    const result: ActionExecutionRecord[] = [];
-    for (const item of this.actionExecutions) {
+    const result: ToolExecutionRecord[] = [];
+    for (const item of this.toolExecutions) {
       if (filter?.projectId && item.projectId !== filter.projectId) continue;
       if (filter?.sessionId && item.sessionId !== filter.sessionId) continue;
-      if (filter?.actionName && item.actionName !== filter.actionName) continue;
+      if (filter?.toolName && item.toolName !== filter.toolName) continue;
+      if (filter?.ownerKind && item.ownerKind !== filter.ownerKind) continue;
+      if (filter?.ownerId && item.ownerId !== filter.ownerId) continue;
       result.push(structuredClone(item));
       if (result.length >= max) break;
     }

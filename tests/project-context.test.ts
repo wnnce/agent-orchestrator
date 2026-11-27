@@ -29,7 +29,13 @@ const taskOrigin: Origin = {
   taskKey: "shop:nightly",
   executionId: "texe_1",
 };
-const nodeOrigin: Origin = { kind: "pipeline", runId: "run_1", nodeId: "build", nodeRunId: "nr_1" };
+const nodeOrigin: Origin = {
+  kind: "pipeline",
+  pipelineId: "deploy",
+  runId: "run_1",
+  nodeId: "build",
+  nodeRunId: "nr_1",
+};
 
 function harness() {
   const queued: unknown[][] = [];
@@ -68,6 +74,7 @@ function harness() {
         return { created: true, run: { runId: "run_new" } as PipelineRunRecord };
       },
       find: async (pipelineId, externalKey) => runs.get(`${pipelineId}/${externalKey}`) ?? null,
+      list: async () => [],
       signal: async (runId) => {
         signalled.push(runId);
         return { woken: true };

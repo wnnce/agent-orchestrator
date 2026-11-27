@@ -323,18 +323,13 @@ Triage open issues for {{project.id}}.
     expect(taskSessions[0]?.model).toBe("claude-haiku-5-5");
     expect(taskSessions[0]?.reasoningEffort).toBe("low");
 
-    // Simulate the task invoking `dispatch_agent_task` via its runtime's ActionContext
+    // The task's agent calls `dispatch_agent_task` through its session's tools
     const taskTurnContext = claudeMock.turnContexts[0]!;
-    const actionCtx = taskTurnContext.createActionContext!({});
-    const dispatchRes = await projectRt.actionRegistry.execute(
-      "dispatch_agent_task",
-      {
-        title: "dev(issue-#42): implement feature",
-        prompt: "Implement feature #42 on main.",
-      },
-      actionCtx,
-    );
-    expect(dispatchRes.success).toBe(true);
+    const dispatchRes = await taskTurnContext.tools!.call("dispatch_agent_task", {
+      title: "dev(issue-#42): implement feature",
+      prompt: "Implement feature #42 on main.",
+    });
+    expect(dispatchRes.ok).toBe(true);
     const dispatchedSessionId = (dispatchRes.data as { sessionId: string }).sessionId;
     await projectRt.waitForIdle(dispatchedSessionId);
 

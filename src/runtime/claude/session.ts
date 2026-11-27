@@ -176,8 +176,8 @@ export class ClaudeSession {
     title: string | undefined,
   ): Promise<PermissionResult> {
     const kind = toolKind(toolName).kind;
-    // The orchestrator's own actions never need the user's approval.
-    if (kind === "action") return Promise.resolve({ behavior: "allow", updatedInput: input });
+    // The orchestrator's own tools never need the user's approval.
+    if (kind === "orchestrator") return Promise.resolve({ behavior: "allow", updatedInput: input });
     return new Promise<PermissionResult>((resolve) => {
       this.approvals.set(requestId, { input, resolve });
       signal.addEventListener("abort", () =>

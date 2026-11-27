@@ -26,6 +26,7 @@ export class PostgresSessionRepo {
       configRevision: route.configRevision,
       status: route.status,
       source,
+      owner: route.owner ?? null,
       runtime,
       model: route.model ?? null,
       reasoningEffort: route.reasoningEffort ?? null,

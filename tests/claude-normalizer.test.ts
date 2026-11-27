@@ -30,7 +30,10 @@ describe("ClaudeNormalizer", () => {
     expect(toolKind("Write")).toEqual({ kind: "file_change", change: "create" });
     expect(toolKind("Edit")).toEqual({ kind: "file_change", change: "modify" });
     expect(toolKind("TodoWrite")).toEqual({ kind: "plan" });
-    expect(toolKind("mcp__orchestrator__notify")).toEqual({ kind: "action", actionName: "notify" });
+    expect(toolKind("mcp__orchestrator__notify")).toEqual({
+      kind: "orchestrator",
+      orchestratorTool: "notify",
+    });
     expect(toolKind("mcp__linear__create_issue")).toEqual({
       kind: "mcp",
       serverName: "linear",

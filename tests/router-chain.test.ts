@@ -465,7 +465,7 @@ describe("3-Tier Decision Chain Router & Global Fallback", () => {
 
       const globalRuntime = projectManager.get(GLOBAL_PROJECT_ID);
       expect(globalRuntime.project.runtime?.type).toBe("fake");
-      expect(globalRuntime.actionRegistry.toCodexTools("conversation")).toEqual([]);
+      expect(globalRuntime.tools.list({})).toEqual([]);
     });
   });
 });

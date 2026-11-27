@@ -1,8 +1,8 @@
 import type { OriginRef } from "../domain/origin.ts";
 import { randomUUID } from "node:crypto";
 import type {
-  ActionExecutionFilter,
-  ActionExecutionRecord,
+  ToolExecutionFilter,
+  ToolExecutionRecord,
   ArtifactRecord,
   EventRecord,
   InboundMessageRecord,
@@ -181,8 +181,8 @@ export interface Store {
     summary?: string,
     finishedAt?: string,
   ): Promise<void>;
-  recordActionExecution(record: ActionExecutionRecord): Promise<void>;
-  listActionExecutions(filter?: ActionExecutionFilter): Promise<ActionExecutionRecord[]>;
+  recordToolExecution(record: ToolExecutionRecord): Promise<void>;
+  listToolExecutions(filter?: ToolExecutionFilter): Promise<ToolExecutionRecord[]>;
   getProjectOverview(
     projectId: string,
     options?: ProjectOverviewQueryOptions,

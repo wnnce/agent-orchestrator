@@ -1,16 +1,20 @@
 import { createRoute, z } from "@hono/zod-openapi";
 import { jsonContent } from "./common.ts";
 
-export const actionExecutionRecordSchema = z
+const ownerKindSchema = z.enum(["task", "pipeline"]);
+
+export const toolExecutionRecordSchema = z
   .object({
     id: z.union([z.string(), z.number()]).optional(),
     executionId: z.string(),
     projectId: z.string(),
-    sessionId: z.string().optional(),
+    sessionId: z.string(),
     turnId: z.string().optional(),
-    taskKey: z.string().optional(),
-    caller: z.string(),
-    actionName: z.string(),
+    ownerKind: z.enum(["session", "task", "pipeline", "hook"]).optional().openapi({
+      description: "Kind of the task execution or pipeline node run the session works for",
+    }),
+    ownerId: z.string().optional(),
+    toolName: z.string(),
     parameters: z.record(z.string(), z.unknown()),
     status: z.enum(["success", "failure"]),
     result: z.unknown().optional(),
@@ -18,18 +22,20 @@ export const actionExecutionRecordSchema = z
     durationMs: z.number(),
     createdAt: z.string().optional(),
   })
-  .openapi("ActionExecutionRecord");
+  .openapi("ToolExecutionRecord");
 
-export const listActionExecutionsRoute = createRoute({
+export const listToolExecutionsRoute = createRoute({
   method: "get",
-  path: "/action-executions",
-  tags: ["Actions"],
-  summary: "List action execution audit records",
+  path: "/tool-executions",
+  tags: ["Tools"],
+  summary: "List the tool calls agents made",
   request: {
     query: z.object({
       projectId: z.string().min(1).optional(),
       sessionId: z.string().min(1).optional(),
-      actionName: z.string().min(1).optional(),
+      toolName: z.string().min(1).optional(),
+      ownerKind: ownerKindSchema.optional(),
+      ownerId: z.string().min(1).optional(),
       limit: z.coerce
         .number()
         .int()
@@ -40,8 +46,8 @@ export const listActionExecutionsRoute = createRoute({
   },
   responses: {
     200: jsonContent(
-      z.object({ executions: z.array(actionExecutionRecordSchema) }),
-      "Action execution records",
+      z.object({ executions: z.array(toolExecutionRecordSchema) }),
+      "Tool execution records",
     ),
   },
 });

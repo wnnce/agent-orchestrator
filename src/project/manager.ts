@@ -13,7 +13,6 @@ import { MemoryEventHub, type EventHub } from "../events/hub.ts";
 import { SkillManager, type ProjectSkill } from "./skills.ts";
 import { GLOBAL_PROJECT_ID, createGlobalProjectConfig } from "./global.ts";
 import { SessionManager } from "../session/index.ts";
-import { ActionRegistry, defaultActionRegistry } from "../actions/index.ts";
 import { PipelineEventHub } from "../pipeline/index.ts";
 
 export class ProjectManager {
@@ -124,17 +123,11 @@ export class ProjectManager {
       sharedWorkspaces ?? new WorkspaceManager(workspaceRoot, baseRoot, undefined, this.logger);
     const artifacts = new ArtifactStore(this.config.artifactDir, this.store);
 
-    const actionRegistry = new ActionRegistry(this.logger, this.store);
-    if (project.id !== GLOBAL_PROJECT_ID) {
-      actionRegistry.registerAll(defaultActionRegistry.list());
-    }
-
     const createAgentRuntime = (type: string): AgentRuntime =>
       this.runtimeRegistry.create(type, {
         project: { ...effective, runtime: { ...effective.runtime, type } },
         logger: this.logger.child({ projectId: project.id }),
         config: this.config,
-        actionRegistry,
         globalProject: project.id === GLOBAL_PROJECT_ID ? undefined : this.globalProject,
       });
 
@@ -151,10 +144,6 @@ export class ProjectManager {
       this.sessionManager,
       { runtimeFactory: createAgentRuntime, pipelineEventHub: this.pipelineEventHub },
       project.id === GLOBAL_PROJECT_ID ? undefined : this.globalProject,
-      undefined,
-      undefined,
-      undefined,
-      actionRegistry,
     );
   }
 }
