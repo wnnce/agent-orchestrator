@@ -19,6 +19,7 @@ import {
   RotateCw,
   ShieldCheck,
   Sparkles,
+  Webhook,
   Workflow,
   Wrench,
 } from "lucide-react";
@@ -99,6 +100,7 @@ export function ProjectInfoView() {
   const [sseConnected, setSseConnected] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [copiedRepo, setCopiedRepo] = useState(false);
+  const [copiedHookId, setCopiedHookId] = useState<string | null>(null);
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const sseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -130,6 +132,13 @@ export function ProjectInfoView() {
   const toolsQuery = useQuery({
     queryKey: queryKeys.projectTools(activeProjectId),
     queryFn: () => projectsApi.listTools(activeProjectId),
+    enabled: Boolean(activeProjectId),
+    staleTime: 60_000,
+  });
+
+  const hooksQuery = useQuery({
+    queryKey: queryKeys.projectHooks(activeProjectId),
+    queryFn: () => projectsApi.listHooks(activeProjectId),
     enabled: Boolean(activeProjectId),
     staleTime: 60_000,
   });
@@ -166,6 +175,7 @@ export function ProjectInfoView() {
       qc.setQueryData(queryKeys.projectMetrics(activeProjectId, range, tz), freshMetrics);
       void qc.invalidateQueries({ queryKey: queryKeys.projectSkills(activeProjectId) });
       void qc.invalidateQueries({ queryKey: queryKeys.projectTools(activeProjectId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.projectHooks(activeProjectId) });
     } catch (err: unknown) {
       toast.error(`刷新失败: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -183,12 +193,24 @@ export function ProjectInfoView() {
     }
   };
 
+  const handleCopyHookUrl = async (hookId: string, hookPath: string) => {
+    const fullUrl = `${window.location.origin}${hookPath}`;
+    const ok = await copyToClipboard(fullUrl);
+    if (ok) {
+      setCopiedHookId(hookId);
+      setTimeout(() => setCopiedHookId((prev) => (prev === hookId ? null : prev)), 1600);
+      toast.success("已复制 Hook 回调地址");
+    }
+  };
+
   const overview = overviewQuery.data;
   const metrics = metricsQuery.data;
   const skills = skillsQuery.data ?? [];
   const loadingSkills = skillsQuery.isPending;
   const tools = toolsQuery.data ?? [];
   const loadingTools = toolsQuery.isPending;
+  const hooks = hooksQuery.data ?? [];
+  const loadingHooks = hooksQuery.isPending;
 
   const toggleToolParams = (toolName: string) => {
     setExpandedTools((prev) => ({ ...prev, [toolName]: !prev[toolName] }));
@@ -882,105 +904,173 @@ export function ProjectInfoView() {
           </section>
         </div>
 
-        {/* 5. Loaded Project Custom Tools */}
-        <section className="rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] overflow-hidden flex flex-col">
-          <div className="px-4 py-2.5 bg-[var(--bg-table-header)] border-b border-[var(--border-default)] flex items-center justify-between">
-            <span className="text-[11px] font-semibold text-[var(--text-primary)] uppercase tracking-wider font-mono">
-              Loaded Tools ({tools.length})
-            </span>
-            <span className="text-[10.5px] text-[var(--text-muted)] font-mono">tools/*</span>
-          </div>
+        {/* 5. Loaded Project Custom Tools & HTTP Hooks */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Loaded Tools */}
+          <section className="rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] overflow-hidden flex flex-col">
+            <div className="px-4 py-2.5 bg-[var(--bg-table-header)] border-b border-[var(--border-default)] flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-[var(--text-primary)] uppercase tracking-wider font-mono">
+                Loaded Tools ({tools.length})
+              </span>
+              <span className="text-[10.5px] text-[var(--text-muted)] font-mono">tools/*</span>
+            </div>
 
-          {loadingTools ? (
-            <div className="p-6 text-center text-xs text-[var(--text-muted)] font-mono">
-              Scanning project tools...
-            </div>
-          ) : tools.length === 0 ? (
-            <div className="p-6 text-center text-xs text-[var(--text-muted)] font-mono">
-              No custom tools detected in this project's tools/ directory.
-            </div>
-          ) : (
-            <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-              {tools.map((tool) => {
-                const params = extractToolParams(tool.inputSchema);
-                const isExpanded = Boolean(expandedTools[tool.name]);
-                return (
-                  <div
-                    key={tool.name}
-                    className="rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-canvas)] px-3.5 py-3 flex flex-col gap-2"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0 flex-wrap">
-                        <Code2 className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0" />
-                        <span className="font-semibold text-xs text-[var(--text-primary)] font-mono truncate">
-                          {tool.name}
-                        </span>
-                        {tool.overridesBuiltin && (
-                          <span
-                            title="Overrides a built-in tool with the same name"
-                            className="text-[10px] font-mono px-1.5 py-0 rounded-[var(--radius-xs)] bg-amber-500/10 border border-amber-500/30 text-amber-500 shrink-0"
+            {loadingTools ? (
+              <div className="p-6 text-center text-xs text-[var(--text-muted)] font-mono">
+                Scanning project tools...
+              </div>
+            ) : tools.length === 0 ? (
+              <div className="p-6 text-center text-xs text-[var(--text-muted)] font-mono">
+                No custom tools detected in this project's tools/ directory.
+              </div>
+            ) : (
+              <div className="divide-y divide-[var(--border-subtle)] max-h-[340px] overflow-y-auto">
+                {tools.map((tool) => {
+                  const params = extractToolParams(tool.inputSchema);
+                  const isExpanded = Boolean(expandedTools[tool.name]);
+                  return (
+                    <div
+                      key={tool.name}
+                      className="px-4 py-3 hover:bg-[var(--bg-surface-hover)] transition-colors flex flex-col gap-1.5"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                          <Code2 className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0" />
+                          <span className="font-semibold text-xs text-[var(--text-primary)] font-mono truncate">
+                            {tool.name}
+                          </span>
+                          {tool.overridesBuiltin && (
+                            <span
+                              title="Overrides a built-in tool with the same name"
+                              className="text-[10px] font-mono px-1.5 py-0 rounded-[var(--radius-xs)] bg-amber-500/10 border border-amber-500/30 text-amber-500 shrink-0"
+                            >
+                              override
+                            </span>
+                          )}
+                        </div>
+
+                        {params.length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => toggleToolParams(tool.name)}
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[var(--radius-xs)] text-[10.5px] font-mono text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] transition-colors cursor-pointer shrink-0"
                           >
-                            override
+                            {isExpanded ? (
+                              <ChevronDown className="w-3 h-3" />
+                            ) : (
+                              <ChevronRight className="w-3 h-3" />
+                            )}
+                            <span>
+                              {params.length} {params.length === 1 ? "param" : "params"}
+                            </span>
+                          </button>
+                        ) : (
+                          <span className="text-[10.5px] font-mono text-[var(--text-muted)] shrink-0">
+                            no params
                           </span>
                         )}
                       </div>
 
-                      {params.length > 0 ? (
-                        <button
-                          type="button"
-                          onClick={() => toggleToolParams(tool.name)}
-                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[var(--radius-xs)] text-[10.5px] font-mono text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer shrink-0"
-                        >
-                          {isExpanded ? (
-                            <ChevronDown className="w-3 h-3" />
-                          ) : (
-                            <ChevronRight className="w-3 h-3" />
-                          )}
-                          <span>
-                            {params.length} {params.length === 1 ? "param" : "params"}
-                          </span>
-                        </button>
-                      ) : (
-                        <span className="text-[10.5px] font-mono text-[var(--text-muted)] shrink-0">
-                          no params
-                        </span>
-                      )}
-                    </div>
+                      <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+                        {tool.description}
+                      </p>
 
-                    <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-                      {tool.description}
-                    </p>
-
-                    {isExpanded && params.length > 0 && (
-                      <div className="mt-0.5 pt-2 border-t border-[var(--border-subtle)] space-y-1.5">
-                        {params.map((param) => (
-                          <div key={param.name} className="text-[11px] leading-relaxed">
-                            <div className="flex items-center gap-1.5 flex-wrap font-mono">
-                              <span className="text-[var(--text-primary)] font-medium">
-                                {param.name}
-                              </span>
-                              <span className="text-[var(--text-muted)]">{param.type}</span>
-                              {param.required && (
-                                <span className="text-[9.5px] uppercase px-1 py-0 rounded-[var(--radius-xs)] bg-[var(--bg-surface-elevated)] border border-[var(--border-default)] text-[var(--text-secondary)]">
-                                  required
+                      {isExpanded && params.length > 0 && (
+                        <div className="mt-1 pt-2 border-t border-[var(--border-subtle)] space-y-1.5">
+                          {params.map((param) => (
+                            <div key={param.name} className="text-[11px] leading-relaxed">
+                              <div className="flex items-center gap-1.5 flex-wrap font-mono">
+                                <span className="text-[var(--text-primary)] font-medium">
+                                  {param.name}
                                 </span>
+                                <span className="text-[var(--text-muted)]">{param.type}</span>
+                                {param.required && (
+                                  <span className="text-[9.5px] uppercase px-1 py-0 rounded-[var(--radius-xs)] bg-[var(--bg-surface-elevated)] border border-[var(--border-default)] text-[var(--text-secondary)]">
+                                    required
+                                  </span>
+                                )}
+                              </div>
+                              {param.description && (
+                                <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
+                                  {param.description}
+                                </p>
                               )}
                             </div>
-                            {param.description && (
-                              <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
-                                {param.description}
-                              </p>
-                            )}
-                          </div>
-                        ))}
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          {/* Loaded Hooks */}
+          <section className="rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] overflow-hidden flex flex-col">
+            <div className="px-4 py-2.5 bg-[var(--bg-table-header)] border-b border-[var(--border-default)] flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-[var(--text-primary)] uppercase tracking-wider font-mono">
+                Loaded Hooks ({hooks.length})
+              </span>
+              <span className="text-[10.5px] text-[var(--text-muted)] font-mono">hooks/*</span>
+            </div>
+
+            {loadingHooks ? (
+              <div className="p-6 text-center text-xs text-[var(--text-muted)] font-mono">
+                Scanning project hooks...
+              </div>
+            ) : hooks.length === 0 ? (
+              <div className="p-6 text-center text-xs text-[var(--text-muted)] font-mono">
+                No HTTP hooks detected in this project's hooks/ directory.
+              </div>
+            ) : (
+              <div className="divide-y divide-[var(--border-subtle)] max-h-[340px] overflow-y-auto">
+                {hooks.map((hook) => (
+                  <div
+                    key={hook.id}
+                    className="px-4 py-3 hover:bg-[var(--bg-surface-hover)] transition-colors space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Webhook className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0" />
+                        <span className="font-semibold text-xs text-[var(--text-primary)] truncate">
+                          {hook.name}
+                        </span>
+                        <span className="text-[10px] font-mono px-1.5 py-0 rounded-[var(--radius-xs)] bg-[var(--bg-surface-elevated)] border border-[var(--border-default)] text-[var(--text-muted)] shrink-0">
+                          {hook.id}
+                        </span>
                       </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-[var(--radius-xs)] font-mono text-[11px] bg-[var(--bg-canvas)] border border-[var(--border-default)] text-[var(--text-primary)] break-all">
+                        {hook.path}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void handleCopyHookUrl(hook.id, hook.path)}
+                        title="复制完整回调地址"
+                        className="p-1 rounded-[var(--radius-xs)] border border-[var(--border-default)] bg-[var(--bg-canvas)] text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer shrink-0"
+                      >
+                        {copiedHookId === hook.id ? (
+                          <Check className="w-3 h-3 text-emerald-500" />
+                        ) : (
+                          <Copy className="w-3 h-3" />
+                        )}
+                      </button>
+                    </div>
+
+                    {hook.description && (
+                      <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+                        {hook.description}
+                      </p>
                     )}
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
       </div>
     </div>
   );

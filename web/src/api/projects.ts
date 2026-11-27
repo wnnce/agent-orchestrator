@@ -1,4 +1,5 @@
 import type {
+  ProjectHook,
   ProjectMetricsData,
   ProjectMetricsRange,
   ProjectOverviewData,
@@ -26,6 +27,13 @@ export const projectsApi = {
       `/projects/${encodeURIComponent(projectId)}/tools`,
     );
     return data.tools ?? [];
+  },
+
+  async listHooks(projectId: string): Promise<ProjectHook[]> {
+    const data = await http.get<{ hooks?: ProjectHook[] }>(
+      `/projects/${encodeURIComponent(projectId)}/hooks`,
+    );
+    return data.hooks ?? [];
   },
 
   async getOverview(

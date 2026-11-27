@@ -24,6 +24,13 @@ export interface ProjectTool {
   inputSchema: Record<string, unknown>;
 }
 
+export interface ProjectHook {
+  id: string;
+  name: string;
+  description?: string;
+  path: string;
+}
+
 export interface RuntimeModelOption {
   id: string;
   displayName: string;

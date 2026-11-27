@@ -4,6 +4,7 @@ export const queryKeys = {
   runtimes: ["runtimes"] as const,
   projectSkills: (projectId: string) => ["projects", projectId, "skills"] as const,
   projectTools: (projectId: string) => ["projects", projectId, "tools"] as const,
+  projectHooks: (projectId: string) => ["projects", projectId, "hooks"] as const,
   projectOverview: (projectId: string) => ["projects", projectId, "overview"] as const,
   projectMetrics: (projectId: string, range: string, tz: string) =>
     ["projects", projectId, "metrics", range, tz] as const,
