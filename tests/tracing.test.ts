@@ -2,10 +2,12 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { ExportResultCode } from "@opentelemetry/core";
 import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
   type ReadableSpan,
+  type SpanExporter,
 } from "@opentelemetry/sdk-trace";
 import { z } from "zod";
 import { ActionRegistry, pipelineActions } from "../src/actions/index.ts";
@@ -130,6 +132,35 @@ describe("tracing setup", () => {
       enabled: false,
       headers: {},
       sampleRate: 1,
+    });
+  });
+
+  test("failed exports are logged and do not stop shutdown", async () => {
+    const lines: string[] = [];
+    const logger = new Logger({ sink: (line) => lines.push(line) });
+    const rejecting: SpanExporter = {
+      export: (_spans, done) =>
+        done({ code: ExportResultCode.FAILED, error: new Error("collector said no") }),
+      shutdown: async () => {
+        throw new Error("final flush failed");
+      },
+    };
+    tracing = setupTracing(
+      { enabled: true, headers: {}, sampleRate: 1 },
+      { logger, spanProcessor: new SimpleSpanProcessor({ exporter: rejecting }) },
+    );
+
+    await withSpan("work", {}, () => {});
+    await tracing.shutdown();
+    tracing = undefined;
+
+    const entries = lines.map((line) => JSON.parse(line));
+    expect(entries.some((e) => e.level === "error" && e.message.startsWith("opentelemetry:"))).toBe(
+      true,
+    );
+    expect(entries.at(-1)).toMatchObject({
+      level: "warn",
+      message: "tracing shutdown could not export the remaining spans",
     });
   });
 

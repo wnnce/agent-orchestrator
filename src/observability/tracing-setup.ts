@@ -1,4 +1,11 @@
-import { context, propagation, trace } from "@opentelemetry/api";
+import {
+  DiagLogLevel,
+  context,
+  diag,
+  propagation,
+  trace,
+  type DiagLogger,
+} from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
@@ -51,6 +58,8 @@ export function setupTracing(
     spanProcessors: [options.spanProcessor ?? otlpProcessor(config)],
   });
 
+  // Export failures are reported through `diag`; without a logger they would go unnoticed.
+  if (options.logger) diag.setLogger(diagLogger(options.logger), DiagLogLevel.WARN);
   const contextManager = new AsyncLocalStorageContextManager().enable();
   context.setGlobalContextManager(contextManager);
   propagation.setGlobalPropagator(new W3CTraceContextPropagator());
@@ -65,10 +74,14 @@ export function setupTracing(
     async shutdown() {
       try {
         await provider.shutdown();
+      } catch (error) {
+        // Losing the last spans must not stop the service from shutting down.
+        options.logger?.warn("tracing shutdown could not export the remaining spans", { error });
       } finally {
         trace.disable();
         propagation.disable();
         context.disable();
+        diag.disable();
       }
     },
   };
@@ -81,4 +94,16 @@ function otlpProcessor(config: TracingConfig): SpanProcessor {
     ...(Object.keys(config.headers).length > 0 ? { headers: config.headers } : {}),
   });
   return new BatchSpanProcessor({ exporter });
+}
+
+/** Routes the SDK's own warnings and errors, such as failed exports, to the service log. */
+function diagLogger(logger: Logger): DiagLogger {
+  const ignore = () => {};
+  return {
+    error: (message, ...details) => logger.error(`opentelemetry: ${message}`, { details }),
+    warn: (message, ...details) => logger.warn(`opentelemetry: ${message}`, { details }),
+    info: ignore,
+    debug: ignore,
+    verbose: ignore,
+  };
 }
