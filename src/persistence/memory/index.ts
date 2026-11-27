@@ -19,11 +19,16 @@ import type {
   ListNotificationDeliveriesFilter,
   ListScheduledJobsFilter,
   ListSessionsOptions,
+  ProjectMetricsData,
+  ProjectMetricsQueryOptions,
+  ProjectOverviewQueryOptions,
+  ProjectOverviewStoreSnapshot,
   Store,
   TurnPatch,
 } from "../types.ts";
 import { MemoryPipelineStore } from "./pipeline-store.ts";
 import { MemorySessionStore } from "./session-store.ts";
+import { MemoryProjectStatsStore } from "./stats-store.ts";
 import { MemoryTaskAuditStore } from "./task-audit-store.ts";
 import { MemoryTurnEventStore } from "./turn-event-store.ts";
 
@@ -33,6 +38,12 @@ export class MemoryStore implements Store {
   private readonly turnEventStore = new MemoryTurnEventStore();
   private readonly taskAuditStore = new MemoryTaskAuditStore();
   readonly pipelines = new MemoryPipelineStore();
+  private readonly statsStore = new MemoryProjectStatsStore(
+    this.sessionStore,
+    this.turnEventStore,
+    this.taskAuditStore,
+    this.pipelines,
+  );
 
   get sessions(): Map<string, SessionRoute> {
     return this.sessionStore.sessions;
@@ -232,6 +243,20 @@ export class MemoryStore implements Store {
 
   listActionExecutions(filter?: ActionExecutionFilter): Promise<ActionExecutionRecord[]> {
     return this.taskAuditStore.listActionExecutions(filter);
+  }
+
+  getProjectOverview(
+    projectId: string,
+    options?: ProjectOverviewQueryOptions,
+  ): Promise<ProjectOverviewStoreSnapshot> {
+    return this.statsStore.getProjectOverview(projectId, options);
+  }
+
+  getProjectMetrics(
+    projectId: string,
+    options: ProjectMetricsQueryOptions,
+  ): Promise<ProjectMetricsData> {
+    return this.statsStore.getProjectMetrics(projectId, options);
   }
 
   async close(): Promise<void> {}

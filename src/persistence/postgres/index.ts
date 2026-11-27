@@ -21,11 +21,16 @@ import type {
   ListNotificationDeliveriesFilter,
   ListScheduledJobsFilter,
   ListSessionsOptions,
+  ProjectMetricsData,
+  ProjectMetricsQueryOptions,
+  ProjectOverviewQueryOptions,
+  ProjectOverviewStoreSnapshot,
   Store,
   TurnPatch,
 } from "../types.ts";
 import { PostgresPipelineRepo } from "./pipeline-repo.ts";
 import { PostgresSessionRepo } from "./session-repo.ts";
+import { PostgresProjectStatsRepo } from "./stats-repo.ts";
 import { PostgresTaskAuditRepo } from "./task-audit-repo.ts";
 import { PostgresTurnEventRepo } from "./turn-event-repo.ts";
 
@@ -34,6 +39,7 @@ export class PostgresStore implements Store {
   private readonly sessionRepo: PostgresSessionRepo;
   private readonly turnEventRepo: PostgresTurnEventRepo;
   private readonly taskAuditRepo: PostgresTaskAuditRepo;
+  private readonly statsRepo: PostgresProjectStatsRepo;
   readonly pipelines: PostgresPipelineRepo;
   private readonly onClose: () => Promise<void>;
 
@@ -45,12 +51,14 @@ export class PostgresStore implements Store {
       this.sessionRepo = new PostgresSessionRepo(db);
       this.turnEventRepo = new PostgresTurnEventRepo(db);
       this.taskAuditRepo = new PostgresTaskAuditRepo(db);
+      this.statsRepo = new PostgresProjectStatsRepo(db);
       this.pipelines = new PostgresPipelineRepo(db);
       this.onClose = () => poolOrDb.end();
     } else {
       this.sessionRepo = new PostgresSessionRepo(poolOrDb);
       this.turnEventRepo = new PostgresTurnEventRepo(poolOrDb);
       this.taskAuditRepo = new PostgresTaskAuditRepo(poolOrDb);
+      this.statsRepo = new PostgresProjectStatsRepo(poolOrDb);
       this.pipelines = new PostgresPipelineRepo(poolOrDb);
       this.onClose = onClose ?? (async () => {});
     }
@@ -221,6 +229,20 @@ export class PostgresStore implements Store {
 
   listActionExecutions(filter?: ActionExecutionFilter): Promise<ActionExecutionRecord[]> {
     return this.taskAuditRepo.listActionExecutions(filter);
+  }
+
+  getProjectOverview(
+    projectId: string,
+    options?: ProjectOverviewQueryOptions,
+  ): Promise<ProjectOverviewStoreSnapshot> {
+    return this.statsRepo.getProjectOverview(projectId, options);
+  }
+
+  getProjectMetrics(
+    projectId: string,
+    options: ProjectMetricsQueryOptions,
+  ): Promise<ProjectMetricsData> {
+    return this.statsRepo.getProjectMetrics(projectId, options);
   }
 
   close(): Promise<void> {

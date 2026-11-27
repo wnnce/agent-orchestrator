@@ -33,6 +33,14 @@ import type {
   PipelineTransitionWrite,
   PipelineVersionRunCounts,
 } from "../pipeline/types.ts";
+import type {
+  ProjectMetricsData,
+  ProjectMetricsQueryOptions,
+  ProjectOverviewQueryOptions,
+  ProjectOverviewStoreSnapshot,
+} from "./stats-types.ts";
+
+export * from "./stats-types.ts";
 
 export interface ListSessionsOptions {
   includeTasks?: boolean | undefined;
@@ -174,6 +182,14 @@ export interface Store {
   ): Promise<void>;
   recordActionExecution(record: ActionExecutionRecord): Promise<void>;
   listActionExecutions(filter?: ActionExecutionFilter): Promise<ActionExecutionRecord[]>;
+  getProjectOverview(
+    projectId: string,
+    options?: ProjectOverviewQueryOptions,
+  ): Promise<ProjectOverviewStoreSnapshot>;
+  getProjectMetrics(
+    projectId: string,
+    options: ProjectMetricsQueryOptions,
+  ): Promise<ProjectMetricsData>;
   readonly pipelines: PipelineStore;
   close(): Promise<void>;
 }

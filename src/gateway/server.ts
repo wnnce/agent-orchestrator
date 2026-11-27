@@ -146,7 +146,7 @@ export class Gateway {
     });
 
     // Domain routes
-    apiV1.route("/", createProjectsRouter({ projects: this.projects }));
+    apiV1.route("/", createProjectsRouter({ projects: this.projects, store: this.store }));
     apiV1.route(
       "/",
       createTasksRouter({ projects: this.projects, store: this.store }),
