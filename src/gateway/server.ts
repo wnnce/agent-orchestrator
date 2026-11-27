@@ -6,6 +6,7 @@ import type { AppConfig } from "../config/config.ts";
 import { UnauthorizedError } from "../domain/errors.ts";
 import type { Store } from "../persistence/store.ts";
 import { ProjectManager } from "../project/manager.ts";
+import { ProjectStats } from "../project/stats.ts";
 import type { Logger } from "../observability/logger.ts";
 import { createOpenAPIApp } from "./openapi.ts";
 import { GatewayService } from "./service.ts";
@@ -139,7 +140,13 @@ export class Gateway {
     });
 
     // Domain routes
-    apiV1.route("/", createProjectsRouter({ projects: this.projects, store: this.store }));
+    apiV1.route(
+      "/",
+      createProjectsRouter({
+        projects: this.projects,
+        stats: new ProjectStats({ projects: this.projects, store: this.store }),
+      }),
+    );
     apiV1.route("/", createTasksRouter({ projects: this.projects, store: this.store }));
     apiV1.route("/", createToolsRouter({ store: this.store }));
     apiV1.route("/", createScheduledJobsRouter({ store: this.store }));

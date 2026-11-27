@@ -1,6 +1,6 @@
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import type { ProjectMetricsData, ProjectOverviewData, Store } from "../../persistence/types.ts";
 import type { ProjectManager } from "../../project/manager.ts";
+import type { ProjectStats } from "../../project/stats.ts";
 import { describeProjectTools } from "../../tools/describe.ts";
 import {
   getProjectMetricsRoute,
@@ -10,21 +10,14 @@ import {
   listProjectsRoute,
 } from "../contracts/projects.ts";
 import { createOpenAPIApp } from "../openapi.ts";
-import { TtlSingleflightCache } from "../stats-cache.ts";
 
 export interface ProjectsRouteDeps {
-  projects: ProjectManager;
-  store: Store;
-  overviewCacheTtlMs?: number;
-  metricsCacheTtlMs?: number;
+  readonly projects: ProjectManager;
+  readonly stats: ProjectStats;
 }
 
 export function createProjectsRouter(deps: ProjectsRouteDeps): OpenAPIHono {
   const router = createOpenAPIApp();
-  const overviewCache = new TtlSingleflightCache<ProjectOverviewData>();
-  const metricsCache = new TtlSingleflightCache<ProjectMetricsData>();
-  const overviewTtlMs = deps.overviewCacheTtlMs ?? 3_000;
-  const metricsTtlMs = deps.metricsCacheTtlMs ?? 20_000;
 
   router.openapi(listProjectsRoute, (c) => {
     const defaultRuntime = deps.projects.getDefaultRuntime();
@@ -61,45 +54,28 @@ export function createProjectsRouter(deps: ProjectsRouteDeps): OpenAPIHono {
   router.openapi(getProjectOverviewRoute, async (c) => {
     const { projectId } = c.req.valid("param");
     const { limit, refresh } = c.req.valid("query");
-    const runtime = deps.projects.get(projectId);
-    const resolvedLimit = limit ?? 5;
-    const data = await overviewCache.getOrLoad(
-      `${projectId}:${resolvedLimit}`,
-      overviewTtlMs,
-      async () => {
-        const [snapshot, tasks] = await Promise.all([
-          deps.store.getProjectOverview(projectId, { limit: resolvedLimit }),
-          runtime.listTasks(),
-        ]);
-        return {
-          generatedAt: new Date().toISOString(),
-          ...snapshot,
-          tasks: {
-            total: tasks.length,
-            enabled: tasks.filter((task) => task.enabled).length,
-          },
-        };
-      },
-      { bypassCache: refresh === "true" || refresh === "1" },
-    );
-
+    const data = await deps.stats.overview(projectId, {
+      limit: limit ?? 5,
+      refresh: isSet(refresh),
+    });
     return c.json(data, 200);
   });
 
   router.openapi(getProjectMetricsRoute, async (c) => {
     const { projectId } = c.req.valid("param");
     const { range, tz, refresh } = c.req.valid("query");
-    deps.projects.get(projectId);
-    const resolvedTz = tz?.trim() || "UTC";
-    const data = await metricsCache.getOrLoad(
-      `${projectId}:${range}:${resolvedTz}`,
-      metricsTtlMs,
-      () => deps.store.getProjectMetrics(projectId, { range, tz: resolvedTz }),
-      { bypassCache: refresh === "true" || refresh === "1" },
-    );
-
+    const data = await deps.stats.metrics(projectId, {
+      range,
+      tz: tz?.trim() || "UTC",
+      refresh: isSet(refresh),
+    });
     return c.json(data, 200);
   });
 
   return router;
+}
+
+/** Reads a `true`/`1` style query flag. */
+function isSet(flag: string | undefined): boolean {
+  return flag === "true" || flag === "1";
 }

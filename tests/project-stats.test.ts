@@ -2,9 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { ErrorCode, NotFoundError } from "../src/domain/errors.ts";
 import { ScheduledJobStatus } from "../src/domain/types.ts";
 import { createProjectsRouter } from "../src/gateway/routes/projects.ts";
-import { TtlSingleflightCache } from "../src/gateway/stats-cache.ts";
 import { MemoryStore } from "../src/persistence/memory/index.ts";
 import type { ProjectManager } from "../src/project/manager.ts";
+import { ProjectStats } from "../src/project/stats.ts";
+import { TtlSingleflightCache } from "../src/project/stats-cache.ts";
 
 function makeProjectManagerStub(
   projectsMap: Record<
@@ -341,8 +342,14 @@ describe("Project Overview & Metrics Store + Gateway", () => {
     expect(calls).toBe(2);
   });
 
-  test("gateway project overview & metrics routes validate params and return 404/400/200", async () => {
+  test("ProjectStats caches overviews per project and limit until refreshed", async () => {
     const store = new MemoryStore();
+    let loads = 0;
+    const getProjectOverview = store.getProjectOverview.bind(store);
+    store.getProjectOverview = async (projectId, options) => {
+      loads += 1;
+      return getProjectOverview(projectId, options);
+    };
     const projects = makeProjectManagerStub({
       demo: {
         tasks: [
@@ -351,22 +358,35 @@ describe("Project Overview & Metrics Store + Gateway", () => {
         ],
       },
     });
-    const router = createProjectsRouter({ projects, store });
+    const stats = new ProjectStats({ projects, store });
 
-    const notFoundRes = await router.request("/projects/missing/overview");
-    expect(notFoundRes.status).toBe(404);
+    const first = await stats.overview("demo", { limit: 5, refresh: false });
+    expect(first.tasks).toEqual({ total: 2, enabled: 1 });
+    await stats.overview("demo", { limit: 5, refresh: false });
+    expect(loads).toBe(1);
+    await stats.overview("demo", { limit: 3, refresh: false });
+    expect(loads).toBe(2);
+    await stats.overview("demo", { limit: 5, refresh: true });
+    expect(loads).toBe(3);
 
-    const overviewRes = await router.request("/projects/demo/overview");
-    expect(overviewRes.status).toBe(200);
-    const overviewBody = (await overviewRes.json()) as {
-      tasks: { total: number; enabled: number };
-      sessions: { total: number };
-    };
-    expect(overviewBody.tasks).toEqual({ total: 2, enabled: 1 });
-    expect(overviewBody.sessions.total).toBe(0);
+    await expect(stats.overview("missing", { limit: 5, refresh: false })).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+    await expect(
+      stats.metrics("missing", { range: "7d", tz: "UTC", refresh: false }),
+    ).rejects.toBeInstanceOf(NotFoundError);
+  });
 
-    const badTzRes = await router.request("/projects/demo/metrics?range=7d&tz=Not/A_Zone");
-    expect(badTzRes.status).toBe(400);
+  test("gateway project overview & metrics routes validate params and return 404/400/200", async () => {
+    const store = new MemoryStore();
+    const projects = makeProjectManagerStub({ demo: { tasks: [] } });
+    const router = createProjectsRouter({ projects, stats: new ProjectStats({ projects, store }) });
+
+    expect((await router.request("/projects/missing/overview")).status).toBe(404);
+    expect((await router.request("/projects/demo/overview")).status).toBe(200);
+    expect((await router.request("/projects/demo/metrics?range=7d&tz=Not/A_Zone")).status).toBe(
+      400,
+    );
 
     const metricsRes = await router.request("/projects/demo/metrics?range=14d&tz=Asia/Shanghai");
     expect(metricsRes.status).toBe(200);
