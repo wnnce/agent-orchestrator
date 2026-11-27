@@ -6,6 +6,7 @@ import {
   ModelRuntime,
   SessionManager,
   SettingsManager,
+  type AgentSessionEvent,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
@@ -115,18 +116,20 @@ export class PiRuntime implements AgentRuntime {
             turnId,
             error: errorMsg,
           });
-          await wrapper.context.onEvent({
-            type: "turn.failed",
-            sessionId,
-            turnId,
-            payload: {
+          await enqueueDelivery(wrapper, () =>
+            wrapper.context.onEvent({
+              type: "turn.failed",
+              sessionId,
               turnId,
-              runtimeTurnId,
-              status: "failed",
-              error: errorMsg,
-              ...(usage ? { usage } : {}),
-            },
-          });
+              payload: {
+                turnId,
+                runtimeTurnId,
+                status: "failed",
+                error: errorMsg,
+                ...(usage ? { usage } : {}),
+              },
+            }),
+          );
         }
       }
     })();
@@ -163,18 +166,22 @@ export class PiRuntime implements AgentRuntime {
     wrapper.isTurnEnded = true;
     await wrapper.session.abort();
     const usage = consumePiTurnUsage(wrapper);
+    const turnId = wrapper.currentTurnId;
 
-    await context.onEvent({
-      type: "turn.interrupted",
-      sessionId,
-      turnId: wrapper.currentTurnId,
-      payload: {
-        turnId: wrapper.currentTurnId,
-        runtimeTurnId,
-        status: "interrupted",
-        ...(usage ? { usage } : {}),
-      },
-    });
+    // After the events Pi emitted before the abort, so none of them lands after the turn ended.
+    await enqueueDelivery(wrapper, () =>
+      context.onEvent({
+        type: "turn.interrupted",
+        sessionId,
+        turnId,
+        payload: {
+          turnId,
+          runtimeTurnId,
+          status: "interrupted",
+          ...(usage ? { usage } : {}),
+        },
+      }),
+    );
   }
 
   /**
@@ -325,117 +332,109 @@ export class PiRuntime implements AgentRuntime {
       sessionId: session.sessionId,
       workspacePath: context.workspacePath,
       context,
+      deliveries: Promise.resolve(),
     };
     wrapperHolder.wrapper = wrapper;
 
-    const unsubscribe = session.subscribe(async (event) => {
-      try {
-        // Accumulate final assistant message text
-        if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-          wrapper.lastAssistantText =
-            (wrapper.lastAssistantText ?? "") + event.assistantMessageEvent.delta;
-        }
-
-        const finished = event.type === "message_end" && asAssistantMessage(event.message);
-        if (finished) {
-          if (assistantText(finished)) {
-            wrapper.lastAssistantText = assistantText(finished);
-          }
-          recordPiAssistantUsage(wrapper, finished);
-        }
-
-        const canonicalEvents = PiNormalizer.normalize(
-          event,
-          wrapper.sessionId,
-          wrapper.currentTurnId,
-        );
-
-        for (const ce of canonicalEvents) {
-          await wrapper.context.onEvent(ce);
-        }
-
-        // Completion and failure handling
-        if (event.type === "agent_end" && !wrapper.isTurnEnded) {
-          if (event.willRetry) {
-            return;
-          }
-
-          const lastMsg = asAssistantMessage(event.messages.at(-1));
-          const usage = consumePiTurnUsage(wrapper);
-          if (lastMsg?.stopReason === "error") {
-            wrapper.isTurnEnded = true;
-            const error = lastMsg.errorMessage ?? "Turn failed";
-            await wrapper.context.onEvent({
-              type: "turn.failed",
-              sessionId: wrapper.sessionId,
-              turnId: wrapper.currentTurnId,
-              payload: {
-                turnId: wrapper.currentTurnId,
-                runtimeTurnId: wrapper.currentRuntimeTurnId,
-                status: "failed",
-                error,
-                ...(usage ? { usage } : {}),
-              },
-            });
-            return;
-          }
-
-          wrapper.isTurnEnded = true;
-          await wrapper.context.onEvent({
-            type: "turn.completed",
-            sessionId: wrapper.sessionId,
-            turnId: wrapper.currentTurnId,
-            payload: {
-              turnId: wrapper.currentTurnId,
-              runtimeTurnId: wrapper.currentRuntimeTurnId,
-              status: "completed",
-              finalText: wrapper.lastAssistantText,
-              ...(usage ? { usage } : {}),
-            },
-          });
-        } else if (event.type === "auto_retry_end" && !event.success && !wrapper.isTurnEnded) {
-          wrapper.isTurnEnded = true;
-          const usage = consumePiTurnUsage(wrapper);
-          const error = event.finalError ?? "Auto retry failed";
-          await wrapper.context.onEvent({
-            type: "turn.failed",
-            sessionId: wrapper.sessionId,
-            turnId: wrapper.currentTurnId,
-            payload: {
-              turnId: wrapper.currentTurnId,
-              runtimeTurnId: wrapper.currentRuntimeTurnId,
-              status: "failed",
-              error,
-              ...(usage ? { usage } : {}),
-            },
-          });
-        } else if (event.type === "agent_settled" && event.aborted && !wrapper.isTurnEnded) {
-          wrapper.isTurnEnded = true;
-          const usage = consumePiTurnUsage(wrapper);
-          await wrapper.context.onEvent({
-            type: "turn.interrupted",
-            sessionId: wrapper.sessionId,
-            turnId: wrapper.currentTurnId,
-            payload: {
-              turnId: wrapper.currentTurnId,
-              runtimeTurnId: wrapper.currentRuntimeTurnId,
-              status: "interrupted",
-              ...(usage ? { usage } : {}),
-            },
-          });
-        }
-      } catch (err) {
-        this.logger.error("error dispatching Pi runtime event", {
-          sessionId: wrapper.sessionId,
-          turnId: wrapper.currentTurnId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
+    const unsubscribe = session.subscribe((event) => {
+      // Bookkeeping runs as Pi emits, while the event's turn is still the current one.
+      trackAssistantOutput(wrapper, event);
+      const turn: PiTurnRef = {
+        turnId: wrapper.currentTurnId,
+        runtimeTurnId: wrapper.currentRuntimeTurnId,
+      };
+      // Pi calls listeners without awaiting them, so deliveries are queued: canonical events
+      // reach onEvent one at a time and in the order Pi emitted them.
+      void enqueueDelivery(wrapper, () => this.deliverPiEvent(wrapper, event, turn));
     });
 
     wrapper.unsubscribe = unsubscribe;
     this.sessions.set(session.sessionId, wrapper);
     return wrapper;
+  }
+
+  /** Hands one Pi event to `onEvent` as canonical events, and ends the turn when Pi says so. */
+  private async deliverPiEvent(
+    wrapper: PiSessionWrapper,
+    event: AgentSessionEvent,
+    turn: PiTurnRef,
+  ): Promise<void> {
+    try {
+      for (const ce of PiNormalizer.normalize(event, wrapper.sessionId, turn.turnId)) {
+        await wrapper.context.onEvent(ce);
+      }
+
+      // Only an event of the current, still open turn can end it.
+      if (turn.turnId !== wrapper.currentTurnId || wrapper.isTurnEnded) return;
+      if (event.type === "agent_end") {
+        if (event.willRetry) return;
+        wrapper.isTurnEnded = true;
+        const lastMsg = asAssistantMessage(event.messages.at(-1));
+        const usage = consumePiTurnUsage(wrapper);
+        if (lastMsg?.stopReason === "error") {
+          await wrapper.context.onEvent({
+            type: "turn.failed",
+            sessionId: wrapper.sessionId,
+            turnId: turn.turnId,
+            payload: {
+              turnId: turn.turnId,
+              runtimeTurnId: turn.runtimeTurnId,
+              status: "failed",
+              error: lastMsg.errorMessage ?? "Turn failed",
+              ...(usage ? { usage } : {}),
+            },
+          });
+          return;
+        }
+        await wrapper.context.onEvent({
+          type: "turn.completed",
+          sessionId: wrapper.sessionId,
+          turnId: turn.turnId,
+          payload: {
+            turnId: turn.turnId,
+            runtimeTurnId: turn.runtimeTurnId,
+            status: "completed",
+            finalText: wrapper.lastAssistantText,
+            ...(usage ? { usage } : {}),
+          },
+        });
+      } else if (event.type === "auto_retry_end" && !event.success) {
+        wrapper.isTurnEnded = true;
+        const usage = consumePiTurnUsage(wrapper);
+        await wrapper.context.onEvent({
+          type: "turn.failed",
+          sessionId: wrapper.sessionId,
+          turnId: turn.turnId,
+          payload: {
+            turnId: turn.turnId,
+            runtimeTurnId: turn.runtimeTurnId,
+            status: "failed",
+            error: event.finalError ?? "Auto retry failed",
+            ...(usage ? { usage } : {}),
+          },
+        });
+      } else if (event.type === "agent_settled" && event.aborted) {
+        wrapper.isTurnEnded = true;
+        const usage = consumePiTurnUsage(wrapper);
+        await wrapper.context.onEvent({
+          type: "turn.interrupted",
+          sessionId: wrapper.sessionId,
+          turnId: turn.turnId,
+          payload: {
+            turnId: turn.turnId,
+            runtimeTurnId: turn.runtimeTurnId,
+            status: "interrupted",
+            ...(usage ? { usage } : {}),
+          },
+        });
+      }
+    } catch (err) {
+      this.logger.error("error dispatching Pi runtime event", {
+        sessionId: wrapper.sessionId,
+        turnId: turn.turnId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   /** Pi's model registry (models.json and auth.json in its agent directory), built once. */
@@ -516,4 +515,33 @@ function consumePiTurnUsage(wrapper: PiSessionWrapper): TurnUsage | undefined {
     contextUsedTokens,
     contextWindowTokens: wrapper.session.model?.contextWindow,
   });
+}
+
+/** The turn a Pi event belongs to, captured when Pi emits it. */
+interface PiTurnRef {
+  readonly turnId: string | undefined;
+  readonly runtimeTurnId: string | undefined;
+}
+
+/** Keeps the turn's final text and token usage up to date as Pi emits its events. */
+function trackAssistantOutput(wrapper: PiSessionWrapper, event: AgentSessionEvent): void {
+  if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
+    wrapper.lastAssistantText =
+      (wrapper.lastAssistantText ?? "") + event.assistantMessageEvent.delta;
+  }
+  const finished = event.type === "message_end" && asAssistantMessage(event.message);
+  if (finished) {
+    if (assistantText(finished)) wrapper.lastAssistantText = assistantText(finished);
+    recordPiAssistantUsage(wrapper, finished);
+  }
+}
+
+/** Runs `deliver` after the deliveries queued before it; a failed one does not stop the queue. */
+function enqueueDelivery(
+  wrapper: PiSessionWrapper,
+  deliver: () => Promise<void> | void,
+): Promise<void> {
+  const delivered = wrapper.deliveries.then(deliver);
+  wrapper.deliveries = delivered.catch(() => {});
+  return delivered;
 }

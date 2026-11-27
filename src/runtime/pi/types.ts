@@ -28,4 +28,6 @@ export interface PiSessionWrapper {
   isTurnEnded?: boolean | undefined;
   activeTurnPromise?: Promise<void> | undefined;
   unsubscribe?: (() => void) | undefined;
+  /** Tail of the queue that hands this session's events to `onEvent` one at a time, in order. */
+  deliveries: Promise<void>;
 }

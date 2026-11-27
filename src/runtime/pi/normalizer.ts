@@ -87,7 +87,8 @@ export class PiNormalizer {
         break;
       }
 
-      // 3. Tool execution start
+      // 3. Tool execution start. Each tool call is one item of one kind: a shell command, a file
+      // change, or a generic tool call.
       case "tool_execution_start": {
         const { toolCallId, toolName, args } = event;
         const safeArgs =
@@ -118,19 +119,18 @@ export class PiNormalizer {
               kind: toolName === "write" ? "create" : "modify",
             },
           });
+        } else {
+          events.push({
+            type: "tool.call.started",
+            sessionId,
+            ...(turnId ? { turnId } : {}),
+            payload: {
+              itemId: toolCallId,
+              toolName,
+              args: safeArgs,
+            },
+          });
         }
-
-        // Generic tool call started
-        events.push({
-          type: "tool.call.started",
-          sessionId,
-          ...(turnId ? { turnId } : {}),
-          payload: {
-            itemId: toolCallId,
-            toolName,
-            args: safeArgs,
-          },
-        });
         break;
       }
 
@@ -164,23 +164,22 @@ export class PiNormalizer {
               diff: output,
             },
           });
+        } else {
+          events.push({
+            type: "tool.called",
+            sessionId,
+            ...(turnId ? { turnId } : {}),
+            payload: {
+              itemId: toolCallId,
+              toolName,
+              args: {},
+              status: isError ? "failure" : "success",
+              result,
+              durationMs,
+              error: isError ? output : undefined,
+            },
+          });
         }
-
-        // Generic tool call completed
-        events.push({
-          type: "tool.called",
-          sessionId,
-          ...(turnId ? { turnId } : {}),
-          payload: {
-            itemId: toolCallId,
-            toolName,
-            args: {},
-            status: isError ? "failure" : "success",
-            result,
-            durationMs,
-            error: isError ? output : undefined,
-          },
-        });
         break;
       }
 

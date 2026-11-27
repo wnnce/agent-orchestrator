@@ -89,6 +89,15 @@ export const FAKE_CAPABILITIES: RuntimeCapabilities = {
  * `turn.failed` or `turn.interrupted`) and `runtime.disconnected`. Session lifecycle events
  * (`session.*`) and `turn.queued` / `turn.started` belong to `ProjectRuntime`; runtimes never
  * emit them.
+ *
+ * A runtime calls `onEvent` in the order events happened, the turn's terminal event last;
+ * `ProjectRuntime` handles the calls one at a time in that order. A runtime whose handlers run
+ * concurrently (e.g. a backend that does not await its async listeners) queues its events so
+ * that a handler's later events cannot overtake another handler's.
+ *
+ * Each `itemId` is one item of one kind: a shell command (`command.*`), a file change
+ * (`file_change.*`), an MCP call (`mcp_call.*`) or another tool call (`tool.*`). A runtime does
+ * not report the same item twice under different kinds.
  */
 export interface AgentRuntime {
   readonly name: string;

@@ -348,6 +348,11 @@ export interface RuntimeDisconnectedPayload {
 // Canonical Event Registry & Discriminated Union
 // ============================================================================
 
+/**
+ * Item events (`command.*`, `file_change.*`, `mcp_call.*`, `tool.*`) describe one item each: its
+ * `itemId` belongs to exactly one of these kinds, and consumers such as the web transcript, the
+ * IM streamers and turn tracing rely on that. See the event contract on `AgentRuntime`.
+ */
 export interface CanonicalEventPayloadMap {
   // 1. Message & Reasoning
   "agent.message.delta": AgentMessageDeltaPayload;

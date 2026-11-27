@@ -203,7 +203,7 @@ describe("Pi Agent Native SDK Runtime", () => {
       });
     });
 
-    it("normalizes bash tool execution lifecycle", () => {
+    it("normalizes a bash call as a command only, so one item ID means one item", () => {
       const startEv: any = {
         type: "tool_execution_start",
         toolCallId: "call_bash_1",
@@ -212,17 +212,11 @@ describe("Pi Agent Native SDK Runtime", () => {
       };
 
       const startNorm = PiNormalizer.normalize(startEv, "ses_1", "turn_1");
-      expect(startNorm).toHaveLength(2);
-      expect(startNorm[0]!.type).toBe("command.started");
+      expect(startNorm.map((e) => e.type)).toEqual(["command.started"]);
       expect(startNorm[0]!.payload).toMatchObject({
         itemId: "call_bash_1",
         command: "ls -la",
         workdir: "/tmp",
-      });
-      expect(startNorm[1]!.type).toBe("tool.call.started");
-      expect(startNorm[1]!.payload).toMatchObject({
-        itemId: "call_bash_1",
-        toolName: "bash",
       });
 
       const endEv: any = {
@@ -237,20 +231,42 @@ describe("Pi Agent Native SDK Runtime", () => {
       };
 
       const endNorm = PiNormalizer.normalize(endEv, "ses_1", "turn_1");
-      expect(endNorm).toHaveLength(2);
-      expect(endNorm[0]!.type).toBe("command.completed");
+      expect(endNorm.map((e) => e.type)).toEqual(["command.completed"]);
       expect(endNorm[0]!.payload).toMatchObject({
         itemId: "call_bash_1",
         exitCode: 0,
         output: "total 0\n-rw-r--r-- file.txt",
         durationMs: 42,
       });
-      expect(endNorm[1]!.type).toBe("tool.called");
-      expect(endNorm[1]!.payload).toMatchObject({
-        itemId: "call_bash_1",
-        toolName: "bash",
-        status: "success",
-      });
+    });
+
+    it("normalizes any other tool as a generic tool call", () => {
+      const start = PiNormalizer.normalize(
+        {
+          type: "tool_execution_start",
+          toolCallId: "call_read_1",
+          toolName: "read",
+          args: { path: "README.md" },
+        } as any,
+        "ses_1",
+        "turn_1",
+      );
+      expect(start.map((e) => e.type)).toEqual(["tool.call.started"]);
+      expect(start[0]!.payload).toMatchObject({ itemId: "call_read_1", toolName: "read" });
+
+      const end = PiNormalizer.normalize(
+        {
+          type: "tool_execution_end",
+          toolCallId: "call_read_1",
+          toolName: "read",
+          result: { content: [{ type: "text", text: "missing" }] },
+          isError: true,
+        } as any,
+        "ses_1",
+        "turn_1",
+      );
+      expect(end.map((e) => e.type)).toEqual(["tool.called"]);
+      expect(end[0]!.payload).toMatchObject({ status: "failure", error: "missing" });
     });
 
     it("normalizes write and edit file changes", () => {
@@ -262,7 +278,7 @@ describe("Pi Agent Native SDK Runtime", () => {
       };
 
       const writeNorm = PiNormalizer.normalize(writeStart, "ses_1", "turn_1");
-      expect(writeNorm[0]!.type).toBe("file_change.started");
+      expect(writeNorm.map((e) => e.type)).toEqual(["file_change.started"]);
       expect(writeNorm[0]!.payload).toMatchObject({
         itemId: "call_write_1",
         path: "src/app.ts",
@@ -278,7 +294,7 @@ describe("Pi Agent Native SDK Runtime", () => {
       };
 
       const writeEndNorm = PiNormalizer.normalize(writeEnd, "ses_1", "turn_1");
-      expect(writeEndNorm[0]!.type).toBe("file_change.completed");
+      expect(writeEndNorm.map((e) => e.type)).toEqual(["file_change.completed"]);
       expect(writeEndNorm[0]!.payload).toMatchObject({
         itemId: "call_write_1",
         kind: "create",
@@ -394,10 +410,68 @@ describe("Pi Agent Native SDK Runtime", () => {
       }
     });
 
+    it("delivers events one at a time and in order, even when onEvent is slow", async () => {
+      const tmpWorkspace = mkdtempSync(join(tmpdir(), "pi-rt-order-"));
+      try {
+        const runtime = new PiRuntime(
+          new Logger({ sink: () => {} }),
+          undefined,
+          undefined,
+          await createMockModelRuntime(["one", " two", " three", " four"]),
+        );
+        const delivered: string[] = [];
+        let inFlight = 0;
+        let maxInFlight = 0;
+        let ended!: () => void;
+        const turnEnded = new Promise<void>((resolve) => {
+          ended = resolve;
+        });
+        const context: RuntimeContext = {
+          project: DUMMY_PROJECT,
+          workspacePath: tmpWorkspace,
+          // Pi emits without awaiting listeners; a slow consumer must still see events in order.
+          onEvent: async (ev) => {
+            inFlight += 1;
+            maxInFlight = Math.max(maxInFlight, inFlight);
+            await Bun.sleep(3);
+            delivered.push(
+              ev.type === "agent.message.delta" ? String((ev.payload as any).delta) : ev.type,
+            );
+            inFlight -= 1;
+            if (ev.type.startsWith("turn.")) ended();
+          },
+        };
+
+        const session = await runtime.startSession(context);
+        await runtime.startTurn(context, session.id, "turn_order", "Count");
+        await turnEnded;
+        await Bun.sleep(20);
+
+        expect(maxInFlight).toBe(1);
+        expect(delivered.filter((d) => ["one", " two", " three", " four"].includes(d))).toEqual([
+          "one",
+          " two",
+          " three",
+          " four",
+        ]);
+        expect(delivered.at(-1)).toBe("turn.completed");
+
+        await runtime.releaseSession(context, session.id);
+        await runtime.stop();
+      } finally {
+        rmSync(tmpWorkspace, { recursive: true, force: true });
+      }
+    });
+
     it("offers only read-only tools to a read-only session", async () => {
       const tmpWorkspace = mkdtempSync(join(tmpdir(), "pi-rt-readonly-"));
       try {
-        const runtime = new PiRuntime(new Logger({ sink: () => {} }), undefined, undefined, await createMockModelRuntime());
+        const runtime = new PiRuntime(
+          new Logger({ sink: () => {} }),
+          undefined,
+          undefined,
+          await createMockModelRuntime(),
+        );
         const context: RuntimeContext = {
           project: DUMMY_PROJECT,
           workspacePath: tmpWorkspace,
