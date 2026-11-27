@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| **Status** | Draft |
+| **Status** | Accepted（阶段 1–5 已实现，Hooks 待设计 15 修订） |
 | **Target Module** | `src/context/`（新增）、`src/actions/` → `src/tools/`、`src/task/`、`src/pipeline/`、`src/project/`、`src/persistence/` |
 | **Date** | 2026-11-27 |
 
@@ -351,3 +351,26 @@ export default definePipeline({ ... });
 | 工具改名（如 `notify`、`start_session`） | 放弃 | 工具名已写进项目提示词，改名只带来迁移成本 |
 | 每类上下文各自保留实现，只统一接口类型 | 放弃 | 类型一致但行为仍会各自漂移，现状的 `notify` / `createArtifact` 差异就是这样产生的 |
 | 保留 `emit` 并补上订阅方 | 暂不做 | 目前没有使用场景；需要时再按真实事件设计 |
+
+---
+
+## 7. 实现说明
+
+阶段 1–5 已实现（`b0af3da`、`7efb5a2`、`7f4c585`、`b314245`），与上文有以下出入，以实现为准：
+
+| 项 | 上文 | 实现 |
+| --- | --- | --- |
+| 上下文的释放 | `createContext` 返回 `ProjectContext & AsyncDisposable` | 返回 `ScopedContext { context, dispose() }`，`dispose` 不出现在交给用户代码的对象上 |
+| `Origin` 字段 | task 只有 `taskId`；pipeline 没有 `pipelineId` | task 另带 `taskKey`（任务引擎按它存状态）；pipeline 另带 `pipelineId`（`pipeline_next` 的输入取决于它） |
+| 记录里的 origin | — | 存为 `OriginRef { kind, id }`：session 用会话 ID，task 用执行 ID，pipeline 用 node run ID，hook 用投递 ID（没有则用 hook ID）。Pipeline run 级别的完成/失败通知是系统通知，不带 origin |
+| `ProjectContext.pipelines` | `start` / `find` / `signal` | 另加 `list()`，`list_project_pipelines` 需要它 |
+| 工具的 `when` | `when(ctx: ToolContext)` | `when(site: ToolSite)`，`site` 只有 `owner`：列出工具时还没有调用上下文 |
+| 运行时拿到的工具 | “替换它们拿到的工具上下文” | `RuntimeContext.tools: SessionTools { specs, call }`。运行时不再接触注册表、scope 和参数覆盖；`pipeline_next` 的节点专属输入由 `ProjectRuntime` 放进 `specs`，并用它校验调用 |
+| 定时唤醒 | `session.scheduleTurn(...)` | `ToolSession.schedule(...)` / `cancelSchedule(...)` |
+| 任务会话里启动的 Pipeline | — | 工具调用的 origin 是会话，所以 `createdBy` 是 `session:<id>`；TS 任务和代码节点直接启动的才是 `task:<id>` / `pipeline:<runId>` |
+| `tool_executions` | `origin_kind` / `origin_id` | 工具调用总来自会话，所以是 `session_id`（必填）、`turn_id`，加上会话的 `owner_kind` / `owner_id` |
+| `sessions.owner` | `TaskOwner` / `PipelineOwner` 的持久化形式 | 直接存 `TaskOrigin` / `PipelineOrigin`；`TaskOwner`、`PipelineOwner` 是工具调用时在它上面加上任务状态和节点操作 |
+| TS 任务的返回值 | — | `run` 返回的对象本身就是执行摘要（不再包一层 `summary`） |
+| 迁移 | 一个迁移，不迁移旧数据 | 两个迁移（`0007` 产物和通知的 origin，`0008` 工具审计和会话 owner），并按 ID 前缀迁移了旧数据：开发库里已有的产物、通知、审计和 Pipeline 会话都保留下来 |
+
+实际验证在 `agent-dev` 的 shortlink 项目上做了：Codex 和 Pi 各调用了 `send_notification` 与 `dispatch_agent_task`，审计、通知和派生会话都记录了正确的会话；一个临时 TS 任务连续执行两次，状态、产物归属（`task:<执行 ID>`）和日志都正确。Claude 因容器里未登录没有跑通；Pipeline 代码节点没有在线上验证（加载新 Pipeline 需要重启，且会在开发库留下 revision 和 run），由端到端测试覆盖。
