@@ -1,6 +1,8 @@
 import { test, expect } from "bun:test";
 import { mkdir, mkdtemp, writeFile, chmod, rm, realpath } from "node:fs/promises";
 import path from "node:path";
+import { z } from "zod";
+import { ActionRegistry } from "../src/actions/registry.ts";
 import { CodexRuntime } from "../src/runtime/codex/index.ts";
 import type { RuntimeEvent } from "../src/runtime/runtime.ts";
 import type { ProjectConfig } from "../src/domain/types.ts";
@@ -116,6 +118,67 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     process.env.OPENAI_API_KEY = previous.key;
     if (previous.home === undefined) delete process.env.CODEX_HOME;
     if (previous.key === undefined) delete process.env.OPENAI_API_KEY;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("an orchestrator tool call is reported as started before it is reported as called", async () => {
+  const root = await mkdtemp("/tmp/codex-dynamic-tool-");
+  const script = path.join(root, "fake-codex");
+  await writeFile(
+    script,
+    `#!/usr/bin/env bun
+import { createInterface } from "node:readline";
+const send = (m) => console.log(JSON.stringify(m));
+createInterface({ input: process.stdin }).on("line", (line) => {
+  const m = JSON.parse(line);
+  if (m.method === "initialize") send({ id: m.id, result: {} });
+  else if (m.method === "thread/start") send({ id: m.id, result: { thread: { id: "thread-tool" } } });
+  else if (m.method === "turn/start") {
+    send({ id: m.id, result: { turn: { id: "turn-tool" } } });
+    send({ id: "srv-1", method: "item/tool/call", params: { threadId: "thread-tool", turnId: "turn-tool", callId: "call-1", namespace: null, tool: "echo", arguments: { text: "hi" } } });
+  } else if (m.id === "srv-1") {
+    send({ method: "turn/completed", params: { threadId: "thread-tool", turn: { id: "turn-tool", status: "completed", items: [], error: null, durationMs: null } } });
+  }
+});
+`,
+    { mode: 0o755 },
+  );
+  const actions = new ActionRegistry(new Logger({ sink: () => {} }));
+  actions.register({
+    name: "echo",
+    description: "Echo",
+    parameters: z.object({ text: z.string() }),
+    async handler(params: { text: string }) {
+      return { echoed: params.text };
+    },
+  });
+  const runtime = new CodexRuntime(script, new Logger({ sink: () => {} }), undefined, actions);
+  const events: RuntimeEvent[] = [];
+  const context = {
+    project,
+    workspacePath: root,
+    onEvent: (event: RuntimeEvent) => {
+      events.push(event);
+    },
+  };
+  try {
+    const session = await runtime.startSession(context);
+    await runtime.startTurn(context, session.id, "gateway-turn", "use the tool");
+    const deadline = Date.now() + 2_000;
+    while (!events.some((e) => e.type === "turn.completed") && Date.now() < deadline) {
+      await Bun.sleep(10);
+    }
+
+    const toolEvents = events.filter((e) => e.type.startsWith("tool."));
+    expect(toolEvents.map((e) => e.type)).toEqual(["tool.call.started", "tool.called"]);
+    expect(toolEvents.map((e) => (e.payload as { itemId: string }).itemId)).toEqual([
+      "call-1",
+      "call-1",
+    ]);
+    expect(toolEvents[1]!.payload).toMatchObject({ toolName: "echo", status: "success" });
+  } finally {
+    await runtime.stop();
     await rm(root, { recursive: true, force: true });
   }
 });

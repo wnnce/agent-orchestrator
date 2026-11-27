@@ -425,6 +425,16 @@ export class CodexRuntime implements AgentRuntime {
 
     const startedAt = Date.now();
     try {
+      await context.onEvent({
+        type: "tool.call.started",
+        sessionId: params.threadId,
+        turnId: params.turnId,
+        payload: {
+          itemId: params.callId,
+          toolName: params.tool,
+          args: (params.arguments ?? {}) as Record<string, unknown>,
+        },
+      });
       const result = await this.actionRegistry.execute(
         params.tool,
         params.arguments,
