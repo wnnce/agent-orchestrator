@@ -53,6 +53,16 @@ export const projectToolSchema = z
   })
   .openapi("ProjectTool");
 
+export const projectHookSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    description: z.string().optional(),
+    /** Where the hook receives requests, to configure on the sending platform. */
+    path: z.string(),
+  })
+  .openapi("ProjectHook");
+
 const projectOverviewSessionItemSchema = z.object({
   sessionId: z.string(),
   title: z.string().optional(),
@@ -269,6 +279,23 @@ export const listProjectToolsRoute = createRoute({
     200: jsonContent(
       z.object({ projectId: z.string(), tools: z.array(projectToolSchema) }),
       "Project custom tools registered in the project's tool registry",
+    ),
+    404: notFoundResponse,
+  },
+});
+
+export const listProjectHooksRoute = createRoute({
+  method: "get",
+  path: "/projects/{projectId}/hooks",
+  tags: ["Projects"],
+  summary: "List the HTTP hooks a project loaded",
+  request: {
+    params: projectIdParamSchema,
+  },
+  responses: {
+    200: jsonContent(
+      z.object({ projectId: z.string(), hooks: z.array(projectHookSchema) }),
+      "Hooks served at /hooks/{projectId}/{hookId}",
     ),
     404: notFoundResponse,
   },

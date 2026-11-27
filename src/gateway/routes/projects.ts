@@ -2,9 +2,11 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import type { ProjectManager } from "../../project/manager.ts";
 import type { ProjectStats } from "../../project/stats.ts";
 import { describeProjectTools } from "../../tools/describe.ts";
+import { hookPath } from "./hooks.ts";
 import {
   getProjectMetricsRoute,
   getProjectOverviewRoute,
+  listProjectHooksRoute,
   listProjectSkillsRoute,
   listProjectToolsRoute,
   listProjectsRoute,
@@ -49,6 +51,15 @@ export function createProjectsRouter(deps: ProjectsRouteDeps): OpenAPIHono {
     const { projectId } = c.req.valid("param");
     const tools = describeProjectTools(deps.projects.get(projectId).tools);
     return c.json({ projectId, tools }, 200);
+  });
+
+  router.openapi(listProjectHooksRoute, (c) => {
+    const { projectId } = c.req.valid("param");
+    const hooks = deps.projects
+      .get(projectId)
+      .listHooks()
+      .map((hook) => ({ ...hook, path: hookPath(projectId, hook.id) }));
+    return c.json({ projectId, hooks }, 200);
   });
 
   router.openapi(getProjectOverviewRoute, async (c) => {

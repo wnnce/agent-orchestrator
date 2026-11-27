@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -10,9 +11,11 @@ import { deliverHook } from "../src/hooks/deliver.ts";
 import { loadProjectHooks, type LoadedHook } from "../src/hooks/loader.ts";
 import { defineHook, type HookContext, type HookSpec } from "../src/hooks/sdk.ts";
 import { Logger } from "../src/observability/logger.ts";
+import { setupTracing } from "../src/observability/tracing-setup.ts";
 import type { StartPipelineRunParams } from "../src/pipeline/types.ts";
 import { MemoryStore } from "../src/persistence/store.ts";
 import { ProjectManager } from "../src/project/manager.ts";
+import { createGateway } from "./helpers/gateway.ts";
 import { contextFactory, testContextServices, testProject } from "./helpers/project-context.ts";
 
 const SDK = path.resolve("src/hooks/sdk.ts");
@@ -221,5 +224,125 @@ describe("ProjectRuntime hooks", () => {
     const missing = manager.get("demo").handleHook("nope", new Request("http://x/"));
     await expect(missing).rejects.toBeInstanceOf(NotFoundError);
     await expect(missing).rejects.toMatchObject({ code: ErrorCode.HOOK_NOT_FOUND });
+  });
+});
+
+describe("/hooks gateway routes", () => {
+  let projectDir: string;
+  let manager: ProjectManager;
+  let gateway: ReturnType<typeof createGateway>;
+
+  beforeAll(async () => {
+    projectDir = await mkdtemp(path.join(os.tmpdir(), "hooks-gateway-"));
+    const hooksDir = path.join(projectDir, "hooks");
+    await mkdir(hooksDir);
+    const hooks: Record<string, string> = {
+      "echo.ts": `{
+        name: "Echo",
+        handle: async (request) =>
+          new Response(request.method + " " + (await request.text()), {
+            status: 202,
+            headers: { "content-type": "text/plain" },
+          }),
+      }`,
+      "boom.ts": `{ name: "Boom", handle: () => { throw new Error("hook exploded"); } }`,
+    };
+    for (const [name, spec] of Object.entries(hooks)) {
+      await writeFile(path.join(hooksDir, name), hookFile(spec));
+    }
+    const config = {
+      host: "127.0.0.1",
+      port: 0,
+      dataDir: path.join(projectDir, "data"),
+      artifactDir: path.join(projectDir, "artifacts"),
+      routerBaseUrl: "http://localhost:1/v1",
+      allowUnauthenticated: false,
+      apiToken: "api-token",
+      feishu: { enabled: false },
+    } as AppConfig;
+    const store = new MemoryStore();
+    const logger = new Logger({ sink: () => {} });
+    const project = testProject({ runtime: { type: "fake" }, projectDir });
+    manager = new ProjectManager([project], store, config, logger);
+    await manager.start();
+    gateway = createGateway(config, store, manager, logger);
+  });
+  afterAll(async () => {
+    await manager.stop();
+    await rm(projectDir, { recursive: true, force: true });
+  });
+
+  it("passes requests of any method to the hook without the API token", async () => {
+    const post = await gateway.handle(
+      new Request("http://localhost/hooks/demo/echo", { method: "POST", body: '{"raw": true}' }),
+    );
+    expect(post.status).toBe(202);
+    expect(post.headers.get("content-type")).toBe("text/plain");
+    expect(await post.text()).toBe('POST {"raw": true}');
+
+    const get = await gateway.handle(new Request("http://localhost/hooks/demo/echo"));
+    expect(await get.text()).toBe("GET ");
+
+    const api = await gateway.handle(new Request("http://localhost/api/v1/projects"));
+    expect(api.status).toBe(401);
+  });
+
+  it("answers 404 for unknown projects and hooks", async () => {
+    const unknownProject = await gateway.handle(new Request("http://localhost/hooks/nope/echo"));
+    expect(unknownProject.status).toBe(404);
+    expect(((await unknownProject.json()) as { error: string }).error).toBe("project_not_found");
+
+    const unknownHook = await gateway.handle(new Request("http://localhost/hooks/demo/nope"));
+    expect(unknownHook.status).toBe(404);
+    expect(((await unknownHook.json()) as { error: string }).error).toBe("hook_not_found");
+  });
+
+  it("answers 500 when a hook throws and keeps serving", async () => {
+    const failed = await gateway.handle(
+      new Request("http://localhost/hooks/demo/boom", { method: "POST" }),
+    );
+    expect(failed.status).toBe(500);
+    const next = await gateway.handle(new Request("http://localhost/hooks/demo/echo"));
+    expect(next.status).toBe(202);
+  });
+
+  it("lists the project's hooks with their paths", async () => {
+    const response = await gateway.handle(
+      new Request("http://localhost/api/v1/projects/demo/hooks", {
+        headers: { authorization: "Bearer api-token" },
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      projectId: "demo",
+      hooks: [
+        { id: "boom", name: "Boom", path: "/hooks/demo/boom" },
+        { id: "echo", name: "Echo", path: "/hooks/demo/echo" },
+      ],
+    });
+  });
+
+  it("traces each delivery under the hook route", async () => {
+    const exporter = new InMemorySpanExporter();
+    const tracing = setupTracing(
+      { enabled: true, headers: {}, sampleRate: 1 },
+      { spanProcessor: new SimpleSpanProcessor({ exporter }) },
+    );
+    try {
+      const response = await gateway.handle(
+        new Request("http://localhost/hooks/demo/echo", { method: "POST", body: "x" }),
+      );
+      const [span] = exporter.getFinishedSpans();
+      expect(span?.name).toBe("POST /hooks/:projectId/:hookId");
+      expect(span?.attributes).toMatchObject({
+        "project.id": "demo",
+        "hook.id": "echo",
+        "http.response.status_code": 202,
+      });
+      expect(String(span?.attributes["hook.delivery_id"])).toMatch(/^dlv_/);
+      expect(response.headers.get("x-trace-id")).toBe(span?.spanContext().traceId ?? null);
+    } finally {
+      await tracing.shutdown();
+    }
   });
 });

@@ -24,6 +24,7 @@ import {
   createSessionsRouter,
   createPipelinesRouter,
   createWebhooksRouter,
+  createHooksRouter,
 } from "./routes/index.ts";
 
 export const API_V1_PREFIX = "/api/v1";
@@ -60,8 +61,9 @@ export class Gateway {
   private createApp(): OpenAPIHono {
     const app = createOpenAPIApp({ logger: this.logger });
 
-    // 0. Tracing for API requests; registered first so the request log below carries the trace ID
+    // 0. Tracing for API and hook requests; registered first so the request log below carries the trace ID
     app.use(`${API_V1_PREFIX}/*`, httpTracing());
+    app.use("/hooks/*", httpTracing());
 
     // 1. Request logging & x-request-id middleware
     app.use("*", async (c, next) => {
@@ -86,7 +88,10 @@ export class Gateway {
     app.route("/", createHealthRouter());
     app.route("/", createDocsRouter(app));
 
-    // 3. Versioned API routes (/api/v1)
+    // 3. Project hooks: external platforms call these without the API token
+    app.route("/", createHooksRouter({ projects: this.projects, logger: this.logger }));
+
+    // 4. Versioned API routes (/api/v1)
     const apiV1 = createOpenAPIApp({ logger: this.logger });
 
     // Public runtime discovery under /api/v1

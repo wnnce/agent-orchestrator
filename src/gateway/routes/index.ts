@@ -7,3 +7,4 @@ export { createScheduledJobsRouter, type ScheduledJobsRouteDeps } from "./schedu
 export { createSessionsRouter, type SessionsRouteDeps } from "./sessions.ts";
 export { createPipelinesRouter, type PipelinesRouteDeps } from "./pipelines.ts";
 export { createWebhooksRouter, type WebhooksRouteDeps } from "./webhooks.ts";
+export { createHooksRouter, type HooksRouteDeps } from "./hooks.ts";
