@@ -287,7 +287,7 @@ describe("/hooks gateway routes", () => {
     expect(api.status).toBe(401);
   });
 
-  it("answers 404 for unknown projects and hooks", async () => {
+  it("answers 404 for unknown projects, hooks, and malformed /hooks paths", async () => {
     const unknownProject = await gateway.handle(new Request("http://localhost/hooks/nope/echo"));
     expect(unknownProject.status).toBe(404);
     expect(((await unknownProject.json()) as { error: string }).error).toBe("project_not_found");
@@ -295,13 +295,24 @@ describe("/hooks gateway routes", () => {
     const unknownHook = await gateway.handle(new Request("http://localhost/hooks/demo/nope"));
     expect(unknownHook.status).toBe(404);
     expect(((await unknownHook.json()) as { error: string }).error).toBe("hook_not_found");
+
+    const missingHookSegment = await gateway.handle(new Request("http://localhost/hooks/demo"));
+    expect(missingHookSegment.status).toBe(404);
+    expect(missingHookSegment.headers.get("content-type") ?? "").not.toContain("text/html");
+
+    const extraSegment = await gateway.handle(
+      new Request("http://localhost/hooks/demo/echo/extra"),
+    );
+    expect(extraSegment.status).toBe(404);
+    expect(extraSegment.headers.get("content-type") ?? "").not.toContain("text/html");
   });
 
-  it("answers 500 when a hook throws and keeps serving", async () => {
+  it("answers 500 without leaking internal error details when a hook throws and keeps serving", async () => {
     const failed = await gateway.handle(
       new Request("http://localhost/hooks/demo/boom", { method: "POST" }),
     );
     expect(failed.status).toBe(500);
+    expect(await failed.json()).toEqual({ error: "internal_error" });
     const next = await gateway.handle(new Request("http://localhost/hooks/demo/echo"));
     expect(next.status).toBe(202);
   });
