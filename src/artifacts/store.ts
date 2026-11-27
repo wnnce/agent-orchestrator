@@ -1,6 +1,7 @@
 import { mkdir, stat, writeFile, readFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import type { OriginRef } from "../domain/origin.ts";
 import type { ArtifactRecord } from "../domain/types.ts";
 import type { Store } from "../persistence/store.ts";
 import { assertSafeId } from "../domain/ids.ts";
@@ -13,23 +14,24 @@ export class ArtifactStore {
 
   async write(
     projectId: string,
-    sessionId: string,
+    origin: OriginRef,
     turnId: string | undefined,
     kind: string,
     content: string | Uint8Array,
     contentType: string,
   ): Promise<ArtifactRecord> {
     assertSafeId(projectId, "projectId");
-    assertSafeId(sessionId, "sessionId");
+    assertSafeId(origin.id, "originId");
     const id = `art_${randomUUID()}`;
-    const file = path.join(this.root, projectId, sessionId, `${id}.bin`);
+    const file = path.join(this.root, projectId, origin.kind, origin.id, `${id}.bin`);
     await mkdir(path.dirname(file), { recursive: true, mode: 0o750 });
     await writeFile(file, content, { mode: 0o640 });
     const info = await stat(file);
     const artifact: ArtifactRecord = {
       id,
       projectId,
-      sessionId,
+      originKind: origin.kind,
+      originId: origin.id,
       ...(turnId ? { turnId } : {}),
       kind,
       path: file,

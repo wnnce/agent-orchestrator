@@ -127,7 +127,8 @@ export const artifactRecordSchema = z
   .object({
     id: z.string(),
     projectId: z.string(),
-    sessionId: z.string(),
+    originKind: z.enum(["session", "task", "pipeline", "hook"]),
+    originId: z.string(),
     turnId: z.string().optional(),
     kind: z.string(),
     path: z.string(),

@@ -91,7 +91,13 @@ export function createActionContext(params: CreateActionContextParams): ActionCo
       }
       const outbox = services?.notifications;
       if (outbox) {
-        await outbox.queue(projectId, sessionId, params.projectNotifications, message, options);
+        await outbox.queue(
+          projectId,
+          { kind: "session", id: sessionId },
+          params.projectNotifications,
+          message,
+          options,
+        );
         return;
       }
       logger.info("notification sent via action context (no outbox configured)", {
@@ -112,7 +118,7 @@ export function createActionContext(params: CreateActionContextParams): ActionCo
       }
       return await store.write(
         projectId,
-        sessionId,
+        { kind: "session", id: sessionId },
         turnId,
         artifactParams.kind,
         artifactParams.content,

@@ -192,7 +192,7 @@ export async function runTsNode(execution: TsNodeExecution): Promise<TsNodeOutco
     notify: async (message, options) => {
       await execution.notifications.queue(
         run.projectId,
-        run.runId,
+        { kind: "pipeline", id: nodeRun.nodeRunId },
         project.notifications,
         message,
         options,
@@ -201,7 +201,7 @@ export async function runTsNode(execution: TsNodeExecution): Promise<TsNodeOutco
     createArtifact: (params) =>
       execution.artifacts.write(
         run.projectId,
-        nodeRun.nodeRunId,
+        { kind: "pipeline", id: nodeRun.nodeRunId },
         undefined,
         params.kind,
         params.content,

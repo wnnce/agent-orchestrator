@@ -1,4 +1,6 @@
 export * from "./events.ts";
+export * from "./origin.ts";
+import type { OriginKind } from "./origin.ts";
 
 export type SessionStatus =
   | "active"
@@ -179,7 +181,9 @@ export interface NotificationDeliveryDetail {
 export interface NotificationDelivery {
   id: string;
   projectId: string;
-  sessionId?: string | undefined;
+  /** Who sent it; absent for notifications the system sends on its own. */
+  originKind?: OriginKind | undefined;
+  originId?: string | undefined;
   configs: NotificationConfig[];
   message: {
     title: string;
@@ -305,7 +309,9 @@ export interface InboundMessageRecord {
 export interface ArtifactRecord extends BaseLogRecord<string> {
   id: string;
   projectId: string;
-  sessionId: string;
+  /** Who created it: a session, task execution, pipeline node run or hook delivery. */
+  originKind: OriginKind;
+  originId: string;
   turnId?: string;
   kind: string;
   path: string;

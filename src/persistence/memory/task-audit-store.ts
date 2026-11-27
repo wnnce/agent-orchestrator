@@ -36,7 +36,11 @@ export class MemoryTaskAuditStore {
     const items: NotificationDelivery[] = [];
     for (const delivery of this.notifications.values()) {
       if (filter?.projectId && delivery.projectId !== filter.projectId) continue;
-      if (filter?.sessionId && delivery.sessionId !== filter.sessionId) continue;
+      if (
+        filter?.origin &&
+        (delivery.originKind !== filter.origin.kind || delivery.originId !== filter.origin.id)
+      )
+        continue;
       if (filter?.status && delivery.status !== filter.status) continue;
       items.push(structuredClone(delivery));
     }

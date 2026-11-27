@@ -1,3 +1,4 @@
+import type { OriginRef } from "../domain/origin.ts";
 import { randomUUID } from "node:crypto";
 import type {
   ActionExecutionFilter,
@@ -56,7 +57,7 @@ export type TurnPatch = Partial<
 
 export interface ListNotificationDeliveriesFilter {
   projectId?: string | undefined;
-  sessionId?: string | undefined;
+  origin?: OriginRef | undefined;
   status?: "sent" | "partial" | "failed" | undefined;
   limit?: number | undefined;
 }
@@ -151,7 +152,7 @@ export interface Store {
   getLatestEventSequence(sessionId: string): Promise<number>;
   listEvents(sessionId: string, afterSequence?: number): Promise<EventRecord[]>;
   addArtifact(artifact: ArtifactRecord): Promise<void>;
-  listArtifacts(sessionId: string): Promise<ArtifactRecord[]>;
+  listArtifacts(origin: OriginRef): Promise<ArtifactRecord[]>;
   recordNotificationDelivery(delivery: NotificationDelivery): Promise<void>;
   listNotificationDeliveries(
     filter?: ListNotificationDeliveriesFilter,

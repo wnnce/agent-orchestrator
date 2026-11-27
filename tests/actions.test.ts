@@ -244,7 +244,7 @@ describe("ActionContext Unified Capabilities & Escape Hatch", () => {
       });
       expect(art.id).toMatch(/^art_/);
       expect(art.projectId).toBe("proj_media");
-      expect(art.sessionId).toBe("ses_media_01");
+      expect(art).toMatchObject({ originKind: "session", originId: "ses_media_01" });
       expect(art.turnId).toBe("turn_01");
       expect(art.kind).toBe("build_summary");
 

@@ -1,3 +1,4 @@
+import type { OriginRef } from "../../domain/origin.ts";
 import type {
   ActionExecutionFilter,
   ActionExecutionRecord,
@@ -166,8 +167,8 @@ export class MemoryStore implements Store {
     return this.turnEventStore.addArtifact(artifact);
   }
 
-  listArtifacts(sessionId: string): Promise<ArtifactRecord[]> {
-    return this.turnEventStore.listArtifacts(sessionId);
+  listArtifacts(origin: OriginRef): Promise<ArtifactRecord[]> {
+    return this.turnEventStore.listArtifacts(origin);
   }
 
   recordNotificationDelivery(delivery: NotificationDelivery): Promise<void> {

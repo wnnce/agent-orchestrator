@@ -1,3 +1,4 @@
+import type { OriginRef } from "../../domain/origin.ts";
 import { and, asc, desc, eq, gt, max, sql } from "drizzle-orm";
 import type {
   ArtifactRecord,
@@ -194,7 +195,8 @@ export class PostgresTurnEventRepo {
     await this.db.insert(artifacts).values({
       artifactId: artifact.id,
       projectId: artifact.projectId,
-      sessionId: artifact.sessionId,
+      originKind: artifact.originKind,
+      originId: artifact.originId,
       turnId: artifact.turnId ?? null,
       kind: artifact.kind,
       path: artifact.path,
@@ -204,11 +206,11 @@ export class PostgresTurnEventRepo {
     });
   }
 
-  async listArtifacts(sessionId: string): Promise<ArtifactRecord[]> {
+  async listArtifacts(origin: OriginRef): Promise<ArtifactRecord[]> {
     const rows = await this.db
       .select()
       .from(artifacts)
-      .where(eq(artifacts.sessionId, sessionId))
+      .where(and(eq(artifacts.originKind, origin.kind), eq(artifacts.originId, origin.id)))
       .orderBy(asc(artifacts.createdAt));
     return rows.map(toArtifactRecord);
   }

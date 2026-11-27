@@ -1016,7 +1016,7 @@ export class PipelineEngine {
     try {
       await this.deps.notifications.queue(
         run.projectId,
-        run.runId,
+        undefined,
         this.deps.project.notifications,
         {
           title: `[Pipeline: ${def.name}] ${run.title}`,

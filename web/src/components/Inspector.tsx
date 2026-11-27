@@ -263,7 +263,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                     </div>
                   </div>
                   <a
-                    href={sessionsApi.getArtifactDownloadUrl(art.sessionId, art.id)}
+                    href={sessionsApi.getArtifactDownloadUrl(art.originId, art.id)}
                     target="_blank"
                     rel="noreferrer"
                     className="p-1.5 rounded bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-default)] text-[var(--text-secondary)]"

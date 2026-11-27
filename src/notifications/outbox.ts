@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import type { OriginRef } from "../domain/origin.ts";
 import type { NotificationConfig, NotificationDelivery } from "../domain/types.ts";
 import type { Store } from "../persistence/store.ts";
 import { Logger } from "../observability/logger.ts";
@@ -27,7 +28,7 @@ export class NotificationOutbox {
    */
   async queue(
     projectId: string,
-    sessionId: string,
+    origin: OriginRef | undefined,
     configs: NotificationConfig[] | undefined,
     message: NotificationMessage,
     options?: NotificationOptions,
@@ -36,7 +37,7 @@ export class NotificationOutbox {
     if (targets.length === 0) {
       this.logger.debug("no matching notification configs to queue", {
         projectId,
-        sessionId,
+        ...(origin ? { originKind: origin.kind, originId: origin.id } : {}),
         target: options?.target ?? "all",
       });
       return undefined;
@@ -46,7 +47,7 @@ export class NotificationOutbox {
     const item: EnqueuedNotification = {
       deliveryId,
       projectId,
-      sessionId,
+      ...(origin ? { origin } : {}),
       configs: targets,
       message,
       options,
@@ -55,7 +56,7 @@ export class NotificationOutbox {
     this.queueBuffer.push(item);
     this.logger.info("notification enqueued to memory queue", {
       projectId,
-      sessionId,
+      ...(origin ? { originKind: origin.kind, originId: origin.id } : {}),
       deliveryId,
       providerCount: targets.length,
       target: options?.target ?? "all",
@@ -118,7 +119,7 @@ export class NotificationOutbox {
     const delivery: NotificationDelivery = {
       id: item.deliveryId,
       projectId: item.projectId,
-      sessionId: item.sessionId,
+      ...(item.origin ? { originKind: item.origin.kind, originId: item.origin.id } : {}),
       configs: item.configs,
       message: item.message,
       status,

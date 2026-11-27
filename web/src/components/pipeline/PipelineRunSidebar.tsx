@@ -532,7 +532,7 @@ export function PipelineRunSidebar({
                   </div>
                 </div>
                 <a
-                  href={sessionsApi.getArtifactDownloadUrl(art.sessionId, art.id)}
+                  href={sessionsApi.getArtifactDownloadUrl(art.originId, art.id)}
                   target="_blank"
                   rel="noreferrer"
                   title="下载产物"

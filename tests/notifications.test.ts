@@ -247,7 +247,10 @@ describe("NotificationOutbox & ActionContext Integration", () => {
       { name: "telegram", type: "telegram", enabled: true },
     ];
 
-    await outbox.queue("p1", "s1", configs, { title: "Broadcast", text: "Test partial" });
+    await outbox.queue("p1", { kind: "session", id: "s1" }, configs, {
+      title: "Broadcast",
+      text: "Test partial",
+    });
     await outbox.drain();
 
     const deliveries = await store.listNotificationDeliveries({ projectId: "p1" });
@@ -279,7 +282,10 @@ describe("NotificationOutbox & ActionContext Integration", () => {
 
     const configs: NotificationConfig[] = [{ name: "broken-hook", type: "webhook", enabled: true }];
 
-    await outbox.queue("p2", "s2", configs, { title: "Down", text: "Service dead" });
+    await outbox.queue("p2", { kind: "session", id: "s2" }, configs, {
+      title: "Down",
+      text: "Service dead",
+    });
     await outbox.drain();
 
     const deliveries = await store.listNotificationDeliveries({ projectId: "p2" });

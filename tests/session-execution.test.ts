@@ -254,6 +254,32 @@ describe("session execution and control", () => {
     const listed = await store.listSessions("execution");
     expect(listed.map((s) => s.sessionId)).toContain(dispatched.sessionId);
   });
+  test("a session started from a project context records where it came from", async () => {
+    const { context, dispose } = runtime.createContext(
+      { kind: "task", taskId: "nightly", taskKey: "execution:nightly", executionId: "texe_1" },
+      { signal: new AbortController().signal },
+    );
+    const started = await context.sessions.start({
+      title: "Fix flaky test",
+      prompt: "fix it",
+      model: "fast",
+      metadata: { issue: 7 },
+    });
+    await dispose();
+    const route = await store.getSession(started.sessionId);
+    expect(route).toMatchObject({ source: "dispatch", model: "fast" });
+    expect(route?.metadata).toMatchObject({
+      title: "Fix flaky test",
+      sourceTaskId: "nightly",
+      sourceTaskExecutionId: "texe_1",
+      dispatch: { issue: 7 },
+    });
+    await agent.started(1);
+    expect(agent.starts[0]!.input).toBe("fix it");
+    await agent.finish(0);
+    await runtime.waitForIdle(started.sessionId);
+    expect((await store.getTurn(started.turnId))?.status).toBe("completed");
+  });
   test("start cleans up task sessions abandoned by a previous run", async () => {
     const task = await runtime.createSession({ taskKey: "execution:nightly" }, "task");
     await runtime.sessionManager.remove(task.sessionId);

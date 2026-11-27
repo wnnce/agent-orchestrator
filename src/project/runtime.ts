@@ -78,6 +78,15 @@ import {
   type Context,
 } from "../observability/tracing.ts";
 import { TurnTrace } from "./turn-trace.ts";
+import {
+  createProjectContext,
+  type ContextOptions,
+  type ScopedContext,
+  type StartSessionParams,
+  type StartedSession,
+} from "../context/index.ts";
+import type { Origin } from "../domain/origin.ts";
+import type { McpClientFactory } from "../mcp/index.ts";
 
 interface QueuedTurn {
   readonly turn: TurnRecord;
@@ -104,6 +113,8 @@ export interface SessionExecutionOptions {
   runtimeFactory?: ((runtimeType: string) => AgentRuntime) | undefined;
   /** Optional shared PipelineEventHub across all ProjectRuntimes. */
   pipelineEventHub?: PipelineEventHub | undefined;
+  /** Replaces how project contexts connect to MCP servers (tests). */
+  mcpClientFactory?: McpClientFactory | undefined;
 }
 
 function toSessionRuntimeOverride(
@@ -119,6 +130,23 @@ function toSessionRuntimeOverride(
     model: config.model,
     reasoningEffort: config.reasoningEffort,
   };
+}
+
+/** What a session started by `origin` records about where it came from. */
+function sessionSourceMetadata(origin: Origin): Record<string, string> {
+  switch (origin.kind) {
+    case "session":
+      return { sourceSessionId: origin.sessionId };
+    case "task":
+      return { sourceTaskId: origin.taskId, sourceTaskExecutionId: origin.executionId };
+    case "pipeline":
+      return { sourcePipelineRunId: origin.runId, sourcePipelineNodeId: origin.nodeId };
+    case "hook":
+      return {
+        sourceHookId: origin.hookId,
+        ...(origin.deliveryId ? { sourceHookDeliveryId: origin.deliveryId } : {}),
+      };
+  }
 }
 
 /** Which actions a session's agent sees: chosen by who created the session. */
@@ -292,6 +320,56 @@ export class ProjectRuntime {
     if (!this.actionRegistry.has("update_task_state")) {
       this.actionRegistry.register(updateTaskStateAction);
     }
+  }
+
+  /**
+   * The project's capabilities acting as `origin`. Every task, pipeline node, agent tool and hook
+   * context is built on one of these.
+   */
+  createContext(origin: Origin, options: ContextOptions): ScopedContext {
+    return createProjectContext(
+      {
+        project: this.project,
+        logger: this.logger,
+        notifications: this.notifications,
+        artifacts: this.artifactStore,
+        sessions: { start: (params, from) => this.startSessionFor(params, from) },
+        pipelines: {
+          start: (params) => this.pipelineEngine.startRun(params),
+          find: (pipelineId, externalKey) =>
+            this.store.pipelines.findRunByExternalKey(this.project.id, pipelineId, externalKey),
+          signal: (runId) => this.pipelineEngine.signalRun(runId),
+        },
+        mcpClientFactory: this.options.mcpClientFactory,
+      },
+      origin,
+      options,
+    );
+  }
+
+  /**
+   * A session started by project code or an agent tool. It is an ordinary session that remembers
+   * where it came from; unless told otherwise it uses the project's runtime and model.
+   */
+  private async startSessionFor(
+    params: StartSessionParams,
+    origin: Origin,
+  ): Promise<StartedSession> {
+    const route = await this.createSession(
+      {
+        title: params.title,
+        ...sessionSourceMetadata(origin),
+        ...(params.metadata ? { dispatch: params.metadata } : {}),
+      },
+      "dispatch",
+      {
+        ...(params.runtime ? { runtime: params.runtime } : {}),
+        ...(params.model ? { model: params.model } : {}),
+        ...(params.reasoningEffort ? { reasoningEffort: params.reasoningEffort } : {}),
+      },
+    );
+    const turn = await this.turn(route.sessionId, params.prompt);
+    return { sessionId: route.sessionId, turnId: turn.id };
   }
 
   /**
@@ -972,7 +1050,7 @@ export class ProjectRuntime {
   }
   async listArtifacts(sessionId: string): Promise<ArtifactRecord[]> {
     await this.loadSession(sessionId);
-    return this.store.listArtifacts(sessionId);
+    return this.store.listArtifacts({ kind: "session", id: sessionId });
   }
 
   async artifact(
@@ -1337,7 +1415,7 @@ export class ProjectRuntime {
       await this.store.updateTurn(active.turn.id, { output: text });
       await this.artifactStore.write(
         entity.projectId,
-        id,
+        { kind: "session", id },
         active.turn.id,
         "agent-message",
         text,
@@ -1403,7 +1481,7 @@ export class ProjectRuntime {
       if (this.project.notifyOnTurnCompleted) {
         await this.notifications.queue(
           entity.projectId,
-          id,
+          { kind: "session", id },
           this.project.notifications,
           {
             title: `Turn ${status}`,

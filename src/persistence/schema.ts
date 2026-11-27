@@ -1,3 +1,4 @@
+import type { OriginKind } from "../domain/origin.ts";
 import { sql } from "drizzle-orm";
 import {
   bigint,
@@ -160,7 +161,8 @@ export const artifacts = pgTable(
     id: bigserial("id", { mode: "number" }).primaryKey(),
     artifactId: varchar("artifact_id", { length: 100 }).notNull(),
     projectId: varchar("project_id", { length: 100 }).notNull(),
-    sessionId: varchar("session_id", { length: 100 }).notNull(),
+    originKind: varchar("origin_kind", { length: 20 }).$type<OriginKind>().notNull(),
+    originId: varchar("origin_id", { length: 100 }).notNull(),
     turnId: varchar("turn_id", { length: 100 }),
     kind: varchar("kind", { length: 100 }).notNull(),
     path: text("path").notNull(),
@@ -170,7 +172,7 @@ export const artifacts = pgTable(
   },
   (table) => [
     uniqueIndex("idx_artifacts_artifact_id").on(table.artifactId),
-    index("idx_artifacts_session_created").on(table.sessionId, table.createdAt),
+    index("idx_artifacts_origin_created").on(table.originKind, table.originId, table.createdAt),
   ],
 );
 
@@ -180,7 +182,8 @@ export const notificationDeliveries = pgTable(
     id: bigserial("id", { mode: "number" }).primaryKey(),
     deliveryId: varchar("delivery_id", { length: 100 }).notNull(),
     projectId: varchar("project_id", { length: 100 }).notNull(),
-    sessionId: varchar("session_id", { length: 100 }),
+    originKind: varchar("origin_kind", { length: 20 }).$type<OriginKind>(),
+    originId: varchar("origin_id", { length: 100 }),
     configs: jsonb("configs").$type<NotificationConfig[]>().notNull(),
     message: jsonb("message").$type<NotificationDelivery["message"]>().notNull(),
     status: varchar("status", { length: 50 }).$type<NotificationDelivery["status"]>().notNull(),

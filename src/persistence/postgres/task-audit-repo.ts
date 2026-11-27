@@ -43,7 +43,8 @@ export class PostgresTaskAuditRepo {
       .values({
         deliveryId: delivery.id,
         projectId: delivery.projectId,
-        sessionId: delivery.sessionId ?? null,
+        originKind: delivery.originKind ?? null,
+        originId: delivery.originId ?? null,
         configs: delivery.configs,
         message: delivery.message,
         status: delivery.status,
@@ -66,8 +67,9 @@ export class PostgresTaskAuditRepo {
     if (filter?.projectId) {
       conditions.push(eq(notificationDeliveries.projectId, filter.projectId));
     }
-    if (filter?.sessionId) {
-      conditions.push(eq(notificationDeliveries.sessionId, filter.sessionId));
+    if (filter?.origin) {
+      conditions.push(eq(notificationDeliveries.originKind, filter.origin.kind));
+      conditions.push(eq(notificationDeliveries.originId, filter.origin.id));
     }
     if (filter?.status) {
       conditions.push(eq(notificationDeliveries.status, filter.status));

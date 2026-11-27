@@ -321,7 +321,9 @@ export interface RuntimeEvent {
 
 export interface ArtifactRecord {
   id: string;
-  sessionId: string;
+  /** Who created it: a session, task execution, pipeline node run or hook delivery. */
+  originKind: "session" | "task" | "pipeline" | "hook";
+  originId: string;
   projectId?: string;
   turnId?: string;
   kind?: string;

@@ -1,3 +1,4 @@
+import type { OriginRef } from "../../domain/origin.ts";
 import { Pool } from "pg";
 import type {
   ActionExecutionFilter,
@@ -152,8 +153,8 @@ export class PostgresStore implements Store {
     return this.turnEventRepo.addArtifact(artifact);
   }
 
-  listArtifacts(sessionId: string): Promise<ArtifactRecord[]> {
-    return this.turnEventRepo.listArtifacts(sessionId);
+  listArtifacts(origin: OriginRef): Promise<ArtifactRecord[]> {
+    return this.turnEventRepo.listArtifacts(origin);
   }
 
   recordNotificationDelivery(delivery: NotificationDelivery): Promise<void> {

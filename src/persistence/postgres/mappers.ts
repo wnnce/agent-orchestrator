@@ -112,7 +112,8 @@ export function toArtifactRecord(row: ArtifactRow): ArtifactRecord {
   return {
     id: row.artifactId,
     projectId: row.projectId,
-    sessionId: row.sessionId,
+    originKind: row.originKind,
+    originId: row.originId,
     ...(row.turnId !== null ? { turnId: row.turnId } : {}),
     kind: row.kind,
     path: row.path,
@@ -126,7 +127,8 @@ export function toNotificationDelivery(row: NotificationDeliveryRow): Notificati
   return {
     id: row.deliveryId,
     projectId: row.projectId,
-    ...(row.sessionId !== null ? { sessionId: row.sessionId } : {}),
+    ...(row.originKind !== null ? { originKind: row.originKind } : {}),
+    ...(row.originId !== null ? { originId: row.originId } : {}),
     configs: row.configs,
     message: row.message,
     status: row.status,

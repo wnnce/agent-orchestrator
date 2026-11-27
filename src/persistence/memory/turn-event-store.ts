@@ -1,3 +1,4 @@
+import type { OriginRef } from "../../domain/origin.ts";
 import type {
   ArtifactRecord,
   EventRecord,
@@ -121,9 +122,9 @@ export class MemoryTurnEventStore {
     this.artifacts.push(structuredClone(artifact));
   }
 
-  async listArtifacts(sessionId: string): Promise<ArtifactRecord[]> {
+  async listArtifacts(origin: OriginRef): Promise<ArtifactRecord[]> {
     return this.artifacts
-      .filter((item) => item.sessionId === sessionId)
+      .filter((item) => item.originKind === origin.kind && item.originId === origin.id)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
       .map((item) => structuredClone(item));
   }
@@ -136,7 +137,8 @@ export class MemoryTurnEventStore {
       }
     }
     for (let i = this.artifacts.length - 1; i >= 0; i--) {
-      if (this.artifacts[i]?.sessionId === sessionId) {
+      const artifact = this.artifacts[i];
+      if (artifact?.originKind === "session" && artifact.originId === sessionId) {
         this.artifacts.splice(i, 1);
       }
     }

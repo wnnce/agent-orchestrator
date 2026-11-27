@@ -1,3 +1,4 @@
+import type { OriginRef } from "../domain/origin.ts";
 import type { NotificationConfig, NotificationDeliveryDetail } from "../domain/types.ts";
 
 export type { NotificationDeliveryDetail } from "../domain/types.ts";
@@ -36,7 +37,7 @@ export interface NotificationProvider {
 export interface EnqueuedNotification {
   readonly deliveryId: string;
   readonly projectId: string;
-  readonly sessionId?: string | undefined;
+  readonly origin?: OriginRef | undefined;
   readonly configs: NotificationConfig[];
   readonly message: NotificationMessage;
   readonly options?: NotificationOptions | undefined;
