@@ -185,6 +185,16 @@ describe("session execution and control", () => {
       turnId: turn.id,
     });
   });
+  test("no notification event is recorded when the project does not notify", async () => {
+    await runtime.turn(sessionId, "finish quietly");
+    await agent.started(1);
+    await agent.finish(0);
+    await runtime.waitForIdle(sessionId);
+    const types = (await runtime.events(sessionId)).map((event) => event.type);
+    expect(types).toContain("turn.completed");
+    expect(types).not.toContain("notification.queued");
+    expect(await store.listNotificationDeliveries()).toHaveLength(0);
+  });
   test("a turn the runtime reports as failed keeps the runtime's reason", async () => {
     const turn = await runtime.turn(sessionId, "fail please");
     await agent.started(1);

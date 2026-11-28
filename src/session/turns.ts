@@ -538,17 +538,13 @@ export class SessionTurns {
     if (finished && !this.stopping) this.deps.onTurnFinished?.(finished);
   }
 
-  /** Sends the project's turn notification. */
+  /** Sends the project's turn notification, when the project asks for one. */
   private async notifyFinished(
     entity: SessionEntity,
     turnId: string,
     status: TurnOutcome,
   ): Promise<void> {
     const { project, events, notifications } = this.deps;
-    await events.emit(entity.toRoute(), "notification.queued", "notification", {
-      kind: status,
-      turnId,
-    });
     if (!project.notifyOnTurnCompleted) return;
     await notifications.queue(
       entity.projectId,
@@ -560,6 +556,10 @@ export class SessionTurns {
         metadata: { projectId: project.id, sessionId: entity.id, turnId },
       },
     );
+    await events.emit(entity.toRoute(), "notification.queued", "notification", {
+      kind: status,
+      turnId,
+    });
   }
 
   private async finishQueued(route: SessionRoute, turn: TurnRecord): Promise<void> {
