@@ -18,7 +18,7 @@ export interface ScheduleJobRequest {
 export interface ScheduledJobsDeps {
   readonly projectId: string;
   readonly store: Store;
-  readonly turns: SessionTurns;
+  readonly turns: Pick<SessionTurns, "submit" | "waitForIdle">;
   readonly logger: Logger;
 }
 
@@ -28,6 +28,10 @@ export interface ScheduledJobsDeps {
  * one that scheduled it.
  */
 export class ScheduledJobs {
+  /** Jobs whose turn is running, by job ID. */
+  private readonly running = new Map<string, Promise<void>>();
+  /** The poll picking up due jobs; polls never overlap, so a job is picked up once. */
+  private polling: Promise<Promise<void>[]> | undefined;
   private stopped = false;
 
   constructor(private readonly deps: ScheduledJobsDeps) {}
@@ -83,13 +87,35 @@ export class ScheduledJobs {
     return jobs.length > 0;
   }
 
-  /** Runs the jobs due at `asOf`, one after another, each as a turn of its session. */
+  /**
+   * Picks up the jobs due at `asOf` and runs each as a turn of its session, and waits for them.
+   * Jobs run independently: a long turn in one session does not hold up another session's job.
+   */
   async poll(asOf: Date = new Date()): Promise<void> {
     if (this.stopped) return;
+    this.polling ??= this.pickUp(asOf).finally(() => {
+      this.polling = undefined;
+    });
+    await Promise.allSettled(await this.polling);
+  }
+
+  /** Stops polling and waits for the jobs that are running. Their turns must be able to end. */
+  async stop(): Promise<void> {
+    this.stopped = true;
+    await this.polling?.catch(() => {});
+    await Promise.allSettled([...this.running.values()]);
+  }
+
+  /** Marks the due jobs running, or abandoned, and starts the ones that run. */
+  private async pickUp(asOf: Date): Promise<Promise<void>[]> {
+    const started: Promise<void>[] = [];
     try {
       const due = await this.deps.store.listDueScheduledJobs(this.deps.projectId, asOf);
       for (const job of due) {
-        if (await this.claim(job)) await this.run(job);
+        if (!(await this.claim(job))) continue;
+        const run = this.run(job).finally(() => this.running.delete(job.jobId));
+        this.running.set(job.jobId, run);
+        started.push(run);
       }
     } catch (error) {
       this.deps.logger.error("error polling scheduled jobs", {
@@ -97,11 +123,7 @@ export class ScheduledJobs {
         error: String(error),
       });
     }
-  }
-
-  /** Stops polling. */
-  stop(): void {
-    this.stopped = true;
+    return started;
   }
 
   /** Marks a due job running, or abandoned when its session has ended or moved on. */
