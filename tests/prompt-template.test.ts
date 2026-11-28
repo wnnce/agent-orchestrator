@@ -294,15 +294,14 @@ Undefined={{vars.notConfigured}}
         path.join(root, "bases"),
       );
       const artifacts = new ArtifactStore(path.join(root, "artifacts"), store);
-      const runtime = new ProjectRuntime(
+      const runtime = new ProjectRuntime({
         project,
         store,
-        new FakeRuntime(),
+        agentRuntime: new FakeRuntime(),
         workspaces,
         artifacts,
-        undefined,
-        new Logger({ sink: () => {} }),
-      );
+        logger: new Logger({ sink: () => {} }),
+      });
 
       await runtime.start();
       try {

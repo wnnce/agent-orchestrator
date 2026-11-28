@@ -66,15 +66,14 @@ describe("global project", () => {
     const root = await mkdtemp("/tmp/session-global-");
     const store = new MemoryStore();
     const agent = new ControlledRuntime();
-    const runtime = new ProjectRuntime(
-      createGlobalProjectConfig(path.join(root, "projects"), "fake"),
+    const runtime = new ProjectRuntime({
+      project: createGlobalProjectConfig(path.join(root, "projects"), "fake"),
       store,
-      agent,
-      new WorkspaceManager(path.join(root, "workspaces")),
-      new ArtifactStore(path.join(root, "artifacts"), store),
-      undefined,
-      new Logger({ sink: () => {} }),
-    );
+      agentRuntime: agent,
+      workspaces: new WorkspaceManager(path.join(root, "workspaces")),
+      artifacts: new ArtifactStore(path.join(root, "artifacts"), store),
+      logger: new Logger({ sink: () => {} }),
+    });
     try {
       const session = await runtime.createSession();
       await runtime.turn(session.sessionId, "what projects are there?");
@@ -107,18 +106,16 @@ describe("session execution and control", () => {
       runtime: { type: "fake" },
       session: { idleTimeoutMs: 1000, archiveTimeoutMs: 2000 },
     };
-    runtime = new ProjectRuntime(
+    runtime = new ProjectRuntime({
       project,
       store,
-      agent,
-      new WorkspaceManager(path.join(root, "workspaces")),
-      new ArtifactStore(path.join(root, "artifacts"), store),
-      undefined,
-      new Logger({ sink: () => {} }),
-      undefined,
-      undefined,
-      { controlTimeoutMs: 30, queueLimit: 2 },
-    );
+      agentRuntime: agent,
+      workspaces: new WorkspaceManager(path.join(root, "workspaces")),
+      artifacts: new ArtifactStore(path.join(root, "artifacts"), store),
+      logger: new Logger({ sink: () => {} }),
+      controlTimeoutMs: 30,
+      queueLimit: 2,
+    });
     sessionId = (await runtime.createSession()).sessionId;
   });
   afterEach(async () => {

@@ -51,16 +51,14 @@ describe("Session Archive & Workspace Release (> 1 hour)", () => {
     const artifactStore = new ArtifactStore(artifactsDir, store);
     const fakeRuntime = new FakeRuntime();
 
-    const runtime = new ProjectRuntime(
+    const runtime = new ProjectRuntime({
       project,
       store,
-      fakeRuntime,
+      agentRuntime: fakeRuntime,
       workspaces,
-      artifactStore,
-      undefined,
-      undefined,
+      artifacts: artifactStore,
       eventHub,
-    );
+    });
 
     // Track emitted events
     const emittedEvents: EventRecord[] = [];

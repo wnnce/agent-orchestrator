@@ -263,15 +263,14 @@ export default [
       repository: { url: "", baseBranch: "main" },
       runtime: { type: "fake" },
     };
-    const runtime = new ProjectRuntime(
+    const runtime = new ProjectRuntime({
       project,
       store,
-      agent,
-      new WorkspaceManager(path.join(root, "workspaces")),
-      new ArtifactStore(path.join(root, "artifacts"), store),
-      undefined,
+      agentRuntime: agent,
+      workspaces: new WorkspaceManager(path.join(root, "workspaces")),
+      artifacts: new ArtifactStore(path.join(root, "artifacts"), store),
       logger,
-    );
+    });
     await runtime.start();
     cleanups.push(() => runtime.stop());
 
@@ -313,8 +312,8 @@ export default defineTool({
     );
 
     const store = new MemoryStore();
-    const runtime = new ProjectRuntime(
-      {
+    const runtime = new ProjectRuntime({
+      project: {
         id: GLOBAL_PROJECT_ID,
         displayName: "Global",
         description: "Global",
@@ -324,12 +323,11 @@ export default defineTool({
         runtime: { type: "fake" },
       },
       store,
-      new FakeRuntime(),
-      new WorkspaceManager(path.join(root, "workspaces")),
-      new ArtifactStore(path.join(root, "artifacts"), store),
-      undefined,
-      new Logger({ sink: () => {} }),
-    );
+      agentRuntime: new FakeRuntime(),
+      workspaces: new WorkspaceManager(path.join(root, "workspaces")),
+      artifacts: new ArtifactStore(path.join(root, "artifacts"), store),
+      logger: new Logger({ sink: () => {} }),
+    });
     await runtime.start();
     cleanups.push(() => runtime.stop());
 

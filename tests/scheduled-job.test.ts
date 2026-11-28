@@ -56,13 +56,13 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
 
   /** A tool context for a session of a project runtime over `store`, as the session's turn sees it. */
   function toolContext(store: MemoryStore, sessionId: string, turnId?: string) {
-    const runtime = new ProjectRuntime(
-      dummyProject,
+    const runtime = new ProjectRuntime({
+      project: dummyProject,
       store,
-      new FakeRuntime(),
-      new WorkspaceManager(path.join(tempRoot, "ws_tools"), path.join(tempRoot, "bases_tools")),
-      new ArtifactStore(path.join(tempRoot, "art_tools"), store),
-    );
+      agentRuntime: new FakeRuntime(),
+      workspaces: new WorkspaceManager(path.join(tempRoot, "ws_tools"), path.join(tempRoot, "bases_tools")),
+      artifacts: new ArtifactStore(path.join(tempRoot, "art_tools"), store),
+    });
     const origin: SessionOrigin = { kind: "session", sessionId, ...(turnId ? { turnId } : {}) };
     const { context } = runtime.createContext(origin, { signal: new AbortController().signal });
     const ctx: ToolContext = {
@@ -144,13 +144,13 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
     );
     const artifacts = new ArtifactStore(path.join(tempRoot, "art_test_jobs"), store);
 
-    const projectRuntime = new ProjectRuntime(
-      dummyProject,
+    const projectRuntime = new ProjectRuntime({
+      project: dummyProject,
       store,
-      runtime,
+      agentRuntime: runtime,
       workspaces,
       artifacts,
-    );
+    });
 
     // 1. Create active session
     const sessionRoute = await projectRuntime.createSession();
@@ -201,13 +201,13 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
     );
     const artifacts = new ArtifactStore(path.join(tempRoot, "art_test_jobs2"), store);
 
-    const projectRuntime = new ProjectRuntime(
-      dummyProject,
+    const projectRuntime = new ProjectRuntime({
+      project: dummyProject,
       store,
-      runtime,
+      agentRuntime: runtime,
       workspaces,
       artifacts,
-    );
+    });
 
     const sessionRoute = await projectRuntime.createSession();
     const sessionId = sessionRoute.sessionId;
@@ -250,13 +250,13 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
     );
     const artifacts = new ArtifactStore(path.join(tempRoot, "art_test_jobs3"), store);
 
-    const projectRuntime = new ProjectRuntime(
-      dummyProject,
+    const projectRuntime = new ProjectRuntime({
+      project: dummyProject,
       store,
-      runtime,
+      agentRuntime: runtime,
       workspaces,
       artifacts,
-    );
+    });
 
     const sessionRoute = await projectRuntime.createSession();
     const sessionId = sessionRoute.sessionId;
@@ -307,7 +307,13 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
       path.join(tempRoot, "bases_test_jobs4"),
     );
     const artifacts = new ArtifactStore(path.join(tempRoot, "art_test_jobs4"), store);
-    const projectRuntime = new ProjectRuntime(dummyProject, store, runtime, workspaces, artifacts);
+    const projectRuntime = new ProjectRuntime({
+      project: dummyProject,
+      store,
+      agentRuntime: runtime,
+      workspaces,
+      artifacts,
+    });
 
     const sessionRoute = await projectRuntime.createSession();
     const sessionId = sessionRoute.sessionId;
@@ -353,7 +359,13 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
       path.join(tempRoot, "bases_test_jobs5"),
     );
     const artifacts = new ArtifactStore(path.join(tempRoot, "art_test_jobs5"), store);
-    const projectRuntime = new ProjectRuntime(dummyProject, store, runtime, workspaces, artifacts);
+    const projectRuntime = new ProjectRuntime({
+      project: dummyProject,
+      store,
+      agentRuntime: runtime,
+      workspaces,
+      artifacts,
+    });
 
     const sessionRoute = await projectRuntime.createSession();
     const sessionId = sessionRoute.sessionId;
@@ -376,7 +388,13 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
       path.join(tempRoot, "bases_test_jobs6"),
     );
     const artifacts = new ArtifactStore(path.join(tempRoot, "art_test_jobs6"), store);
-    const projectRuntime = new ProjectRuntime(dummyProject, store, runtime, workspaces, artifacts);
+    const projectRuntime = new ProjectRuntime({
+      project: dummyProject,
+      store,
+      agentRuntime: runtime,
+      workspaces,
+      artifacts,
+    });
 
     const sessionRoute = await projectRuntime.createSession();
     const sessionId = sessionRoute.sessionId;
@@ -421,7 +439,13 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
       path.join(tempRoot, "bases_test_jobs7"),
     );
     const artifacts = new ArtifactStore(path.join(tempRoot, "art_test_jobs7"), store);
-    const projectRuntime = new ProjectRuntime(dummyProject, store, runtime, workspaces, artifacts);
+    const projectRuntime = new ProjectRuntime({
+      project: dummyProject,
+      store,
+      agentRuntime: runtime,
+      workspaces,
+      artifacts,
+    });
 
     const sessionRoute = await projectRuntime.createSession();
     const sessionId = sessionRoute.sessionId;

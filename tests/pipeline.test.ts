@@ -478,18 +478,15 @@ describe("PipelineEngine End-to-End Lifecycle, Concurrency, Durable TS Steps & F
     const runtime = new ScriptedAgentRuntime();
     const artifacts = new ArtifactStore(artifactDir, store);
     const pipelineHub = new PipelineEventHub();
-    const projectRuntime = new ProjectRuntime(
+    const projectRuntime = new ProjectRuntime({
       project,
       store,
-      runtime,
+      agentRuntime: runtime,
       workspaces,
       artifacts,
-      undefined,
       logger,
-      undefined,
-      undefined,
-      { pipelineEventHub: pipelineHub },
-    );
+      pipelineEventHub: pipelineHub,
+    });
     await projectRuntime.start();
     return {
       rootDir,

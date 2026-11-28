@@ -45,15 +45,14 @@ describe("runtime session binding", () => {
       repository: { url: "", baseBranch: "main" },
       runtime: { type: "fake" },
     };
-    runtime = new ProjectRuntime(
+    runtime = new ProjectRuntime({
       project,
       store,
-      agent,
-      new WorkspaceManager(path.join(root, "workspaces")),
-      new ArtifactStore(path.join(root, "artifacts"), store),
-      undefined,
-      new Logger({ sink: () => {} }),
-    );
+      agentRuntime: agent,
+      workspaces: new WorkspaceManager(path.join(root, "workspaces")),
+      artifacts: new ArtifactStore(path.join(root, "artifacts"), store),
+      logger: new Logger({ sink: () => {} }),
+    });
   });
 
   afterEach(async () => {

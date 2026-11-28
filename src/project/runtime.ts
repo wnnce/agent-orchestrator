@@ -106,18 +106,28 @@ interface ActiveTurn {
   completed: Promise<void>;
   resolve: () => void;
 }
-export interface SessionExecutionOptions {
-  queueLimit?: number;
-  controlTimeoutMs?: number;
-  scheduledJobPollIntervalMs?: number;
-  /** Optional lazy factory for creating additional runtimes requested at session creation time. */
-  runtimeFactory?: ((runtimeType: string) => AgentRuntime) | undefined;
-  /** Optional shared PipelineEventHub across all ProjectRuntimes. */
-  pipelineEventHub?: PipelineEventHub | undefined;
+export interface ProjectRuntimeDeps {
+  readonly project: ProjectConfig;
+  readonly store: Store;
+  /** The project's default agent runtime. */
+  readonly agentRuntime: AgentRuntime;
+  readonly workspaces: WorkspaceManager;
+  readonly artifacts: ArtifactStore;
+  readonly notifications?: NotificationOutbox | undefined;
+  readonly logger?: Logger | undefined;
+  readonly eventHub?: EventHub | undefined;
+  readonly sessionManager?: SessionManager | undefined;
+  /** Creates the other runtimes a session may ask for by type. */
+  readonly runtimeFactory?: ((runtimeType: string) => AgentRuntime) | undefined;
+  /** Shared by all projects, so pipeline event streams can span them. */
+  readonly pipelineEventHub?: PipelineEventHub | undefined;
   /** Replaces how project contexts connect to MCP servers (tests). */
-  mcpClientFactory?: McpClientFactory | undefined;
+  readonly mcpClientFactory?: McpClientFactory | undefined;
   /** Replaces the tools the project's agents are offered (tests). */
-  tools?: readonly ToolDefinition[] | undefined;
+  readonly tools?: readonly ToolDefinition[] | undefined;
+  readonly queueLimit?: number | undefined;
+  readonly controlTimeoutMs?: number | undefined;
+  readonly scheduledJobPollIntervalMs?: number | undefined;
 }
 
 function toSessionRuntimeOverride(
@@ -178,36 +188,40 @@ export class ProjectRuntime {
   readonly pipelineEventHub: PipelineEventHub;
   readonly pipelineEngine: PipelineEngine;
 
-  constructor(
-    readonly project: ProjectConfig,
-    private readonly store: Store,
-    private readonly runtime: AgentRuntime,
-    private readonly workspaces: WorkspaceManager,
-    private readonly artifactStore: ArtifactStore,
-    private readonly notifications = new NotificationOutbox(
-      store,
-      new NotificationHub(),
-    ),
-    private readonly logger = new Logger(),
-    private readonly eventHub: EventHub = new MemoryEventHub(store),
-    readonly sessionManager: SessionManager = new SessionManager(store),
-    private readonly options: SessionExecutionOptions = {},
-    private readonly inheritedSkillsProject?: ProjectConfig,
-    taskEngine?: TaskEngine,
-    taskScheduler?: TaskScheduler,
-    taskLoader?: TaskLoader,
-  ) {
-    this.taskEngine = taskEngine ?? new TaskEngine(store, logger);
-    this.taskScheduler =
-      taskScheduler ?? new TaskScheduler(this.taskEngine, logger);
-    this.taskLoader = taskLoader ?? new TaskLoader(logger);
+  readonly project: ProjectConfig;
+  readonly sessionManager: SessionManager;
+  private readonly store: Store;
+  private readonly runtime: AgentRuntime;
+  private readonly workspaces: WorkspaceManager;
+  private readonly artifactStore: ArtifactStore;
+  private readonly notifications: NotificationOutbox;
+  private readonly logger: Logger;
+  private readonly eventHub: EventHub;
+  private readonly options: ProjectRuntimeDeps;
+
+  constructor(deps: ProjectRuntimeDeps) {
+    const { project, store } = deps;
+    const logger = deps.logger ?? new Logger();
+    this.project = project;
+    this.store = store;
+    this.runtime = deps.agentRuntime;
+    this.workspaces = deps.workspaces;
+    this.artifactStore = deps.artifacts;
+    this.logger = logger;
+    this.notifications = deps.notifications ?? new NotificationOutbox(store, new NotificationHub());
+    this.eventHub = deps.eventHub ?? new MemoryEventHub(store);
+    this.sessionManager = deps.sessionManager ?? new SessionManager(store);
+    this.options = deps;
+    this.taskEngine = new TaskEngine(store, logger);
+    this.taskScheduler = new TaskScheduler(this.taskEngine, logger);
+    this.taskLoader = new TaskLoader(logger);
     // The global project only reads; its agents get no tools that act on projects.
     this.tools = new ToolRegistry(
-      options.tools ?? (project.id === GLOBAL_PROJECT_ID ? [] : builtinTools),
+      deps.tools ?? (project.id === GLOBAL_PROJECT_ID ? [] : builtinTools),
       logger,
       (record) => store.recordToolExecution(record),
     );
-    this.pipelineEventHub = options.pipelineEventHub ?? new PipelineEventHub();
+    this.pipelineEventHub = deps.pipelineEventHub ?? new PipelineEventHub();
     this.pipelineEngine = new PipelineEngine({
       project: this.project,
       store: this.store.pipelines,
@@ -455,14 +469,6 @@ export class ProjectRuntime {
         get: (query) => engine.getHistoryDetail(owner.runId, query),
       },
     };
-  }
-
-  get hub(): EventHub {
-    return this.eventHub;
-  }
-
-  getTaskExecutorRegistry(): TaskExecutorRegistry | undefined {
-    return this.taskEngine.getRegistry();
   }
 
   async start(): Promise<void> {
@@ -814,11 +820,8 @@ export class ProjectRuntime {
     }
     return entity;
   }
-  async loadSession(id: string): Promise<SessionRoute> {
-    return (await this.entity(id)).toRoute();
-  }
   async getSession(id: string): Promise<SessionRoute> {
-    return this.loadSession(id);
+    return (await this.entity(id)).toRoute();
   }
   async bindExternal(
     id: string,
@@ -1038,7 +1041,7 @@ export class ProjectRuntime {
     }
   }
   async steer(sessionId: string, input: string): Promise<void> {
-    const route = await this.loadSession(sessionId);
+    const route = await this.getSession(sessionId);
     const active = this.activeTurns.get(sessionId);
     if (!active?.runtimeId || active.settled) throw new ConflictError("no active turn");
     const runtime = this.runtimeForRoute(route);
@@ -1051,7 +1054,7 @@ export class ProjectRuntime {
   }
   async interrupt(sessionId: string, turnId?: string): Promise<void> {
     await this.admissions.get(sessionId)?.catch(() => {});
-    const route = await this.loadSession(sessionId);
+    const route = await this.getSession(sessionId);
     if (turnId && this.pendingTurns.get(sessionId)?.some(({ turn }) => turn.id === turnId)) {
       await this.cancelQueued(sessionId, turnId);
       return;
@@ -1076,7 +1079,7 @@ export class ProjectRuntime {
     );
   }
   async compact(sessionId: string): Promise<void> {
-    const route = await this.loadSession(sessionId);
+    const route = await this.getSession(sessionId);
     const active = this.activeTurns.get(sessionId);
     if (active && !active.settled) {
       throw new ConflictError("cannot compact while a turn is running");
@@ -1092,7 +1095,7 @@ export class ProjectRuntime {
     requestId: string,
     decision: ApprovalDecision,
   ): Promise<void> {
-    const route = await this.loadSession(sessionId);
+    const route = await this.getSession(sessionId);
     const runtime = this.runtimeForRoute(route);
     await runtime.respondToApproval(
       this.context(this.workspacePath(route), sessionId, route, route.owner),
@@ -1105,7 +1108,7 @@ export class ProjectRuntime {
     });
   }
   async events(sessionId: string, after = 0): Promise<EventRecord[]> {
-    await this.loadSession(sessionId);
+    await this.getSession(sessionId);
     return this.store.listEvents(sessionId, after);
   }
   /**
@@ -1116,7 +1119,7 @@ export class ProjectRuntime {
     sessionId: string,
     options: { includeInternal?: boolean } = {},
   ): Promise<ArtifactRecord[]> {
-    await this.loadSession(sessionId);
+    await this.getSession(sessionId);
     const artifacts = await this.store.listArtifacts({ kind: "session", id: sessionId });
     return options.includeInternal
       ? artifacts

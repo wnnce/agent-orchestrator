@@ -87,13 +87,13 @@ describe("fake project runtime", () => {
       if ((await process.exited) !== 0) throw new Error(await new Response(process.stderr).text());
     }
     store = new MemoryStore();
-    runtime = new ProjectRuntime(
-      { ...project, repository: { url: repo, baseBranch: "main" } },
+    runtime = new ProjectRuntime({
+      project: { ...project, repository: { url: repo, baseBranch: "main" } },
       store,
-      new FakeRuntime(),
-      new WorkspaceManager(path.join(root, "workspaces")),
-      new ArtifactStore(path.join(root, "artifacts"), store),
-    );
+      agentRuntime: new FakeRuntime(),
+      workspaces: new WorkspaceManager(path.join(root, "workspaces")),
+      artifacts: new ArtifactStore(path.join(root, "artifacts"), store),
+    });
   });
   afterEach(async () => {
     await runtime.stop();

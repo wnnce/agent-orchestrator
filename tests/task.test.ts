@@ -486,13 +486,13 @@ describe("ProjectRuntime Task Integration", () => {
       description: "Demo project",
       routing: { projectId: "demo" },
     };
-    const runtime = new ProjectRuntime(
+    const runtime = new ProjectRuntime({
       project,
       store,
-      new FakeRuntime(),
-      new WorkspaceManager("/tmp"),
-      new ArtifactStore("/tmp", store),
-    );
+      agentRuntime: new FakeRuntime(),
+      workspaces: new WorkspaceManager("/tmp"),
+      artifacts: new ArtifactStore("/tmp", store),
+    });
 
     const template = `Project: {{project.id}}
 Task: {{task.id}} (Key: {{task.key}}, Name: {{task.name}})
@@ -546,13 +546,13 @@ Clean up project {{project.id}} with state: {{state}}
 `,
     );
 
-    const runtime = new ProjectRuntime(
+    const runtime = new ProjectRuntime({
       project,
       store,
-      new FakeRuntime(),
+      agentRuntime: new FakeRuntime(),
       workspaces,
       artifacts,
-    );
+    });
 
     try {
       await runtime.start();

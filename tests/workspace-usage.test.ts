@@ -48,15 +48,14 @@ describe("session workspace usage", () => {
       undefined,
       new Logger({ sink: () => {} }),
     );
-    runtime = new ProjectRuntime(
+    runtime = new ProjectRuntime({
       project,
       store,
-      new FakeRuntime(),
+      agentRuntime: new FakeRuntime(),
       workspaces,
-      new ArtifactStore(path.join(root, "artifacts"), store),
-      undefined,
-      new Logger({ sink: () => {} }),
-    );
+      artifacts: new ArtifactStore(path.join(root, "artifacts"), store),
+      logger: new Logger({ sink: () => {} }),
+    });
   });
 
   afterEach(async () => {

@@ -464,18 +464,15 @@ export default definePipeline({
     const runtime = new InspectableScriptedRuntime();
     const artifacts = new ArtifactStore(artifactDir, store);
     const pipelineHub = new PipelineEventHub();
-    const projectRuntime = new ProjectRuntime(
+    const projectRuntime = new ProjectRuntime({
       project,
       store,
-      runtime,
+      agentRuntime: runtime,
       workspaces,
       artifacts,
-      undefined,
       logger,
-      undefined,
-      undefined,
-      { pipelineEventHub: pipelineHub },
-    );
+      pipelineEventHub: pipelineHub,
+    });
     await projectRuntime.start();
 
     try {
@@ -708,18 +705,15 @@ export default definePipeline({
     const runtime = new InspectableScriptedRuntime();
     const artifacts = new ArtifactStore(artifactDir, store);
     const pipelineHub = new PipelineEventHub();
-    const projectRuntime = new ProjectRuntime(
+    const projectRuntime = new ProjectRuntime({
       project,
       store,
-      runtime,
+      agentRuntime: runtime,
       workspaces,
       artifacts,
-      undefined,
       logger,
-      undefined,
-      undefined,
-      { pipelineEventHub: pipelineHub },
-    );
+      pipelineEventHub: pipelineHub,
+    });
     await projectRuntime.start();
 
     try {

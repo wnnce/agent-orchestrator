@@ -152,19 +152,23 @@ export class ProjectManager {
       });
 
     const runtime = createAgentRuntime(runtimeType);
-    return new ProjectRuntime(
-      effective,
-      this.store,
-      runtime,
+    return new ProjectRuntime({
+      project: effective,
+      store: this.store,
+      agentRuntime: runtime,
       workspaces,
       artifacts,
-      new NotificationOutbox(this.store, new NotificationHub(this.logger), this.logger),
-      this.logger,
-      this.eventHub,
-      this.sessionManager,
-      { runtimeFactory: createAgentRuntime, pipelineEventHub: this.pipelineEventHub },
-      project.id === GLOBAL_PROJECT_ID ? undefined : this.globalProject,
-    );
+      notifications: new NotificationOutbox(
+        this.store,
+        new NotificationHub(this.logger),
+        this.logger,
+      ),
+      logger: this.logger,
+      eventHub: this.eventHub,
+      sessionManager: this.sessionManager,
+      runtimeFactory: createAgentRuntime,
+      pipelineEventHub: this.pipelineEventHub,
+    });
   }
 }
 

@@ -54,15 +54,14 @@ describe("session titles", () => {
       repository: { url: "", baseBranch: "main" },
       runtime: { type: "fake" },
     };
-    runtime = new ProjectRuntime(
+    runtime = new ProjectRuntime({
       project,
       store,
-      new FakeRuntime(),
-      new WorkspaceManager(path.join(root, "workspaces")),
-      new ArtifactStore(path.join(root, "artifacts"), store),
-      undefined,
-      quiet,
-    );
+      agentRuntime: new FakeRuntime(),
+      workspaces: new WorkspaceManager(path.join(root, "workspaces")),
+      artifacts: new ArtifactStore(path.join(root, "artifacts"), store),
+      logger: quiet,
+    });
   });
 
   afterEach(async () => {

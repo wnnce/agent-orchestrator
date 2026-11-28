@@ -557,15 +557,14 @@ Analyze system status.
 `,
       );
 
-      const runtime = new ProjectRuntime(
-        projectConfig,
+      const runtime = new ProjectRuntime({
+        project: projectConfig,
         store,
-        new FakeRuntime(),
-        workspaceManager,
-        artifactStore,
-        undefined,
+        agentRuntime: new FakeRuntime(),
+        workspaces: workspaceManager,
+        artifacts: artifactStore,
         logger,
-      );
+      });
 
       await runtime.start();
 

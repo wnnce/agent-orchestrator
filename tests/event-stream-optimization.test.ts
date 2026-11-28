@@ -111,16 +111,14 @@ describe("Event Stream Optimization: Delta skipping & in-memory sequence", () =>
 
     store = new MemoryStore();
     eventHub = new MemoryEventHub(store);
-    runtime = new ProjectRuntime(
-      { ...project, repository: { url: repo, baseBranch: "main" } },
+    runtime = new ProjectRuntime({
+      project: { ...project, repository: { url: repo, baseBranch: "main" } },
       store,
-      new StreamingFakeRuntime(),
-      new WorkspaceManager(path.join(root, "workspaces")),
-      new ArtifactStore(path.join(root, "artifacts"), store),
-      undefined,
-      undefined,
+      agentRuntime: new StreamingFakeRuntime(),
+      workspaces: new WorkspaceManager(path.join(root, "workspaces")),
+      artifacts: new ArtifactStore(path.join(root, "artifacts"), store),
       eventHub,
-    );
+    });
   });
 
   afterEach(async () => {

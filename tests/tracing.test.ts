@@ -320,18 +320,15 @@ describe("agent turn tracing", () => {
       repository: { url: "", baseBranch: "main" },
       runtime: { type: "fake", model: "gpt-test" },
     };
-    const runtime = new ProjectRuntime(
+    const runtime = new ProjectRuntime({
       project,
       store,
-      agent,
-      new WorkspaceManager(path.join(root, "workspaces")),
-      new ArtifactStore(path.join(root, "artifacts"), store),
-      undefined,
+      agentRuntime: agent,
+      workspaces: new WorkspaceManager(path.join(root, "workspaces")),
+      artifacts: new ArtifactStore(path.join(root, "artifacts"), store),
       logger,
-      undefined,
-      undefined,
-      { tools: [echoTool] },
-    );
+      tools: [echoTool],
+    });
     cleanups.push(() => runtime.stop());
     const sessionId = (await runtime.createSession()).sessionId;
     return { runtime, agent, sessionId };
@@ -527,24 +524,20 @@ export default definePipeline({
       runtime: { type: "fake" },
     };
     const dataDir = path.join(root, "data");
-    const runtime = new ProjectRuntime(
+    const runtime = new ProjectRuntime({
       project,
       store,
-      new AdvancingRuntime(),
-      new WorkspaceManager(
+      agentRuntime: new AdvancingRuntime(),
+      workspaces: new WorkspaceManager(
         path.join(dataDir, "projects"),
         path.join(dataDir, "bases"),
         path.join(dataDir, "secrets"),
         logger,
         path.join(dataDir, "pipelines"),
       ),
-      new ArtifactStore(path.join(root, "artifacts"), store),
-      undefined,
+      artifacts: new ArtifactStore(path.join(root, "artifacts"), store),
       logger,
-      undefined,
-      undefined,
-      {},
-    );
+    });
     await runtime.start();
     cleanups.push(() => runtime.stop());
 
