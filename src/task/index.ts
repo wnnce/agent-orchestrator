@@ -6,3 +6,4 @@ export * from "./registry.ts";
 export * from "./engine.ts";
 export * from "./scheduler.ts";
 export * from "./executors/index.ts";
+export * from "./project-tasks.ts";

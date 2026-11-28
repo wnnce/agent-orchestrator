@@ -1,3 +1,4 @@
+import { ErrorCode, NotFoundError } from "../domain/errors.ts";
 import type { SessionRoute } from "../domain/types.ts";
 import type { Store } from "../persistence/store.ts";
 import { SessionEntity } from "./entity.ts";
@@ -96,6 +97,17 @@ export class SessionManager {
     } finally {
       this.loading.delete(id);
     }
+  }
+  /** The session, which must belong to `projectId`. */
+  async getOwned(id: string, projectId: string): Promise<SessionEntity> {
+    const entity = await this.getOrLoad(id);
+    if (!entity || entity.projectId !== projectId) {
+      throw new NotFoundError(
+        `session ${id} is not owned by project ${projectId}`,
+        ErrorCode.SESSION_NOT_FOUND,
+      );
+    }
+    return entity;
   }
   async remove(id: string): Promise<void> {
     const entity = this.entities.get(id);

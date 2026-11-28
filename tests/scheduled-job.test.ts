@@ -68,7 +68,7 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
     const ctx: ToolContext = {
       ...context,
       origin,
-      session: runtime["toolSession"](origin, "/tmp", context.logger),
+      session: runtime["toolSession"](origin, "/tmp"),
     };
     return { tools: runtime.tools, ctx };
   }
