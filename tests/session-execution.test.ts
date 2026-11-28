@@ -94,6 +94,7 @@ describe("session execution and control", () => {
   let root: string;
   let store: MemoryStore;
   let hub: MemoryEventHub;
+  let notificationHub: NotificationHub;
   let notifications: NotificationOutbox;
   let agent: ControlledRuntime;
   let runtime: ProjectRuntime;
@@ -103,7 +104,8 @@ describe("session execution and control", () => {
     store = new MemoryStore();
     hub = new MemoryEventHub(store);
     const logger = new Logger({ sink: () => {} });
-    notifications = new NotificationOutbox(store, new NotificationHub(logger), logger);
+    notificationHub = new NotificationHub(logger);
+    notifications = new NotificationOutbox(store, notificationHub, logger);
     agent = new ControlledRuntime();
     const project: ProjectConfig = {
       id: "execution",
@@ -251,6 +253,53 @@ describe("session execution and control", () => {
     } finally {
       drain.mockRestore();
       stop.mockRestore();
+    }
+  });
+  test("shutdown waits for pending notifications before returning a turn settlement error", async () => {
+    const delivery = Promise.withResolvers<void>();
+    notificationHub.register({ type: "log", send: () => delivery.promise });
+    runtime.project.notifyOnTurnCompleted = true;
+    runtime.project.notifications = [{ type: "log", name: "completion" }];
+    const completed = await runtime.turns.submit(sessionId, "finish before shutdown");
+    await agent.started(1);
+    await agent.finish(0);
+    await runtime.turns.waitForIdle(sessionId);
+    await runtime.turns.submit(sessionId, "keep running until shutdown");
+    await agent.started(2);
+
+    const settlementError = new Error("failed to persist turn settlement");
+    const updateTurn = store.updateTurn.bind(store);
+    const update = spyOn(store, "updateTurn").mockImplementation(async (id, patch) => {
+      if (patch.status === "failed") throw settlementError;
+      await updateTurn(id, patch);
+    });
+    const draining = Promise.withResolvers<void>();
+    const drainOutbox = notifications.drain.bind(notifications);
+    const drain = spyOn(notifications, "drain").mockImplementation(() => {
+      draining.resolve();
+      return drainOutbox();
+    });
+    const shutdown = runtime.stop().catch(async (error: unknown) => ({
+      error,
+      deliveries: await store.listNotificationDeliveries(),
+    }));
+    try {
+      const first = await Promise.race([
+        draining.promise.then(() => "draining"),
+        shutdown.then(() => "stopped"),
+      ]);
+      expect(first).toBe("draining");
+      delivery.resolve();
+      const result = await shutdown;
+      expect(result?.error).toBe(settlementError);
+      expect(result?.deliveries).toMatchObject([
+        { status: "sent", message: { metadata: { turnId: completed.id } } },
+      ]);
+    } finally {
+      delivery.resolve();
+      await shutdown;
+      drain.mockRestore();
+      update.mockRestore();
     }
   });
   test("a turn the runtime reports as failed keeps the runtime's reason", async () => {
