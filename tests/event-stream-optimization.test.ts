@@ -145,14 +145,14 @@ describe("Event Stream Optimization: Delta skipping & in-memory sequence", () =>
   });
 
   it("broadcasts delta events to eventHub with increasing sequences but skips database persistence", async () => {
-    const route = await runtime.createSession();
+    const route = await runtime.sessions.create();
     const receivedHubEvents: EventRecord[] = [];
     const unsub = eventHub.subscribeSession(route.sessionId, (evt) => {
       receivedHubEvents.push(evt);
     });
 
     try {
-      await runtime.turn(route.sessionId, "Say hello");
+      await runtime.turns.submit(route.sessionId, "Say hello");
 
       // Wait for turn completion
       let completed = false;

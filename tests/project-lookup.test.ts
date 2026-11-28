@@ -42,7 +42,7 @@ describe("ProjectManager lookups", () => {
   afterAll(() => manager.stop());
 
   it("finds the runtime of the project that owns a session", async () => {
-    const session = await manager.get(project.id).createSession();
+    const session = await manager.get(project.id).sessions.create();
     const runtime = await manager.runtimeForSession(session.sessionId);
     expect(runtime.project.id).toBe(project.id);
   });
@@ -59,16 +59,18 @@ describe("ProjectManager lookups", () => {
 
   it("leaves internal artifacts out of a session's artifacts unless asked", async () => {
     const runtime = manager.get(project.id);
-    const session = await runtime.createSession();
+    const session = await runtime.sessions.create();
     await store.addArtifact(artifact("art_report", session.sessionId, "report"));
     await store.addArtifact(artifact("art_message", session.sessionId, "agent-message"));
 
-    const visible = await runtime.listArtifacts(session.sessionId);
+    const visible = await runtime.sessions.artifacts(session.sessionId);
     expect(visible.map((item) => item.id)).toEqual(["art_report"]);
-    const all = await runtime.listArtifacts(session.sessionId, { includeInternal: true });
+    const all = await runtime.sessions.artifacts(session.sessionId, { includeInternal: true });
     expect(all.map((item) => item.id).sort()).toEqual(["art_message", "art_report"]);
     // Internal artifacts can still be fetched by id.
-    expect((await runtime.artifact(session.sessionId, "art_message")).kind).toBe("agent-message");
+    expect((await runtime.sessions.artifact(session.sessionId, "art_message")).kind).toBe(
+      "agent-message",
+    );
   });
 });
 

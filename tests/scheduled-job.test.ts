@@ -68,7 +68,7 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
     const ctx: ToolContext = {
       ...context,
       origin,
-      session: runtime["toolSession"](origin, "/tmp"),
+      session: runtime.agentTools.session(origin, "/tmp"),
     };
     return { tools: runtime.tools, ctx };
   }
@@ -135,7 +135,7 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
     expect(all[0]?.status).toBe(ScheduledJobStatus.CANCELLED);
   });
 
-  test("pollScheduledJobs triggers turn when due and transitions to status 0 (COMPLETED) upon turn finish", async () => {
+  test("polling triggers a turn when due and transitions to status 0 (COMPLETED) upon turn finish", async () => {
     const store = new MemoryStore();
     const runtime = new FakeRuntime();
     const workspaces = new WorkspaceManager(
@@ -153,12 +153,12 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
     });
 
     // 1. Create active session
-    const sessionRoute = await projectRuntime.createSession();
+    const sessionRoute = await projectRuntime.sessions.create();
     const sessionId = sessionRoute.sessionId;
 
     // 2. Initial turn
-    const turn1 = await projectRuntime.turn(sessionId, "帮我准备测试环境");
-    await projectRuntime.waitForIdle(sessionId);
+    const turn1 = await projectRuntime.turns.submit(sessionId, "帮我准备测试环境");
+    await projectRuntime.turns.waitForIdle(sessionId);
 
     // 3. Schedule delayed job (10 minutes)
     const triggerAt = new Date(Date.now() + 10 * 60_000).toISOString();
@@ -177,7 +177,7 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
 
     // 4. Poll when due (now + 11m)
     const asOf = new Date(Date.now() + 11 * 60_000);
-    await projectRuntime.pollScheduledJobs(asOf);
+    await projectRuntime.scheduledJobs.poll(asOf);
 
     // 5. Verify status transitioned to COMPLETED (0)
     const finishedJob = store.scheduledJobs.get("job_success_test");
@@ -192,7 +192,7 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
     await projectRuntime.stop();
   });
 
-  test("Defense 1: pollScheduledJobs abandons job (status 4) if session has been closed or archived", async () => {
+  test("Defense 1: polling abandons job (status 4) if session has been closed or archived", async () => {
     const store = new MemoryStore();
     const runtime = new FakeRuntime();
     const workspaces = new WorkspaceManager(
@@ -209,7 +209,7 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
       artifacts,
     });
 
-    const sessionRoute = await projectRuntime.createSession();
+    const sessionRoute = await projectRuntime.sessions.create();
     const sessionId = sessionRoute.sessionId;
 
     // Create scheduled job
@@ -227,11 +227,11 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
     });
 
     // Active session cleanup
-    await projectRuntime.cleanupSession(sessionId);
+    await projectRuntime.sessions.close(sessionId);
 
     // Poll when due
     const asOf = new Date(Date.now() + 15 * 60_000);
-    await projectRuntime.pollScheduledJobs(asOf);
+    await projectRuntime.scheduledJobs.poll(asOf);
 
     // Verify job abandoned with reason session_closed
     const job = store.scheduledJobs.get("job_abandon_close");
@@ -241,7 +241,7 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
     await projectRuntime.stop();
   });
 
-  test("Defense 2: pollScheduledJobs abandons job (status 4) if session progressed with a newer turn", async () => {
+  test("Defense 2: polling abandons job (status 4) if session progressed with a newer turn", async () => {
     const store = new MemoryStore();
     const runtime = new FakeRuntime();
     const workspaces = new WorkspaceManager(
@@ -258,12 +258,12 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
       artifacts,
     });
 
-    const sessionRoute = await projectRuntime.createSession();
+    const sessionRoute = await projectRuntime.sessions.create();
     const sessionId = sessionRoute.sessionId;
 
     // Turn 1
-    const turn1 = await projectRuntime.turn(sessionId, "第一轮对话");
-    await projectRuntime.waitForIdle(sessionId);
+    const turn1 = await projectRuntime.turns.submit(sessionId, "第一轮对话");
+    await projectRuntime.turns.waitForIdle(sessionId);
 
     // Schedule 10 minute reminder during Turn 1
     await store.createScheduledJob({
@@ -280,12 +280,12 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
     });
 
     // User sends Turn 2 before timer expires
-    const turn2 = await projectRuntime.turn(sessionId, "第二轮新指令：别管刚才的事了，先看这个新需求");
-    await projectRuntime.waitForIdle(sessionId);
+    const turn2 = await projectRuntime.turns.submit(sessionId, "第二轮新指令：别管刚才的事了，先看这个新需求");
+    await projectRuntime.turns.waitForIdle(sessionId);
 
     // Poll 10 minutes later
     const asOf = new Date(Date.now() + 15 * 60_000);
-    await projectRuntime.pollScheduledJobs(asOf);
+    await projectRuntime.scheduledJobs.poll(asOf);
 
     // Verify stale reminder is marked ABANDONED (4)
     const job = store.scheduledJobs.get("job_stale_turn");
@@ -315,7 +315,7 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
       artifacts,
     });
 
-    const sessionRoute = await projectRuntime.createSession();
+    const sessionRoute = await projectRuntime.sessions.create();
     const sessionId = sessionRoute.sessionId;
     const triggerAt = new Date(Date.now() + 10 * 60_000).toISOString();
     await store.createScheduledJob({
@@ -335,14 +335,14 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
     entity.touch(new Date(Date.now() - 2 * 60 * 60_000).toISOString());
     await projectRuntime.sessionManager.save(sessionId);
 
-    await projectRuntime.checkLifecycles();
+    await projectRuntime.sessions.sweepIdle();
 
     expect((await store.getSession(sessionId))?.status).toBe("suspended");
     expect(store.scheduledJobs.get("job_pending_keepalive")?.status).toBe(
       ScheduledJobStatus.PENDING,
     );
 
-    await projectRuntime.pollScheduledJobs(new Date(Date.now() + 11 * 60_000));
+    await projectRuntime.scheduledJobs.poll(new Date(Date.now() + 11 * 60_000));
     expect(store.scheduledJobs.get("job_pending_keepalive")?.status).toBe(
       ScheduledJobStatus.COMPLETED,
     );
@@ -367,13 +367,13 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
       artifacts,
     });
 
-    const sessionRoute = await projectRuntime.createSession();
+    const sessionRoute = await projectRuntime.sessions.create();
     const sessionId = sessionRoute.sessionId;
     const entity = projectRuntime.sessionManager.get(sessionId)!;
     entity.touch(new Date(Date.now() - 2 * 60 * 60_000).toISOString());
     await projectRuntime.sessionManager.save(sessionId);
 
-    await projectRuntime.checkLifecycles();
+    await projectRuntime.sessions.sweepIdle();
 
     expect((await store.getSession(sessionId))?.status).toBe("archived");
 
@@ -396,7 +396,7 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
       artifacts,
     });
 
-    const sessionRoute = await projectRuntime.createSession();
+    const sessionRoute = await projectRuntime.sessions.create();
     const sessionId = sessionRoute.sessionId;
     const staleAt = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
     await store.createScheduledJob({
@@ -415,17 +415,17 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
     const entity = projectRuntime.sessionManager.get(sessionId)!;
     entity.touch(staleAt);
     await projectRuntime.sessionManager.save(sessionId);
-    await projectRuntime.checkLifecycles();
+    await projectRuntime.sessions.sweepIdle();
     expect((await store.getSession(sessionId))?.status).toBe("suspended");
 
-    await projectRuntime.pollScheduledJobs(new Date(Date.now() + 11 * 60_000));
+    await projectRuntime.scheduledJobs.poll(new Date(Date.now() + 11 * 60_000));
     expect(store.scheduledJobs.get("job_completed_cleanup")?.status).toBe(
       ScheduledJobStatus.COMPLETED,
     );
 
     entity.touch(staleAt);
     await projectRuntime.sessionManager.save(sessionId);
-    await projectRuntime.checkLifecycles();
+    await projectRuntime.sessions.sweepIdle();
     expect((await store.getSession(sessionId))?.status).toBe("archived");
 
     await projectRuntime.stop();
@@ -447,7 +447,7 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
       artifacts,
     });
 
-    const sessionRoute = await projectRuntime.createSession();
+    const sessionRoute = await projectRuntime.sessions.create();
     const sessionId = sessionRoute.sessionId;
     const staleAt = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
     await store.createScheduledJob({
@@ -466,13 +466,13 @@ describe("Session-Only Delayed Trigger / ScheduledJob (Minute-Level Delayed Queu
     const entity = projectRuntime.sessionManager.get(sessionId)!;
     entity.touch(staleAt);
     await projectRuntime.sessionManager.save(sessionId);
-    await projectRuntime.checkLifecycles();
+    await projectRuntime.sessions.sweepIdle();
     expect((await store.getSession(sessionId))?.status).toBe("suspended");
 
     expect(await store.cancelScheduledJob(sessionId, "cancelled_cleanup")).toBe(true);
     entity.touch(staleAt);
     await projectRuntime.sessionManager.save(sessionId);
-    await projectRuntime.checkLifecycles();
+    await projectRuntime.sessions.sweepIdle();
     expect((await store.getSession(sessionId))?.status).toBe("archived");
 
     await projectRuntime.stop();

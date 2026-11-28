@@ -70,28 +70,28 @@ describe("session titles", () => {
   });
 
   test("a new session has no title until one is generated", async () => {
-    const session = await runtime.createSession();
+    const session = await runtime.sessions.create();
     expect(session.title).toBeUndefined();
-    await runtime.setGeneratedTitle(session.sessionId, "Generated");
+    await runtime.sessions.setGeneratedTitle(session.sessionId, "Generated");
     expect((await store.getSession(session.sessionId))?.title).toBe("Generated");
   });
 
   test("a generated title never replaces one the user chose", async () => {
-    const session = await runtime.createSession();
-    await runtime.renameSession(session.sessionId, "Mine");
-    await runtime.setGeneratedTitle(session.sessionId, "Generated");
+    const session = await runtime.sessions.create();
+    await runtime.sessions.rename(session.sessionId, "Mine");
+    await runtime.sessions.setGeneratedTitle(session.sessionId, "Generated");
     expect((await store.getSession(session.sessionId))?.title).toBe("Mine");
-    const renamed = (await runtime.events(session.sessionId)).filter(
+    const renamed = (await runtime.sessions.events(session.sessionId)).filter(
       (e) => e.type === "session.renamed",
     );
     expect(renamed).toHaveLength(1);
   });
 
   test("saving session state does not touch the title", async () => {
-    const session = await runtime.createSession();
+    const session = await runtime.sessions.create();
     await store.updateSessionTitle(session.sessionId, "Set elsewhere");
-    await runtime.turn(session.sessionId, "hello");
-    await runtime.waitForIdle(session.sessionId);
+    await runtime.turns.submit(session.sessionId, "hello");
+    await runtime.turns.waitForIdle(session.sessionId);
     expect((await store.getSession(session.sessionId))?.title).toBe("Set elsewhere");
   });
 });

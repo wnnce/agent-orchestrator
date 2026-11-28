@@ -41,7 +41,7 @@ export class ProjectStats {
       async () => {
         const [snapshot, tasks] = await Promise.all([
           this.deps.store.getProjectOverview(projectId, { limit: options.limit }),
-          runtime.listTasks(),
+          runtime.tasks.list(),
         ]);
         return {
           generatedAt: new Date().toISOString(),

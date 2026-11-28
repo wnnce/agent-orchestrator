@@ -192,8 +192,8 @@ describe("dynamic session runtime, model, and reasoningEffort selection", () => 
     });
 
     const projectRt = manager.get("demo");
-    await projectRt.turn(created.session.sessionId, "ping claude");
-    await projectRt.waitForIdle(created.session.sessionId);
+    await projectRt.turns.submit(created.session.sessionId, "ping claude");
+    await projectRt.turns.waitForIdle(created.session.sessionId);
 
     expect(claudeMock.turnContexts).toHaveLength(1);
     expect(claudeMock.turnContexts[0]?.project.runtime).toMatchObject({
@@ -252,8 +252,8 @@ describe("dynamic session runtime, model, and reasoningEffort selection", () => 
     });
 
     const projectRt = manager.get("demo");
-    await projectRt.turn("ses_persisted_claude", "resume me");
-    await projectRt.waitForIdle("ses_persisted_claude");
+    await projectRt.turns.submit("ses_persisted_claude", "resume me");
+    await projectRt.turns.waitForIdle("ses_persisted_claude");
 
     expect(claudeMock.resumedContexts).toHaveLength(1);
     expect(claudeMock.resumedContexts[0]?.id).toBe("claude-sess-42");
@@ -262,7 +262,7 @@ describe("dynamic session runtime, model, and reasoningEffort selection", () => 
       model: "claude-sonnet-5-5",
       reasoningEffort: "medium",
     });
-    const events = await projectRt.events("ses_persisted_claude");
+    const events = await projectRt.sessions.events("ses_persisted_claude");
     expect(events.some((e) => e.type === "session.runtime_reset")).toBe(false);
   });
 
@@ -302,9 +302,9 @@ Triage open issues for {{project.id}}.
     });
 
     // Trigger task execution and wait for completion
-    const queued = await projectRt.runTask("issue-triage");
+    const queued = await projectRt.tasks.run("issue-triage");
     expect(queued).toBe(true);
-    await projectRt.taskEngine.drain();
+    await projectRt.tasks.engine.drain();
 
     // Task session must have run on claude with overridden model & effort
     expect(claudeMock.startedContexts).toHaveLength(1);
@@ -331,7 +331,7 @@ Triage open issues for {{project.id}}.
     });
     expect(dispatchRes.ok).toBe(true);
     const dispatchedSessionId = (dispatchRes.data as { sessionId: string }).sessionId;
-    await projectRt.waitForIdle(dispatchedSessionId);
+    await projectRt.turns.waitForIdle(dispatchedSessionId);
 
     // Dispatched session MUST follow project default config (codex / gpt-5.6-terra / high)
     const dispatchedSession = await store.getSession(dispatchedSessionId);
@@ -379,8 +379,8 @@ Run on claude default model.
 `,
     );
 
-    await projectRt.runTask("model-only");
-    await projectRt.taskEngine.drain();
+    await projectRt.tasks.run("model-only");
+    await projectRt.tasks.engine.drain();
 
     expect(codexMock.startedContexts).toHaveLength(1);
     expect(codexMock.startedContexts[0]?.project.runtime).toMatchObject({
@@ -389,8 +389,8 @@ Run on claude default model.
       reasoningEffort: "low",
     });
 
-    await projectRt.runTask("runtime-only");
-    await projectRt.taskEngine.drain();
+    await projectRt.tasks.run("runtime-only");
+    await projectRt.tasks.engine.drain();
 
     expect(claudeMock.startedContexts).toHaveLength(1);
     expect(claudeMock.startedContexts[0]?.project.runtime?.type).toBe("claude");

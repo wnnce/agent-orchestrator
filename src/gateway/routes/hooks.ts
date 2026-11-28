@@ -26,7 +26,7 @@ export function createHooksRouter(deps: HooksRouteDeps): OpenAPIHono {
   router.all("/hooks/:projectId/:hookId", async (c) => {
     const { projectId, hookId } = c.req.param();
     try {
-      const response = await deps.projects.get(projectId).handleHook(hookId, c.req.raw);
+      const response = await deps.projects.get(projectId).hooks.handle(hookId, c.req.raw);
       // Rebuilt through the context so headers set by middleware (trace and request IDs) stay.
       return c.newResponse(response.body, response);
     } catch (error) {

@@ -83,15 +83,15 @@ describe("InboundService", () => {
 
   it("undoes the reply and releases the message when submitting fails", async () => {
     const runtime = projects.get(project.id);
-    const turn = runtime.turn.bind(runtime);
-    runtime.turn = async () => {
+    const turn = runtime.turns.submit.bind(runtime.turns);
+    runtime.turns.submit = async () => {
       throw new Error("admission failed");
     };
     const failing = message("conv-b", "hello");
     try {
       await expect(inbound.handle(failing)).rejects.toThrow("admission failed");
     } finally {
-      runtime.turn = turn;
+      runtime.turns.submit = turn;
     }
     expect(channel.undone).toEqual([failing.messageId]);
     expect(store.inboundMessages.has(failing.messageId)).toBe(false);
@@ -115,7 +115,7 @@ describe("InboundService", () => {
   it("closes the conversation's session on /close", async () => {
     const opened = await inbound.handle(message("conv-c", "hello"));
     const sessionId = opened.session!.sessionId;
-    await projects.get(project.id).waitForIdle(sessionId);
+    await projects.get(project.id).turns.waitForIdle(sessionId);
 
     const closed = await inbound.handle(message("conv-c", "/close"));
     expect(closed.command).toBe("close");

@@ -639,7 +639,7 @@ export default definePipeline({
     });
 
     try {
-      const started = await env.projectRuntime.pipelineEngine.startRun({
+      const started = await env.projectRuntime.pipelines.startRun({
         pipelineId: "delivery",
         title: "Build Feature X",
         externalKey: "ISSUE-101",
@@ -663,11 +663,11 @@ export default definePipeline({
       const visibleSessions = await env.store.listSessions("demo");
       expect(visibleSessions).toHaveLength(0);
 
-      const designDetail = await env.projectRuntime.pipelineEngine.getRunDetail(runId);
+      const designDetail = await env.projectRuntime.pipelines.getRunDetail(runId);
       const designSessionId = designDetail.nodeRuns[0]!.sessionId!;
 
       // 2. Interactive user follow-up chat during waiting_confirmation (must NOT nag!)
-      const followUpTurn = await env.projectRuntime.turn(
+      const followUpTurn = await env.projectRuntime.turns.submit(
         designSessionId,
         "Can you clarify edge case #2?",
       );
@@ -684,7 +684,7 @@ export default definePipeline({
       expect(designPrompts).toHaveLength(2);
 
       // 3. Approve design -> runs implement -> review (prev) -> implement #2 -> review #2 (loop breaker!)
-      await env.projectRuntime.pipelineEngine.approveRun(runId, {
+      await env.projectRuntime.pipelines.approveRun(runId, {
         humanNote: "Looks great, proceed",
       });
 
@@ -692,7 +692,7 @@ export default definePipeline({
       const archivedDesign = await env.store.getSession(designSessionId);
       expect(archivedDesign?.status).toBe("archived");
       expect(existsSync(atDesign.workspacePath!)).toBe(true);
-      await expect(env.projectRuntime.turn(designSessionId, "too late")).rejects.toThrow(
+      await expect(env.projectRuntime.turns.submit(designSessionId, "too late")).rejects.toThrow(
         "archived",
       );
 
@@ -709,7 +709,7 @@ export default definePipeline({
       }
 
       // 4. Human overrides circuit breaker by approving review -> lands on human release_gate
-      await env.projectRuntime.pipelineEngine.approveRun(runId);
+      await env.projectRuntime.pipelines.approveRun(runId);
       const atHumanGate = await waitFor(async () => {
         const r = await env.store.pipelines.getRun(runId);
         return r?.currentNodeId === "release_gate" && r.status === "waiting_confirmation"
@@ -719,7 +719,7 @@ export default definePipeline({
       expect(atHumanGate.currentNodeId).toBe("release_gate");
 
       // 5. Human approves release_gate -> enters TS node `ci` which runs step + suspends in waitUntil
-      await env.projectRuntime.pipelineEngine.approveRun(runId);
+      await env.projectRuntime.pipelines.approveRun(runId);
       const atCiWaiting = await waitFor(async () => {
         const r = await env.store.pipelines.getRun(runId);
         return r?.currentNodeId === "ci" && r.status === "waiting" ? r : undefined;
@@ -732,7 +732,7 @@ export default definePipeline({
       ciState.ready = true;
       await writeFile(ciStateFile, JSON.stringify(ciState), "utf8");
 
-      const signalRes = await env.projectRuntime.pipelineEngine.signalRun(runId);
+      const signalRes = await env.projectRuntime.pipelines.signalRun(runId);
       expect(signalRes.woken).toBe(true);
 
       // 6. Wait for terminal node `done` to auto-complete and clean up shared worktree
@@ -749,9 +749,9 @@ export default definePipeline({
       expect(finalCiState.stepExecutions).toBe(1);
 
       // Confirm TS node logs persisted monotonically across suspend/replay
-      const finalDetail = await env.projectRuntime.pipelineEngine.getRunDetail(runId);
+      const finalDetail = await env.projectRuntime.pipelines.getRunDetail(runId);
       const ciNodeRun = finalDetail.nodeRuns.find((n) => n.nodeId === "ci")!;
-      const logs = await env.projectRuntime.pipelineEngine.listNodeRunLogs(ciNodeRun.nodeRunId);
+      const logs = await env.projectRuntime.pipelines.listNodeRunLogs(ciNodeRun.nodeRunId);
       expect(logs.length).toBeGreaterThanOrEqual(2);
       expect(logs.map((l) => l.sequence)).toEqual([1, 2]);
 
@@ -784,7 +784,7 @@ export default definePipeline({
     });
 
     try {
-      const { run } = await env.projectRuntime.pipelineEngine.startRun({
+      const { run } = await env.projectRuntime.pipelines.startRun({
         pipelineId: "delivery",
         title: "Fallback Run",
       });
@@ -794,7 +794,7 @@ export default definePipeline({
       });
       expect(paused.statusSummary).toContain("did not invoke a pipeline action");
 
-      const actions = await env.projectRuntime.pipelineEngine.listRunActions(run.runId);
+      const actions = await env.projectRuntime.pipelines.listRunActions(run.runId);
       expect(actions).toHaveLength(1);
       expect(actions[0]?.action).toBe("system_fallback");
       expect(actions[0]?.context.content).toBe("Still forgot to call tool #2");
@@ -849,7 +849,7 @@ export default definePipeline({
     const env = await createTestProjectRuntime({ pipelineCode, tsHandlerCode });
     try {
       // 1. Run fails on first attempt AFTER caching step("side-effect")
-      const { run } = await env.projectRuntime.pipelineEngine.startRun({
+      const { run } = await env.projectRuntime.pipelines.startRun({
         pipelineId: "delivery",
         title: "Retryable Run",
       });
@@ -866,7 +866,7 @@ export default definePipeline({
         JSON.stringify({ stepCount: 1, shouldFail: false, ready: false }),
         "utf8",
       );
-      await env.projectRuntime.pipelineEngine.retryRun(run.runId, { preserveStepState: true });
+      await env.projectRuntime.pipelines.retryRun(run.runId, { preserveStepState: true });
       await waitFor(async () => {
         const r = await env.store.pipelines.getRun(run.runId);
         return r?.status === "waiting" ? r : undefined;
@@ -874,7 +874,7 @@ export default definePipeline({
       expect(JSON.parse(await Bun.file(stepLogFile).text()).stepCount).toBe(1);
 
       // 3. Simulate process restart: spin up a brand new PipelineEngine backed by the same Store
-      await env.projectRuntime.pipelineEngine.stop();
+      await env.projectRuntime.pipelines.stop();
 
       // Also leave a node `running`, as a crash would: restart recovery must mark it failed
       const now = new Date().toISOString();
@@ -1031,9 +1031,9 @@ export default defineTask({
 `;
     const env = await createTestProjectRuntime({ pipelineCode, tsTaskCode });
     try {
-      const dispatched = await env.projectRuntime.runTask("scan");
+      const dispatched = await env.projectRuntime.tasks.run("scan");
       expect(dispatched).toBe(true);
-      await env.projectRuntime.taskEngine.drain();
+      await env.projectRuntime.tasks.engine.drain();
       const executions = await env.store.listTaskExecutions("demo:scan", 5, "demo");
       expect(executions).toHaveLength(1);
       expect(executions[0]?.status).toBe("success");
@@ -1076,7 +1076,7 @@ export default definePipeline({
 `;
     const env = await createTestProjectRuntime({ pipelineCode, pipelineId: "context-flow" });
     try {
-      const { run } = await env.projectRuntime.pipelineEngine.startRun({
+      const { run } = await env.projectRuntime.pipelines.startRun({
         pipelineId: "context-flow",
         title: "Weekly",
       });
@@ -1085,7 +1085,7 @@ export default definePipeline({
         return latest?.status === "completed" ? latest : undefined;
       });
       const [record] = (
-        await env.projectRuntime.pipelineEngine.listRunActions(done.runId, {})
+        await env.projectRuntime.pipelines.listRunActions(done.runId, {})
       ).filter((r) => r.action === "pipeline_next");
       expect(record?.context.summary).toBe("Weekly on demo by report");
       const nodeRunId = record?.context.metadata?.nodeRunId as string;
@@ -1130,13 +1130,13 @@ export default definePipeline({
     });
 
     try {
-      const r1 = await env.projectRuntime.pipelineEngine.startRun({
+      const r1 = await env.projectRuntime.pipelines.startRun({
         pipelineId: "delivery",
         title: "Run 1",
       });
       await firstTurnStarted;
 
-      const r2 = await env.projectRuntime.pipelineEngine.startRun({
+      const r2 = await env.projectRuntime.pipelines.startRun({
         pipelineId: "delivery",
         title: "Run 2",
       });
@@ -1176,7 +1176,7 @@ export default definePipeline({
     });
     env.runtime.enqueueTurnHandler(async () => "Answering the question");
     try {
-      const { run } = await env.projectRuntime.pipelineEngine.startRun({
+      const { run } = await env.projectRuntime.pipelines.startRun({
         pipelineId: "delivery",
         title: "Chat during approval",
       });
@@ -1184,13 +1184,13 @@ export default definePipeline({
         const r = await env.store.pipelines.getRun(run.runId);
         return r?.status === "waiting_confirmation" ? r : undefined;
       });
-      const { nodeRuns } = await env.projectRuntime.pipelineEngine.getRunDetail(run.runId);
+      const { nodeRuns } = await env.projectRuntime.pipelines.getRunDetail(run.runId);
       const sessionId = nodeRuns[0]!.sessionId!;
 
       // A chat turn and an approval of the same node, at the same time
       const settled = Promise.allSettled([
-        env.projectRuntime.turn(sessionId, "One more question?"),
-        env.projectRuntime.pipelineEngine.approveRun(run.runId),
+        env.projectRuntime.turns.submit(sessionId, "One more question?"),
+        env.projectRuntime.pipelines.approveRun(run.runId),
       ]);
       const [, approval] = await Promise.race([
         settled,
@@ -1234,7 +1234,7 @@ export default definePipeline({
 });
 `;
     const env = await createTestProjectRuntime({ pipelineCode });
-    const engine = env.projectRuntime.pipelineEngine;
+    const engine = env.projectRuntime.pipelines;
     try {
       const runs = await Promise.all(
         [1, 2, 3].map((i) => engine.startRun({ pipelineId: "delivery", title: `Run ${i}` })),
@@ -1280,7 +1280,7 @@ export default definePipeline({
 });
 `;
     const env = await createTestProjectRuntime({ pipelineCode });
-    const engine = env.projectRuntime.pipelineEngine;
+    const engine = env.projectRuntime.pipelines;
     const pipelines = env.store.pipelines;
     try {
       const first = await engine.startRun({ pipelineId: "delivery", title: "Running" });
@@ -1329,7 +1329,7 @@ export default definePipeline({
 });
 `;
     const env = await createTestProjectRuntime({ pipelineCode });
-    const engine = env.projectRuntime.pipelineEngine;
+    const engine = env.projectRuntime.pipelines;
     const scheduler = engine["scheduler"];
     let refreshes = 0;
     const refresh = scheduler.refresh.bind(scheduler);
@@ -1376,7 +1376,7 @@ export default definePipeline({
 });
 `;
     const env = await createTestProjectRuntime({ pipelineCode });
-    const engine = env.projectRuntime.pipelineEngine;
+    const engine = env.projectRuntime.pipelines;
     try {
       const first = await engine.startRun({ pipelineId: "delivery", title: "First" });
       const failed = await waitFor(async () => {
@@ -1408,7 +1408,7 @@ export default definePipeline({
 });
 `;
     const env = await createTestProjectRuntime({ pipelineCode });
-    const engine = env.projectRuntime.pipelineEngine;
+    const engine = env.projectRuntime.pipelines;
     env.runtime.enqueueTurnHandler(async ({ callAction }) => {
       await callAction("pipeline_fail", { reason: "blocked" });
     });
@@ -1431,7 +1431,7 @@ export default definePipeline({
           context: { summary: "sneaky", content: "skip the retry" },
         }),
       ).rejects.toBeInstanceOf(PipelineConflictError);
-      await expect(env.projectRuntime.turn(sessionId, "hello?")).rejects.toThrow("archived");
+      await expect(env.projectRuntime.turns.submit(sessionId, "hello?")).rejects.toThrow("archived");
       expect((await env.store.pipelines.getRun(run.runId))?.status).toBe("failed");
 
       await engine.retryRun(run.runId);
@@ -1473,7 +1473,7 @@ export default definePipeline({
 });
 `;
     const env = await createTestProjectRuntime({ pipelineCode });
-    const engine = env.projectRuntime.pipelineEngine;
+    const engine = env.projectRuntime.pipelines;
     try {
       const { run } = await engine.startRun({ pipelineId: "delivery", title: "Undefined step" });
       await waitFor(async () => {
@@ -1512,7 +1512,7 @@ export default definePipeline({
 });
 `;
     const env = await createTestProjectRuntime({ pipelineCode: makePipeline("auto") });
-    const engine = env.projectRuntime.pipelineEngine;
+    const engine = env.projectRuntime.pipelines;
     try {
       expect(engine.getCurrentVersion("delivery")).toBe(1);
       await writeFile(path.join(env.projectDir, "pipelines", "delivery.ts"), makePipeline("manual"));

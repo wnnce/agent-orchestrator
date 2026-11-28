@@ -278,8 +278,8 @@ export default [
     );
 
     const projectRt = manager.get("demo");
-    await projectRt.runTask("bulk-log");
-    await projectRt.taskEngine.drain();
+    await projectRt.tasks.run("bulk-log");
+    await projectRt.tasks.engine.drain();
 
     const execs = await store.listTaskExecutions("demo:bulk-log", 5);
     expect(execs).toHaveLength(1);
@@ -314,8 +314,8 @@ export default [
     expect(warnData.hasMore).toBe(false);
 
     // Failed execution must still flush logs written before throwing
-    await projectRt.runTask("fail-with-logs");
-    await projectRt.taskEngine.drain();
+    await projectRt.tasks.run("fail-with-logs");
+    await projectRt.tasks.engine.drain();
 
     const failedExecs = await store.listTaskExecutions("demo:fail-with-logs", 5);
     expect(failedExecs).toHaveLength(1);

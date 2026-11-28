@@ -330,7 +330,7 @@ describe("agent turn tracing", () => {
       tools: [echoTool],
     });
     cleanups.push(() => runtime.stop());
-    const sessionId = (await runtime.createSession()).sessionId;
+    const sessionId = (await runtime.sessions.create()).sessionId;
     return { runtime, agent, sessionId };
   }
 
@@ -338,8 +338,8 @@ describe("agent turn tracing", () => {
     enableTracing();
     const { runtime, sessionId } = await createRuntime();
 
-    await withSpan("request", {}, () => runtime.turn(sessionId, "do it"));
-    await runtime.waitForIdle(sessionId);
+    await withSpan("request", {}, () => runtime.turns.submit(sessionId, "do it"));
+    await runtime.turns.waitForIdle(sessionId);
 
     const request = only("request");
     const turn = only("invoke_agent fake");
@@ -377,10 +377,10 @@ describe("agent turn tracing", () => {
     const { runtime, agent, sessionId } = await createRuntime();
 
     agent.hold();
-    await withSpan("first request", {}, () => runtime.turn(sessionId, "first"));
-    await withSpan("second request", {}, () => runtime.turn(sessionId, "second"));
+    await withSpan("first request", {}, () => runtime.turns.submit(sessionId, "first"));
+    await withSpan("second request", {}, () => runtime.turns.submit(sessionId, "second"));
     agent.release();
-    await runtime.waitForIdle(sessionId);
+    await runtime.turns.waitForIdle(sessionId);
 
     const turns = finished("invoke_agent fake");
     expect(turns).toHaveLength(2);
@@ -542,7 +542,7 @@ export default definePipeline({
     cleanups.push(() => runtime.stop());
 
     const { run } = await withSpan("start request", {}, () =>
-      runtime.pipelineEngine.startRun({ pipelineId: "flow", title: "Traced run" }),
+      runtime.pipelines.startRun({ pipelineId: "flow", title: "Traced run" }),
     );
     await waitFor(async () => {
       const latest = await store.pipelines.getRun(run.runId);

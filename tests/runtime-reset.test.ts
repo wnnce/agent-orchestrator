@@ -78,8 +78,8 @@ describe("runtime session binding", () => {
   }
 
   async function runTurn(sessionId: string, input: string) {
-    const turn = await runtime.turn(sessionId, input);
-    await runtime.waitForIdle(sessionId);
+    const turn = await runtime.turns.submit(sessionId, input);
+    await runtime.turns.waitForIdle(sessionId);
     return store.getTurn(turn.id);
   }
 
@@ -88,7 +88,7 @@ describe("runtime session binding", () => {
     await runTurn(route.sessionId, "first");
     await runTurn(route.sessionId, "second");
     expect(agent.resumed).toEqual(["old-runtime-session"]);
-    const events = await runtime.events(route.sessionId);
+    const events = await runtime.sessions.events(route.sessionId);
     expect(events.some((e) => e.type === "session.runtime_reset")).toBe(false);
   });
 
@@ -98,7 +98,7 @@ describe("runtime session binding", () => {
     const turn = await runTurn(route.sessionId, "hello");
     expect(turn?.status).toBe("completed");
 
-    const reset = (await runtime.events(route.sessionId)).find(
+    const reset = (await runtime.sessions.events(route.sessionId)).find(
       (e) => e.type === "session.runtime_reset",
     );
     expect(reset?.payload).toMatchObject({
@@ -123,7 +123,7 @@ describe("runtime session binding", () => {
     const route = await storedSession("codex");
     await runTurn(route.sessionId, "hello");
     expect(agent.resumed).toEqual([]);
-    const reset = (await runtime.events(route.sessionId)).find(
+    const reset = (await runtime.sessions.events(route.sessionId)).find(
       (e) => e.type === "session.runtime_reset",
     );
     expect(reset?.payload).toMatchObject({ reason: "runtime_changed", runtime: "fake" });

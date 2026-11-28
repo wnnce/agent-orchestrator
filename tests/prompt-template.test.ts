@@ -305,8 +305,8 @@ Undefined={{vars.notConfigured}}
 
       await runtime.start();
       try {
-        const scanTask = (await runtime.listTasks()).find((t) => t.taskId === "scan")!;
-        const renderedMd = runtime.renderTaskPrompt(scanTask.promptTemplate, {
+        const scanTask = (await runtime.tasks.list()).find((t) => t.taskId === "scan")!;
+        const renderedMd = runtime.tasks.renderPrompt(scanTask.promptTemplate, {
           projectId: project.id,
           taskId: scanTask.taskId,
           taskKey: scanTask.taskKey,
@@ -321,9 +321,9 @@ Undefined={{vars.notConfigured}}
         expect(renderedMd).toContain("State=c-99");
         expect(renderedMd).not.toContain("ghp_top_secret_never_leak");
 
-        await runtime.runTask("feeder");
-        await runtime.taskEngine.drain();
-        const feederState = await runtime.taskEngine.getState("example-service:feeder");
+        await runtime.tasks.run("feeder");
+        await runtime.tasks.engine.drain();
+        const feederState = await runtime.tasks.engine.getState("example-service:feeder");
         expect(feederState.authorVar).toBe("alice");
         expect(feederState.maxBatchVar).toBe(15);
         expect(feederState.rendered).toBe(

@@ -52,13 +52,13 @@ describe("SessionService", () => {
   it("names an untitled session after the first message", async () => {
     const created = await sessions.create({ projectId: project.id });
     await sessions.submitTurn(created.session.sessionId, "Fix the login bug");
-    await projects.get(project.id).waitForIdle(created.session.sessionId);
+    await projects.get(project.id).turns.waitForIdle(created.session.sessionId);
     await Bun.sleep(10);
     expect((await store.getSession(created.session.sessionId))?.title).toBe("Fix the login bug");
   });
 
   it("refuses turns from people in task sessions", async () => {
-    const session = await projects.get(project.id).createSession(undefined, "task");
+    const session = await projects.get(project.id).sessions.create({ source: "task" });
     const submit = sessions.submitTurn(session.sessionId, "please stop");
     await expect(submit).rejects.toBeInstanceOf(ForbiddenError);
     await expect(submit).rejects.toMatchObject({ code: ErrorCode.TASK_SESSION_READ_ONLY });

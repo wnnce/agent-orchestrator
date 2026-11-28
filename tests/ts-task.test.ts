@@ -377,8 +377,8 @@ export default [
 
     // 2. Run first task twice to verify incremental state persistence & dispatched session config
     const projectRt = manager.get("demo");
-    await projectRt.runTask("poll-and-dispatch");
-    await projectRt.taskEngine.drain();
+    await projectRt.tasks.run("poll-and-dispatch");
+    await projectRt.tasks.engine.drain();
 
     const execs1 = await store.listTaskExecutions("demo:poll-and-dispatch", 10);
     expect(execs1).toHaveLength(1);
@@ -388,7 +388,7 @@ export default [
 
     const dispatchedId = execs1[0]?.stateAfter?.lastSessionId as string;
     expect(dispatchedId).toBeTruthy();
-    await projectRt.waitForIdle(dispatchedId);
+    await projectRt.turns.waitForIdle(dispatchedId);
 
     const dispatchedSession = await store.getSession(dispatchedId);
     expect(dispatchedSession?.source).toBe("dispatch");
@@ -403,16 +403,16 @@ export default [
     });
 
     // Run a second time -> state.count increments to 2
-    await projectRt.runTask("poll-and-dispatch");
-    await projectRt.taskEngine.drain();
+    await projectRt.tasks.run("poll-and-dispatch");
+    await projectRt.tasks.engine.drain();
     const execs2 = await store.listTaskExecutions("demo:poll-and-dispatch", 10);
     expect(execs2).toHaveLength(2);
     expect(execs2[0]?.stateBefore?.count).toBe(1);
     expect(execs2[0]?.stateAfter?.count).toBe(2);
 
     // Run the second registered task in the same file
-    await projectRt.runTask("check-counter");
-    await projectRt.taskEngine.drain();
+    await projectRt.tasks.run("check-counter");
+    await projectRt.tasks.engine.drain();
     const counterExecs = await store.listTaskExecutions("demo:check-counter", 10);
     expect(counterExecs).toHaveLength(1);
     expect(counterExecs[0]?.status).toBe("success");
@@ -443,8 +443,8 @@ export default defineTask({
     );
 
     const projectRt = manager.get("demo");
-    await projectRt.runTask("hot-reload");
-    await projectRt.taskEngine.drain();
+    await projectRt.tasks.run("hot-reload");
+    await projectRt.tasks.engine.drain();
 
     let execs = await store.listTaskExecutions("demo:hot-reload", 10);
     expect(execs[0]?.stateAfter).toEqual({ version: 1 });
@@ -468,8 +468,8 @@ export default defineTask({
     const future = new Date(Date.now() + 2000);
     await utimes(taskFile, future, future);
 
-    await projectRt.runTask("hot-reload");
-    await projectRt.taskEngine.drain();
+    await projectRt.tasks.run("hot-reload");
+    await projectRt.tasks.engine.drain();
 
     execs = await store.listTaskExecutions("demo:hot-reload", 10);
     expect(execs[0]?.status).toBe("success");
@@ -494,8 +494,8 @@ export default defineTask({
 `,
     );
 
-    await projectRt.runTask("slow-task");
-    await projectRt.taskEngine.drain();
+    await projectRt.tasks.run("slow-task");
+    await projectRt.tasks.engine.drain();
 
     const timeoutExecs = await store.listTaskExecutions("demo:slow-task", 10);
     expect(timeoutExecs).toHaveLength(1);

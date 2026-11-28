@@ -274,9 +274,9 @@ export default [
     await runtime.start();
     cleanups.push(() => runtime.stop());
 
-    const session = await runtime.createSession({ title: "Custom Tool Test" }, "web");
-    await runtime.turn(session.sessionId, "run custom override");
-    await runtime.waitForIdle(session.sessionId);
+    const session = await runtime.sessions.create({ title: "Custom Tool Test", source: "web" });
+    await runtime.turns.submit(session.sessionId, "run custom override");
+    await runtime.turns.waitForIdle(session.sessionId);
 
     expect(agent.seenToolNames).toContain("lookup_env");
     expect(agent.seenToolNames).toContain("send_notification");

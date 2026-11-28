@@ -57,7 +57,7 @@ export function createProjectsRouter(deps: ProjectsRouteDeps): OpenAPIHono {
     const { projectId } = c.req.valid("param");
     const hooks = deps.projects
       .get(projectId)
-      .listHooks()
+      .hooks.list()
       .map((hook) => ({ ...hook, path: hookPath(projectId, hook.id) }));
     return c.json({ projectId, hooks }, 200);
   });

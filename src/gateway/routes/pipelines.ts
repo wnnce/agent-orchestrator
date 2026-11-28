@@ -29,14 +29,14 @@ export function createPipelinesRouter(deps: PipelinesRouteDeps): OpenAPIHono {
   router.openapi(listProjectPipelinesRoute, async (c) => {
     const { projectId } = c.req.valid("param");
     const runtime = deps.projects.get(projectId);
-    const pipelines = await runtime.pipelineEngine.listPipelinesWithVersions();
+    const pipelines = await runtime.pipelines.listPipelinesWithVersions();
     return c.json({ projectId, pipelines }, 200);
   });
 
   router.openapi(listPipelineRunsRoute, async (c) => {
     const { projectId, pipelineId } = c.req.valid("param");
     const runtime = deps.projects.get(projectId);
-    const runs = await runtime.pipelineEngine.listRuns(pipelineId, c.req.valid("query"));
+    const runs = await runtime.pipelines.listRuns(pipelineId, c.req.valid("query"));
     return c.json({ projectId, pipelineId, runs }, 200);
   });
 
@@ -44,7 +44,7 @@ export function createPipelinesRouter(deps: PipelinesRouteDeps): OpenAPIHono {
     const { projectId, pipelineId } = c.req.valid("param");
     const runtime = deps.projects.get(projectId);
     const body = c.req.valid("json");
-    const result = await runtime.pipelineEngine.startRun({
+    const result = await runtime.pipelines.startRun({
       pipelineId,
       ...body,
       createdBy: body.createdBy ?? "api",
@@ -70,7 +70,7 @@ export function createPipelinesRouter(deps: PipelinesRouteDeps): OpenAPIHono {
           event: "connected",
           data: JSON.stringify({ projectId }),
         });
-        for await (const event of runtime.pipelineEventHub.stream(projectId, ac.signal)) {
+        for await (const event of runtime.pipelineEvents.stream(projectId, ac.signal)) {
           if (filter.pipelineId && event.pipelineId !== filter.pipelineId) continue;
           if (filter.runId && event.runId !== filter.runId) continue;
           await stream.writeSSE({
@@ -90,7 +90,7 @@ export function createPipelinesRouter(deps: PipelinesRouteDeps): OpenAPIHono {
   router.openapi(getPipelineRunDetailRoute, async (c) => {
     const { runId } = c.req.valid("param");
     const runtime = await deps.projects.runtimeForPipelineRun(runId);
-    const detail = await runtime.pipelineEngine.getRunDetail(runId);
+    const detail = await runtime.pipelines.getRunDetail(runId);
     return c.json(detail, 200);
   });
 
@@ -98,7 +98,7 @@ export function createPipelinesRouter(deps: PipelinesRouteDeps): OpenAPIHono {
     const { runId } = c.req.valid("param");
     const runtime = await deps.projects.runtimeForPipelineRun(runId);
     const { afterSeq, ...query } = c.req.valid("query");
-    const actions = await runtime.pipelineEngine.listRunActions(runId, {
+    const actions = await runtime.pipelines.listRunActions(runId, {
       ...query,
       ...(afterSeq !== undefined ? { afterSequence: afterSeq } : {}),
     });
@@ -108,35 +108,35 @@ export function createPipelinesRouter(deps: PipelinesRouteDeps): OpenAPIHono {
   router.openapi(approvePipelineRunRoute, async (c) => {
     const { runId } = c.req.valid("param");
     const runtime = await deps.projects.runtimeForPipelineRun(runId);
-    const run = await runtime.pipelineEngine.approveRun(runId, c.req.valid("json"));
+    const run = await runtime.pipelines.approveRun(runId, c.req.valid("json"));
     return c.json({ run }, 200);
   });
 
   router.openapi(rejectPipelineRunRoute, async (c) => {
     const { runId } = c.req.valid("param");
     const runtime = await deps.projects.runtimeForPipelineRun(runId);
-    const run = await runtime.pipelineEngine.rejectRun(runId, c.req.valid("json"));
+    const run = await runtime.pipelines.rejectRun(runId, c.req.valid("json"));
     return c.json({ run }, 200);
   });
 
   router.openapi(retryPipelineRunRoute, async (c) => {
     const { runId } = c.req.valid("param");
     const runtime = await deps.projects.runtimeForPipelineRun(runId);
-    const run = await runtime.pipelineEngine.retryRun(runId, c.req.valid("json"));
+    const run = await runtime.pipelines.retryRun(runId, c.req.valid("json"));
     return c.json({ run }, 200);
   });
 
   router.openapi(cancelPipelineRunRoute, async (c) => {
     const { runId } = c.req.valid("param");
     const runtime = await deps.projects.runtimeForPipelineRun(runId);
-    const run = await runtime.pipelineEngine.cancelRun(runId, c.req.valid("json"));
+    const run = await runtime.pipelines.cancelRun(runId, c.req.valid("json"));
     return c.json({ run }, 200);
   });
 
   router.openapi(signalPipelineRunRoute, async (c) => {
     const { runId } = c.req.valid("param");
     const runtime = await deps.projects.runtimeForPipelineRun(runId);
-    const result = await runtime.pipelineEngine.signalRun(runId);
+    const result = await runtime.pipelines.signalRun(runId);
     return c.json(result, 200);
   });
 
@@ -145,7 +145,7 @@ export function createPipelinesRouter(deps: PipelinesRouteDeps): OpenAPIHono {
     const { nodeRunId } = c.req.valid("param");
     const runtime = await deps.projects.runtimeForNodeRun(nodeRunId);
     const { afterSeq, ...query } = c.req.valid("query");
-    const logs = await runtime.pipelineEngine.listNodeRunLogs(nodeRunId, {
+    const logs = await runtime.pipelines.listNodeRunLogs(nodeRunId, {
       ...query,
       ...(afterSeq !== undefined ? { afterSequence: afterSeq } : {}),
     });

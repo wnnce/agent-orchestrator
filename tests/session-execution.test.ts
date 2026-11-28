@@ -75,8 +75,8 @@ describe("global project", () => {
       logger: new Logger({ sink: () => {} }),
     });
     try {
-      const session = await runtime.createSession();
-      await runtime.turn(session.sessionId, "what projects are there?");
+      const session = await runtime.sessions.create();
+      await runtime.turns.submit(session.sessionId, "what projects are there?");
       await agent.started(1);
       expect(agent.starts[0]!.context.readOnly).toBe(true);
       await agent.finish(0);
@@ -116,7 +116,7 @@ describe("session execution and control", () => {
       controlTimeoutMs: 30,
       queueLimit: 2,
     });
-    sessionId = (await runtime.createSession()).sessionId;
+    sessionId = (await runtime.sessions.create()).sessionId;
   });
   afterEach(async () => {
     await runtime.stop();
@@ -124,56 +124,56 @@ describe("session execution and control", () => {
   });
 
   test("does not start the next turn before the previous terminal event", async () => {
-    const first = await runtime.turn(sessionId, "first");
+    const first = await runtime.turns.submit(sessionId, "first");
     await agent.started(1);
-    const second = await runtime.turn(sessionId, "second");
+    const second = await runtime.turns.submit(sessionId, "second");
     expect(agent.starts).toHaveLength(1);
     expect((await store.getTurn(second.id))?.status).toBe("queued");
     await agent.finish(0);
     await agent.started(2);
     expect((await store.getTurn(first.id))?.status).toBe("completed");
     await agent.finish(1);
-    await runtime.waitForIdle(sessionId);
+    await runtime.turns.waitForIdle(sessionId);
     expect((await store.getTurn(second.id))?.status).toBe("completed");
   });
   test("compaction is rejected while a turn is running", async () => {
-    await runtime.turn(sessionId, "long");
+    await runtime.turns.submit(sessionId, "long");
     await agent.started(1);
-    await expect(runtime.compact(sessionId)).rejects.toThrow(
+    await expect(runtime.turns.compact(sessionId)).rejects.toThrow(
       "cannot compact while a turn is running",
     );
     await agent.finish(0);
-    await runtime.waitForIdle(sessionId);
-    await runtime.compact(sessionId);
+    await runtime.turns.waitForIdle(sessionId);
+    await runtime.turns.compact(sessionId);
   });
   test("correlates a terminal event arriving before startTurn returns", async () => {
     agent.early = true;
-    const turn = await runtime.turn(sessionId, "instant");
-    await runtime.waitForIdle(sessionId);
+    const turn = await runtime.turns.submit(sessionId, "instant");
+    await runtime.turns.waitForIdle(sessionId);
     expect((await store.getTurn(turn.id))?.status).toBe("completed");
-    expect((await runtime.events(sessionId)).find((e) => e.type === "turn.completed")?.turnId).toBe(
-      turn.id,
-    );
+    expect(
+      (await runtime.sessions.events(sessionId)).find((e) => e.type === "turn.completed")?.turnId,
+    ).toBe(turn.id);
   });
   test("cancel bypasses queued work and the next normal turn can continue", async () => {
-    const first = await runtime.turn(sessionId, "long");
+    const first = await runtime.turns.submit(sessionId, "long");
     await agent.started(1);
-    const second = await runtime.turn(sessionId, "next");
-    await runtime.interrupt(sessionId);
+    const second = await runtime.turns.submit(sessionId, "next");
+    await runtime.turns.interrupt(sessionId);
     await agent.started(2);
     expect((await store.getTurn(first.id))?.status).toBe("interrupted");
     await agent.finish(1);
-    await runtime.waitForIdle(sessionId);
+    await runtime.turns.waitForIdle(sessionId);
     expect((await store.getTurn(second.id))?.status).toBe("completed");
   });
   test("turn completion retains the notification event and project metadata", async () => {
     runtime.project.notifyOnTurnCompleted = true;
     runtime.project.notifications = [{ type: "log", name: "completion" }];
-    const turn = await runtime.turn(sessionId, "finish with notification");
+    const turn = await runtime.turns.submit(sessionId, "finish with notification");
     await agent.started(1);
     await agent.finish(0);
-    await runtime.waitForIdle(sessionId);
-    const queued = (await runtime.events(sessionId)).find(
+    await runtime.turns.waitForIdle(sessionId);
+    const queued = (await runtime.sessions.events(sessionId)).find(
       (event) => event.type === "notification.queued",
     );
     expect(queued?.turnId).toBe(turn.id);
@@ -186,17 +186,17 @@ describe("session execution and control", () => {
     });
   });
   test("no notification event is recorded when the project does not notify", async () => {
-    await runtime.turn(sessionId, "finish quietly");
+    await runtime.turns.submit(sessionId, "finish quietly");
     await agent.started(1);
     await agent.finish(0);
-    await runtime.waitForIdle(sessionId);
-    const types = (await runtime.events(sessionId)).map((event) => event.type);
+    await runtime.turns.waitForIdle(sessionId);
+    const types = (await runtime.sessions.events(sessionId)).map((event) => event.type);
     expect(types).toContain("turn.completed");
     expect(types).not.toContain("notification.queued");
     expect(await store.listNotificationDeliveries()).toHaveLength(0);
   });
   test("a turn the runtime reports as failed keeps the runtime's reason", async () => {
-    const turn = await runtime.turn(sessionId, "fail please");
+    const turn = await runtime.turns.submit(sessionId, "fail please");
     await agent.started(1);
     const start = agent.starts[0]!;
     await start.context.onEvent({
@@ -205,37 +205,37 @@ describe("session execution and control", () => {
       turnId: start.id,
       payload: { status: "failed", error: "Not logged in" },
     });
-    await runtime.waitForIdle(sessionId);
+    await runtime.turns.waitForIdle(sessionId);
     expect(await store.getTurn(turn.id)).toMatchObject({
       status: "failed",
       error: "Not logged in",
     });
   });
   test("canceling a queued turn does not cancel the active turn", async () => {
-    const first = await runtime.turn(sessionId, "long");
+    const first = await runtime.turns.submit(sessionId, "long");
     await agent.started(1);
-    const second = await runtime.turn(sessionId, "queued");
-    await runtime.interrupt(sessionId, second.id);
+    const second = await runtime.turns.submit(sessionId, "queued");
+    await runtime.turns.interrupt(sessionId, second.id);
     expect((await store.getTurn(second.id))?.status).toBe("interrupted");
     expect((await store.getTurn(first.id))?.status).toBe("in_progress");
     await agent.finish(0);
-    await runtime.waitForIdle(sessionId);
+    await runtime.turns.waitForIdle(sessionId);
     expect(agent.starts).toHaveLength(1);
   });
   test("close cancels the queue and releases resources only after interrupt confirmation", async () => {
-    await runtime.turn(sessionId, "long");
+    await runtime.turns.submit(sessionId, "long");
     await agent.started(1);
-    await runtime.turn(sessionId, "queued");
-    await runtime.cleanupSession(sessionId);
+    await runtime.turns.submit(sessionId, "queued");
+    await runtime.sessions.close(sessionId);
     expect(agent.starts).toHaveLength(1);
     expect(agent.released).toHaveLength(1);
     expect(await store.getSession(sessionId)).toBeNull();
   });
   test("close completes even when the runtime never confirms the interrupt", async () => {
     agent.acknowledgeInterrupt = false;
-    const turn = await runtime.turn(sessionId, "long");
+    const turn = await runtime.turns.submit(sessionId, "long");
     await agent.started(1);
-    await runtime.cleanupSession(sessionId, { deleteFromStore: false });
+    await runtime.sessions.close(sessionId, { retain: true });
     expect((await store.getTurn(turn.id))?.status).toBe("interrupted");
     expect((await store.getSession(sessionId))?.status).toBe("closed");
     expect(agent.released).toHaveLength(1);
@@ -287,12 +287,14 @@ describe("session execution and control", () => {
     await agent.started(1);
     expect(agent.starts[0]!.input).toBe("fix it");
     await agent.finish(0);
-    await runtime.waitForIdle(started.sessionId);
+    await runtime.turns.waitForIdle(started.sessionId);
     expect((await store.getTurn(started.turnId))?.status).toBe("completed");
   });
   test("a task's session updates the task's state through its tools", async () => {
-    runtime.taskEngine.updateState("execution:nightly", { cursor: 1 });
-    const route = await runtime.createSession({ title: "Task: nightly" }, "task", undefined, {
+    runtime.tasks.engine.updateState("execution:nightly", { cursor: 1 });
+    const route = await runtime.sessions.create({
+      title: "Task: nightly",
+      source: "task",
       owner: {
         kind: "task",
         taskId: "nightly",
@@ -302,13 +304,13 @@ describe("session execution and control", () => {
     });
     expect((await store.getSession(route.sessionId))?.owner).toMatchObject({ kind: "task" });
 
-    await runtime.turn(route.sessionId, "sync");
+    await runtime.turns.submit(route.sessionId, "sync");
     await agent.started(1);
     const tools = agent.starts[0]!.context.tools!;
     expect(tools.specs.map((spec) => spec.name)).toContain("update_task_state");
     const result = await tools.call("update_task_state", { state: { since: "t1" } });
     expect(result.ok).toBe(true);
-    expect(await runtime.taskEngine.getState("execution:nightly")).toEqual({
+    expect(await runtime.tasks.engine.getState("execution:nightly")).toEqual({
       cursor: 1,
       since: "t1",
     });
@@ -320,16 +322,19 @@ describe("session execution and control", () => {
       ownerId: "exec_1",
     });
     await agent.finish(0);
-    await runtime.waitForIdle(route.sessionId);
+    await runtime.turns.waitForIdle(route.sessionId);
   });
   test("start cleans up task sessions abandoned by a previous run", async () => {
-    const task = await runtime.createSession({ taskKey: "execution:nightly" }, "task");
+    const task = await runtime.sessions.create({
+      source: "task",
+      metadata: { taskKey: "execution:nightly" },
+    });
     await runtime.sessionManager.remove(task.sessionId);
     await runtime.start();
     expect((await store.getSession(task.sessionId))?.status).toBe("closed");
   });
   test("runtime disconnect completes the active turn as failed", async () => {
-    const turn = await runtime.turn(sessionId, "long");
+    const turn = await runtime.turns.submit(sessionId, "long");
     await agent.started(1);
     const current = agent.starts[0]!;
     await current.context.onEvent({
@@ -337,16 +342,16 @@ describe("session execution and control", () => {
       sessionId: current.session,
       payload: {},
     });
-    await runtime.waitForIdle(sessionId);
+    await runtime.turns.waitForIdle(sessionId);
     expect((await store.getTurn(turn.id))?.status).toBe("failed");
   });
   test("failed startup does not stall the next turn", async () => {
     agent.failStart = true;
-    const first = await runtime.turn(sessionId, "fail");
-    const second = await runtime.turn(sessionId, "next");
+    const first = await runtime.turns.submit(sessionId, "fail");
+    const second = await runtime.turns.submit(sessionId, "next");
     await agent.started(1);
     await agent.finish(0);
-    await runtime.waitForIdle(sessionId);
+    await runtime.turns.waitForIdle(sessionId);
     expect((await store.getTurn(first.id))?.status).toBe("failed");
     expect((await store.getTurn(second.id))?.status).toBe("completed");
   });
@@ -354,27 +359,27 @@ describe("session execution and control", () => {
     const entity = runtime.sessionManager.get(sessionId)!;
     entity.touch(new Date(Date.now() - 1500).toISOString());
     await runtime.sessionManager.save(sessionId);
-    await runtime.checkLifecycles();
+    await runtime.sessions.sweepIdle();
     expect(entity.status).toBe("suspended");
     expect(agent.released).toHaveLength(1);
-    const turn = await runtime.turn(sessionId, "resume");
+    const turn = await runtime.turns.submit(sessionId, "resume");
     await agent.started(1);
     await agent.finish(0);
-    await runtime.waitForIdle(sessionId);
+    await runtime.turns.waitForIdle(sessionId);
     expect(entity.status).toBe("active");
     expect((await store.getTurn(turn.id))?.status).toBe("completed");
   });
   test("active work cannot be archived and completing work refreshes idle time", async () => {
-    await runtime.turn(sessionId, "long");
+    await runtime.turns.submit(sessionId, "long");
     await agent.started(1);
     const entity = runtime.sessionManager.get(sessionId)!;
     entity.touch(new Date(Date.now() - 10000).toISOString());
     await runtime.sessionManager.save(sessionId);
-    await runtime.checkLifecycles();
+    await runtime.sessions.sweepIdle();
     expect(entity.status).toBe("active");
     await agent.finish(0);
-    await runtime.waitForIdle(sessionId);
-    await runtime.checkLifecycles();
+    await runtime.turns.waitForIdle(sessionId);
+    await runtime.sessions.sweepIdle();
     expect(entity.status).toBe("active");
     expect(Date.now() - Date.parse(entity.lastActiveAt)).toBeLessThan(1000);
   });

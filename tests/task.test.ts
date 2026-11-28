@@ -500,7 +500,7 @@ Current PR Cursor: {{state.lastPr}}
 Full state:
 {{state}}`;
 
-    const rendered = runtime.renderTaskPrompt(template, {
+    const rendered = runtime.tasks.renderPrompt(template, {
       projectId: "demo",
       taskId: "poll-prs",
       taskKey: "demo:poll-prs",
@@ -557,17 +557,17 @@ Clean up project {{project.id}} with state: {{state}}
     try {
       await runtime.start();
 
-      const task = (await runtime.listTasks())[0]!;
+      const task = (await runtime.tasks.list())[0]!;
       expect(task).toBeDefined();
 
       // Set initial state
-      runtime.taskEngine.updateState(task.taskKey, { lastCleanedAt: 1000 });
+      runtime.tasks.engine.updateState(task.taskKey, { lastCleanedAt: 1000 });
 
       // Dispatch task via engine
-      const dispatchedFirst = runtime.taskEngine.dispatch(task);
+      const dispatchedFirst = runtime.tasks.engine.dispatch(task);
       expect(dispatchedFirst).toBe(true);
 
-      await runtime.taskEngine.drain();
+      await runtime.tasks.engine.drain();
 
       // Verify audit record written to store
       const executions = await store.listTaskExecutions(task.taskKey);
@@ -587,10 +587,10 @@ Clean up project {{project.id}} with state: {{state}}
       expect(userSessions.some((s) => s.sessionId === execution.sessionId)).toBe(false);
 
       // Manually trigger runTask via engine dispatch
-      const dispatched = await runtime.runTask("cleanup-task");
+      const dispatched = await runtime.tasks.run("cleanup-task");
       expect(dispatched).toBe(true);
 
-      await runtime.taskEngine.drain();
+      await runtime.tasks.engine.drain();
 
       const secondExecutions = await store.listTaskExecutions(task.taskKey);
       expect(secondExecutions).toHaveLength(2);
@@ -668,7 +668,7 @@ Sync daily updates.
       expect(runData.queued).toBe(true);
 
       const runtime = projectManager.get("gw-proj");
-      await runtime.taskEngine.drain();
+      await runtime.tasks.engine.drain();
 
       // 3. GET /api/v1/projects/:projectId/tasks/:taskId/executions
       const execRes = await gateway.app.request(

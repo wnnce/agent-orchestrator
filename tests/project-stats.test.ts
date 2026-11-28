@@ -27,7 +27,7 @@ function makeProjectManagerStub(
         throw new NotFoundError(`project not found: ${projectId}`, ErrorCode.PROJECT_NOT_FOUND);
       }
       return {
-        listTasks: async () => entry.tasks ?? [],
+        tasks: { list: async () => entry.tasks ?? [] },
       };
     },
     listSkills: async (projectId: string) => {

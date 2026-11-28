@@ -173,14 +173,14 @@ describe("Gateway with Hono", () => {
 
       // Check GET /api/v1/sessions hides scheduled-task sessions but lists dispatched ones
       const projectRuntime = projectManager.get("test-proj");
-      const taskSession = await projectRuntime.createSession(
-        { taskKey: "test-proj:cron-test" },
-        "task",
-      );
-      const dispatchedSession = await projectRuntime.createSession(
-        { sourceSessionId: sessionId, dispatch: { taskKey: "spoofed" } },
-        "dispatch",
-      );
+      const taskSession = await projectRuntime.sessions.create({
+        source: "task",
+        metadata: { taskKey: "test-proj:cron-test" },
+      });
+      const dispatchedSession = await projectRuntime.sessions.create({
+        source: "dispatch",
+        metadata: { sourceSessionId: sessionId, dispatch: { taskKey: "spoofed" } },
+      });
       const listSessionsRes = await gateway.handle(
         new Request("http://localhost/api/v1/sessions?projectId=test-proj"),
       );
@@ -262,7 +262,7 @@ describe("Gateway with Hono", () => {
     const { gateway, projectManager, store } = createTestGateway();
     await projectManager.start();
     try {
-      const session = await projectManager.get("test-proj").createSession();
+      const session = await projectManager.get("test-proj").sessions.create();
       for (const sequence of [2, 3]) {
         await store.appendEvent({
           id: `source-event-${sequence}`,
@@ -318,9 +318,9 @@ describe("Gateway with Hono", () => {
     await projectManager.start();
     try {
       const project = projectManager.get("test-proj");
-      const turn = project.turn.bind(project);
+      const turn = project.turns.submit.bind(project.turns);
       let attempts = 0;
-      project.turn = async (sessionId, input) => {
+      project.turns.submit = async (sessionId, input) => {
         if (++attempts === 1) throw new Error("temporary admission failure");
         return turn(sessionId, input);
       };
@@ -353,7 +353,7 @@ describe("Gateway with Hono", () => {
     const { gateway, projectManager } = createTestGateway();
     await projectManager.start();
     try {
-      const session = await projectManager.get("test-proj").createSession(undefined, "task");
+      const session = await projectManager.get("test-proj").sessions.create({ source: "task" });
       const viaSessionApi = await gateway.handle(
         new Request(`http://localhost/api/v1/sessions/${session.sessionId}/turns`, {
           method: "POST",

@@ -213,15 +213,15 @@ describe("ProjectRuntime hooks", () => {
 
   it("serves the hooks it loaded at start", async () => {
     const runtime = manager.get("demo");
-    expect(runtime.listHooks()).toEqual([
+    expect(runtime.hooks.list()).toEqual([
       { id: "ping", name: "Ping", description: "Answers pong" },
     ]);
-    const response = await runtime.handleHook("ping", new Request("http://x/hooks/demo/ping"));
+    const response = await runtime.hooks.handle("ping", new Request("http://x/hooks/demo/ping"));
     expect(await response.json()).toEqual({ pong: "ping", project: "demo" });
   });
 
   it("reports unknown hooks as not found", async () => {
-    const missing = manager.get("demo").handleHook("nope", new Request("http://x/"));
+    const missing = manager.get("demo").hooks.handle("nope", new Request("http://x/"));
     await expect(missing).rejects.toBeInstanceOf(NotFoundError);
     await expect(missing).rejects.toMatchObject({ code: ErrorCode.HOOK_NOT_FOUND });
   });

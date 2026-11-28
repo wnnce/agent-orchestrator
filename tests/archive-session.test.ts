@@ -65,7 +65,7 @@ describe("Session Archive & Workspace Release (> 1 hour)", () => {
     eventHub.subscribeAll((e) => emittedEvents.push(e));
 
     // 1. Create session
-    const session = await runtime.createSession();
+    const session = await runtime.sessions.create();
     expect(session.status).toBe("active");
 
     // Verify workspace exists on disk
@@ -73,17 +73,17 @@ describe("Session Archive & Workspace Release (> 1 hour)", () => {
     expect(await Bun.file(path.join(sessionWorkdir, "README.md")).exists()).toBe(true);
 
     // 2. Perform a turn while active
-    const turn1 = await runtime.turn(session.sessionId, "First question");
+    const turn1 = await runtime.turns.submit(session.sessionId, "First question");
     expect(turn1.status).toBe("queued");
 
     // 3. Simulate time passing > 1 hour (e.g. 3601 seconds ago)
     const twoHoursAgo = new Date(Date.now() - 3601_000).toISOString();
-    await runtime.waitForIdle(session.sessionId);
+    await runtime.turns.waitForIdle(session.sessionId);
     runtime.sessionManager.get(session.sessionId)!.touch(twoHoursAgo);
     await runtime.sessionManager.save(session.sessionId);
 
     // 4. Run lifecycle check
-    await runtime.checkLifecycles();
+    await runtime.sessions.sweepIdle();
 
     // 5. Verify session is now archived
     const updated = await store.getSession(session.sessionId);
@@ -97,16 +97,16 @@ describe("Session Archive & Workspace Release (> 1 hour)", () => {
     expect(archiveEvent).toBeDefined();
 
     // 8. Verify session is read-only (new turns must be rejected)
-    expect(runtime.turn(session.sessionId, "Cannot submit to archived")).rejects.toThrow(
+    expect(runtime.turns.submit(session.sessionId, "Cannot submit to archived")).rejects.toThrow(
       "is archived and read-only",
     );
 
     // 9. Verify historical reads (events) still work
-    const events = await runtime.events(session.sessionId);
+    const events = await runtime.sessions.events(session.sessionId);
     expect(events.length).toBeGreaterThan(0);
 
     // 10. Verify findSessionByExternal ignores archived session
-    await runtime.bindExternal(session.sessionId, {
+    await runtime.sessions.bindExternal(session.sessionId, {
       channel: "feishu",
       conversationId: "oc_chat_999",
     });

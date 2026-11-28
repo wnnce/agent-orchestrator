@@ -100,13 +100,13 @@ describe("fake project runtime", () => {
     await rm(root, { recursive: true, force: true });
   });
   test("creates a session, forwards a turn, and records events", async () => {
-    const route = await runtime.createSession();
-    const turn = await runtime.turn(route.sessionId, "hello");
+    const route = await runtime.sessions.create();
+    const turn = await runtime.turns.submit(route.sessionId, "hello");
     expect(turn.status).toBe("queued");
 
     let completed = false;
     for (let i = 0; i < 50; i++) {
-      const events = await runtime.events(route.sessionId);
+      const events = await runtime.sessions.events(route.sessionId);
       if (events.some((event) => event.type === "turn.completed")) {
         completed = true;
         break;

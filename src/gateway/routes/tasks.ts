@@ -22,8 +22,8 @@ export function createTasksRouter(deps: TasksRouteDeps): OpenAPIHono {
   router.openapi(listProjectTasksRoute, async (c) => {
     const { projectId } = c.req.valid("param");
     const runtime = deps.projects.get(projectId);
-    const scheduler = runtime.taskScheduler;
-    const tasks = (await runtime.listTasks()).map((task) => ({
+    const scheduler = runtime.tasks.scheduler;
+    const tasks = (await runtime.tasks.list()).map((task) => ({
       ...task,
       isScheduled: scheduler.isScheduled(task.taskKey),
       nextRun: scheduler.getNextRun(task.taskKey)?.toISOString() ?? null,
@@ -34,7 +34,7 @@ export function createTasksRouter(deps: TasksRouteDeps): OpenAPIHono {
   router.openapi(runProjectTaskRoute, async (c) => {
     const { projectId, taskId } = c.req.valid("param");
     const runtime = deps.projects.get(projectId);
-    const queued = await runtime.runTask(taskId);
+    const queued = await runtime.tasks.run(taskId);
     return c.json(
       {
         projectId,

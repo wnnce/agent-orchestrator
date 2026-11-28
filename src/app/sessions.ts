@@ -60,13 +60,13 @@ export class SessionService {
             ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
           }
         : undefined;
-    let session = await project.createSession(
-      explicitTitle ? { title: explicitTitle } : undefined,
+    let session = await project.sessions.create({
+      title: explicitTitle,
       source,
-      runtimeOverride,
-    );
+      runtime: runtimeOverride,
+    });
     if (input.external) {
-      session = await project.bindExternal(session.sessionId, {
+      session = await project.sessions.bindExternal(session.sessionId, {
         channel: input.external.channel,
         conversationId: input.external.conversationId,
         ...(input.external.threadId ? { threadId: input.external.threadId } : {}),
@@ -74,7 +74,7 @@ export class SessionService {
     }
     const turn =
       query && input.submitQuery !== false
-        ? await project.turn(session.sessionId, query)
+        ? await project.turns.submit(session.sessionId, query)
         : undefined;
     if (query && !explicitTitle) this.nameAfter(session.sessionId, query);
     return { session, routedProject: project.project.id, ...(turn ? { turn } : {}) };
@@ -86,7 +86,7 @@ export class SessionService {
    */
   async submitTurn(sessionId: string, input: string): Promise<TurnRecord> {
     const runtime = await this.deps.projects.runtimeForSession(sessionId);
-    const session = await runtime.getSession(sessionId);
+    const session = await runtime.sessions.get(sessionId);
     if (session.source === "task") {
       throw new ForbiddenError(
         "Task session is automated and read-only; manual turn input is disabled.",
@@ -94,7 +94,7 @@ export class SessionService {
       );
     }
     if (!session.title) this.nameAfter(sessionId, input);
-    return runtime.turn(sessionId, input);
+    return runtime.turns.submit(sessionId, input);
   }
 
   private async routeQuery(query: string): Promise<string> {
@@ -112,7 +112,7 @@ export class SessionService {
       .then(async (title) => {
         if (!title) return;
         const runtime = await this.deps.projects.runtimeForSession(sessionId);
-        await runtime.setGeneratedTitle(sessionId, title);
+        await runtime.sessions.setGeneratedTitle(sessionId, title);
       })
       .catch((error) =>
         this.deps.logger.warn("failed to set generated session title", { sessionId, error }),

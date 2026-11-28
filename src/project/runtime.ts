@@ -6,15 +6,8 @@ import {
   type StartSessionParams,
   type StartedSession,
 } from "../context/index.ts";
-import type { Origin, SessionOrigin, SessionOwner } from "../domain/origin.ts";
-import type {
-  ArtifactRecord,
-  EventRecord,
-  ProjectConfig,
-  SessionRoute,
-  SessionRuntimeOverride,
-  TurnRecord,
-} from "../domain/types.ts";
+import type { Origin } from "../domain/origin.ts";
+import type { ProjectConfig, SessionRuntimeOverride } from "../domain/types.ts";
 import { MemoryEventHub, type EventHub } from "../events/hub.ts";
 import { ProjectHooks } from "../hooks/registry.ts";
 import type { McpClientFactory } from "../mcp/index.ts";
@@ -22,7 +15,7 @@ import { NotificationHub, NotificationOutbox } from "../notifications/index.ts";
 import { Logger } from "../observability/logger.ts";
 import type { Store } from "../persistence/store.ts";
 import { PipelineEngine, PipelineEventHub } from "../pipeline/index.ts";
-import type { AgentRuntime, ApprovalDecision } from "../runtime/runtime.ts";
+import type { AgentRuntime } from "../runtime/runtime.ts";
 import { AgentRuntimes } from "../session/agents.ts";
 import { SessionEvents } from "../session/events.ts";
 import { SessionLifecycle } from "../session/lifecycle.ts";
@@ -30,19 +23,12 @@ import { SessionManager } from "../session/manager.ts";
 import { ScheduledJobs } from "../session/scheduled-jobs.ts";
 import { SessionTurns, type TurnFinished } from "../session/turns.ts";
 import { SessionWorkspaces } from "../session/workspaces.ts";
-import {
-  ProjectTasks,
-  type TaskDefinition,
-  type TaskEngine,
-  type TaskPromptVars,
-  type TaskScheduler,
-} from "../task/index.ts";
+import { ProjectTasks } from "../task/index.ts";
 import {
   builtinTools,
   loadProjectTools,
   ToolRegistry,
   type ToolDefinition,
-  type ToolSession,
 } from "../tools/index.ts";
 import type { WorkspaceManager } from "../workspace/workspace.ts";
 import { AgentTools } from "./agent-tools.ts";
@@ -111,7 +97,7 @@ function sessionSourceMetadata(origin: Origin): Record<string, string> {
  * - `turns`: running the sessions' turns on their agent runtimes;
  * - `scheduledJobs`: the wake-ups agents schedule for their sessions;
  * - `tasks`, `pipelines`, `hooks`: the project's tasks, pipelines and HTTP hooks;
- * - `tools`: the tools the project's agents are offered.
+ * - `tools`, `agentTools`: the tools the project's agents are offered.
  */
 export class ProjectRuntime {
   readonly project: ProjectConfig;
@@ -125,12 +111,13 @@ export class ProjectRuntime {
   readonly hooks: ProjectHooks;
   /** The tools this project's agents are offered. */
   readonly tools: ToolRegistry;
+  /** The same tools, bound to the session calling them. */
+  readonly agentTools: AgentTools;
 
   private readonly store: Store;
   private readonly logger: Logger;
   private readonly notifications: NotificationOutbox;
   private readonly artifacts: ArtifactStore;
-  private readonly agentTools: AgentTools;
   private readonly timers: ReturnType<typeof setInterval>[] = [];
 
   constructor(private readonly deps: ProjectRuntimeDeps) {
@@ -394,119 +381,5 @@ export class ProjectRuntime {
           error: (err as Error).message,
         });
       });
-  }
-
-  // --- Forwarding to the parts, until callers use them directly. ---
-
-  get taskEngine(): TaskEngine {
-    return this.tasks.engine;
-  }
-  get taskScheduler(): TaskScheduler {
-    return this.tasks.scheduler;
-  }
-  get pipelineEngine(): PipelineEngine {
-    return this.pipelines;
-  }
-  get pipelineEventHub(): PipelineEventHub {
-    return this.pipelineEvents;
-  }
-  createSession(
-    metadata?: Record<string, unknown>,
-    source = "api",
-    runtimeOverride?: SessionRuntimeOverride,
-    options?: { externalWorkspacePath?: string | undefined; owner?: SessionOwner | undefined },
-  ): Promise<SessionRoute> {
-    return this.sessions.create({
-      title: typeof metadata?.title === "string" ? metadata.title : undefined,
-      source,
-      runtime: runtimeOverride,
-      owner: options?.owner,
-      workspacePath: options?.externalWorkspacePath,
-      metadata,
-    });
-  }
-  renameSession(sessionId: string, title: string): Promise<void> {
-    return this.sessions.rename(sessionId, title);
-  }
-  setGeneratedTitle(sessionId: string, title: string): Promise<void> {
-    return this.sessions.setGeneratedTitle(sessionId, title);
-  }
-  cleanupSession(sessionId: string, options?: { deleteFromStore?: boolean }): Promise<void> {
-    return this.sessions.close(sessionId, { retain: options?.deleteFromStore === false });
-  }
-  getSession(sessionId: string): Promise<SessionRoute> {
-    return this.sessions.get(sessionId);
-  }
-  bindExternal(
-    sessionId: string,
-    external: { channel: string; conversationId: string; threadId?: string },
-  ): Promise<SessionRoute> {
-    return this.sessions.bindExternal(sessionId, external);
-  }
-  archivePipelineSession(sessionId: string): Promise<void> {
-    return this.sessions.archive(sessionId, "pipeline_node_completed");
-  }
-  events(sessionId: string, after = 0): Promise<EventRecord[]> {
-    return this.sessions.events(sessionId, after);
-  }
-  listArtifacts(
-    sessionId: string,
-    options: { includeInternal?: boolean } = {},
-  ): Promise<ArtifactRecord[]> {
-    return this.sessions.artifacts(sessionId, options);
-  }
-  artifact(sessionId: string, artifactId: string): Promise<ArtifactRecord> {
-    return this.sessions.artifact(sessionId, artifactId);
-  }
-  readArtifact(artifact: ArtifactRecord): Promise<Uint8Array> {
-    return this.sessions.readArtifact(artifact);
-  }
-  checkLifecycles(): Promise<void> {
-    return this.sessions.sweepIdle();
-  }
-  turn(sessionId: string, input: string): Promise<TurnRecord> {
-    return this.turns.submit(sessionId, input);
-  }
-  waitForIdle(sessionId: string): Promise<void> {
-    return this.turns.waitForIdle(sessionId);
-  }
-  steer(sessionId: string, input: string): Promise<void> {
-    return this.turns.steer(sessionId, input);
-  }
-  interrupt(sessionId: string, turnId?: string): Promise<void> {
-    return this.turns.interrupt(sessionId, turnId);
-  }
-  compact(sessionId: string): Promise<void> {
-    return this.turns.compact(sessionId);
-  }
-  approve(sessionId: string, requestId: string, decision: ApprovalDecision): Promise<void> {
-    return this.turns.approve(sessionId, requestId, decision);
-  }
-  pollScheduledJobs(asOf?: Date): Promise<void> {
-    return this.scheduledJobs.poll(asOf);
-  }
-  listTasks(): Promise<TaskDefinition[]> {
-    return this.tasks.list();
-  }
-  runTask(taskId: string): Promise<boolean> {
-    return this.tasks.run(taskId);
-  }
-  loadAndScheduleTasks(): Promise<TaskDefinition[]> {
-    return this.tasks.reload();
-  }
-  renderTaskPrompt(template: string, vars: TaskPromptVars): string {
-    return this.tasks.renderPrompt(template, vars);
-  }
-  listHooks() {
-    return this.hooks.list();
-  }
-  handleHook(hookId: string, request: Request): Promise<Response> {
-    return this.hooks.handle(hookId, request);
-  }
-  toolSession(origin: SessionOrigin, workspace: string): ToolSession {
-    return this.agentTools.session(origin, workspace);
-  }
-  sessionTools(sessionId: string, workspacePath: string, owner: SessionOwner | undefined) {
-    return this.agentTools.forSession(sessionId, workspacePath, owner);
   }
 }

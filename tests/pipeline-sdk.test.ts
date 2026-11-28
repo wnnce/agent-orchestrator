@@ -476,7 +476,7 @@ export default definePipeline({
     await projectRuntime.start();
 
     try {
-      const engine = projectRuntime.pipelineEngine;
+      const engine = projectRuntime.pipelines;
 
       // 1. startRun validates first node's declared `input` schema
       await expect(
@@ -496,7 +496,7 @@ export default definePipeline({
         nodeRunId: `pnr_${nodeId}`,
       });
       const sessionToolsAt = (nodeId: string): SessionTools =>
-        projectRuntime["sessionTools"](`ses_${nodeId}`, "/tmp", nodeOwner(nodeId));
+        projectRuntime.agentTools.forSession(`ses_${nodeId}`, "/tmp", nodeOwner(nodeId));
 
       const designNext = sessionToolsAt("design").specs.find((t) => t.name === "pipeline_next")!;
       const designNextJson = designNext.inputSchema as {
@@ -717,7 +717,11 @@ export default definePipeline({
     await projectRuntime.start();
 
     try {
-      const chat: SessionTools = projectRuntime["sessionTools"]("ses_chat_1", repoDir, undefined);
+      const chat: SessionTools = projectRuntime.agentTools.forSession(
+        "ses_chat_1",
+        repoDir,
+        undefined,
+      );
       type Listed = {
         pipelines: Array<{ id: string; entryInputSchema?: { required?: string[] } }>;
       };
@@ -782,7 +786,7 @@ export default definePipeline({
         taskKey: "dispatch-demo:nightly",
         executionId: "exec_1",
       };
-      const taskSession: SessionTools = projectRuntime["sessionTools"](
+      const taskSession: SessionTools = projectRuntime.agentTools.forSession(
         "ses_task_1",
         repoDir,
         nightly,

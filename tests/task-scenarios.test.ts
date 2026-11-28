@@ -569,13 +569,13 @@ Analyze system status.
       await runtime.start();
 
       try {
-        const loadedTasks = await runtime.listTasks();
+        const loadedTasks = await runtime.tasks.list();
         expect(loadedTasks).toHaveLength(2);
 
         // 1. Run the TypeScript task
-        const ranScript = await runtime.runTask("sync");
+        const ranScript = await runtime.tasks.run("sync");
         expect(ranScript).toBe(true);
-        await runtime.taskEngine.drain();
+        await runtime.tasks.engine.drain();
 
         const scriptExecs = await store.listTaskExecutions("hybrid-proj:sync");
         expect(scriptExecs).toHaveLength(1);
@@ -584,9 +584,9 @@ Analyze system status.
         expect(scriptExecs[0]?.actionsSummary).toEqual({ project: "hybrid-proj", origin: "task" });
 
         // 2. Run Agent Task (runs through FakeRuntime)
-        const ranAgent = await runtime.runTask("analyze-agent");
+        const ranAgent = await runtime.tasks.run("analyze-agent");
         expect(ranAgent).toBe(true);
-        await runtime.taskEngine.drain();
+        await runtime.tasks.engine.drain();
 
         const agentExecs = await store.listTaskExecutions("hybrid-proj:analyze-agent");
         expect(agentExecs).toHaveLength(1);

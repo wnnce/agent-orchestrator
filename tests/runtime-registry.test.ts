@@ -323,7 +323,7 @@ describe("ProjectManager Runtime Extensibility", () => {
     await manager.start();
 
     const projectRuntime = manager.get("runtime-track-proj");
-    const session = await projectRuntime.createSession();
+    const session = await projectRuntime.sessions.create();
 
     expect(session.runtime).toBe("fake");
     expect(session.metadata?.runtime).toBe("fake");

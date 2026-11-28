@@ -64,33 +64,33 @@ describe("session workspace usage", () => {
   });
 
   test("only session creation prepares the workspace", async () => {
-    const session = await runtime.createSession();
+    const session = await runtime.sessions.create();
     expect(workspaces.prepared).toBe(1);
     expect(session.workspacePath).toBe(
       path.join(root, "workspaces", "usage", session.sessionId),
     );
 
-    await runtime.turn(session.sessionId, "first");
-    await runtime.turn(session.sessionId, "second");
-    await runtime.waitForIdle(session.sessionId);
-    await runtime.compact(session.sessionId);
-    await runtime.interrupt(session.sessionId);
+    await runtime.turns.submit(session.sessionId, "first");
+    await runtime.turns.submit(session.sessionId, "second");
+    await runtime.turns.waitForIdle(session.sessionId);
+    await runtime.turns.compact(session.sessionId);
+    await runtime.turns.interrupt(session.sessionId);
     expect(workspaces.prepared).toBe(1);
   });
 
   test("a missing worktree is recreated before the next turn", async () => {
-    const session = await runtime.createSession();
+    const session = await runtime.sessions.create();
     await workspaces.removeSession(runtime.project, session.sessionId);
     expect(existsSync(session.workspacePath!)).toBe(false);
 
-    await runtime.turn(session.sessionId, "after cleanup");
-    await runtime.waitForIdle(session.sessionId);
+    await runtime.turns.submit(session.sessionId, "after cleanup");
+    await runtime.turns.waitForIdle(session.sessionId);
     expect(workspaces.prepared).toBe(2);
     expect(existsSync(path.join(session.workspacePath!, ".git"))).toBe(true);
   });
 
   test("a session from before single-repo projects keeps its worktree one level down", async () => {
-    const session = await runtime.createSession();
+    const session = await runtime.sessions.create();
     const sessionDir = session.workspacePath!;
     const legacyDir = path.join(sessionDir, "main");
     // Move the worktree into the old <session>/<repositoryId> layout.
@@ -106,9 +106,9 @@ describe("session workspace usage", () => {
   });
 
   test("closing a session whose worktree is gone does not recreate it", async () => {
-    const session = await runtime.createSession();
+    const session = await runtime.sessions.create();
     await workspaces.removeSession(runtime.project, session.sessionId);
-    await runtime.cleanupSession(session.sessionId);
+    await runtime.sessions.close(session.sessionId);
     expect(workspaces.prepared).toBe(1);
     expect(existsSync(session.workspacePath!)).toBe(false);
   });

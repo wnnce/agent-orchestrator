@@ -116,8 +116,8 @@ export class InboundService {
       const runtime = this.deps.projects.get(session.projectId);
       await this.releaseOnFailure(envelope, () =>
         name === "cancel"
-          ? runtime.interrupt(session.sessionId, argument)
-          : runtime.cleanupSession(session.sessionId),
+          ? runtime.turns.interrupt(session.sessionId, argument)
+          : runtime.sessions.close(session.sessionId),
       );
       if (name === "close") {
         this.deps.logger.info("session closed via /close command", {
