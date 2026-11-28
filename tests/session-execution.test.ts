@@ -11,6 +11,7 @@ import type { ProjectConfig } from "../src/domain/types.ts";
 import { createGlobalProjectConfig } from "../src/project/global.ts";
 import { MemoryEventHub } from "../src/events/hub.ts";
 import { SessionEvents } from "../src/session/events.ts";
+import { NotificationHub, NotificationOutbox } from "../src/notifications/index.ts";
 
 class ControlledRuntime extends FakeRuntime {
   starts: Array<{ context: RuntimeContext; session: string; id: string; input: string }> = [];
@@ -93,6 +94,7 @@ describe("session execution and control", () => {
   let root: string;
   let store: MemoryStore;
   let hub: MemoryEventHub;
+  let notifications: NotificationOutbox;
   let agent: ControlledRuntime;
   let runtime: ProjectRuntime;
   let sessionId: string;
@@ -100,6 +102,8 @@ describe("session execution and control", () => {
     root = await mkdtemp("/tmp/session-execution-");
     store = new MemoryStore();
     hub = new MemoryEventHub(store);
+    const logger = new Logger({ sink: () => {} });
+    notifications = new NotificationOutbox(store, new NotificationHub(logger), logger);
     agent = new ControlledRuntime();
     const project: ProjectConfig = {
       id: "execution",
@@ -114,10 +118,11 @@ describe("session execution and control", () => {
       project,
       store,
       eventHub: hub,
+      notifications,
       agentRuntime: agent,
       workspaces: new WorkspaceManager(path.join(root, "workspaces")),
       artifacts: new ArtifactStore(path.join(root, "artifacts"), store),
-      logger: new Logger({ sink: () => {} }),
+      logger,
       controlTimeoutMs: 30,
       queueLimit: 2,
     });
@@ -210,6 +215,43 @@ describe("session execution and control", () => {
     expect(types).toContain("turn.completed");
     expect(types).not.toContain("notification.queued");
     expect(await store.listNotificationDeliveries()).toHaveLength(0);
+  });
+  test("shutdown drains the failed turn notification after scheduled jobs stop", async () => {
+    runtime.project.notifyOnTurnCompleted = true;
+    runtime.project.notifications = [{ type: "log", name: "completion" }];
+    const turn = await runtime.turns.submit(sessionId, "keep running until shutdown");
+    await agent.started(1);
+
+    let jobsStopped = false;
+    const stopJobs = runtime.scheduledJobs.stop.bind(runtime.scheduledJobs);
+    const stop = spyOn(runtime.scheduledJobs, "stop").mockImplementation(async () => {
+      await stopJobs();
+      jobsStopped = true;
+    });
+    const drainEntries: Array<{ jobsStopped: boolean; notificationQueued: boolean }> = [];
+    const drainOutbox = notifications.drain.bind(notifications);
+    const drain = spyOn(notifications, "drain").mockImplementation(async () => {
+      const jobsStoppedAtEntry = jobsStopped;
+      const events = await store.listEvents(sessionId);
+      drainEntries.push({
+        jobsStopped: jobsStoppedAtEntry,
+        notificationQueued: events.some(
+          (event) => event.type === "notification.queued" && event.turnId === turn.id,
+        ),
+      });
+      await drainOutbox();
+    });
+    try {
+      await runtime.stop();
+      expect(drainEntries).toEqual([{ jobsStopped: true, notificationQueued: true }]);
+      expect((await store.getTurn(turn.id))?.status).toBe("failed");
+      expect(await store.listNotificationDeliveries()).toMatchObject([
+        { status: "sent", message: { metadata: { turnId: turn.id } } },
+      ]);
+    } finally {
+      drain.mockRestore();
+      stop.mockRestore();
+    }
   });
   test("a turn the runtime reports as failed keeps the runtime's reason", async () => {
     const turn = await runtime.turns.submit(sessionId, "fail please");

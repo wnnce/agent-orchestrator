@@ -326,9 +326,9 @@ export class ProjectRuntime {
     this.turns.stopAccepting();
     await this.pipelines.stop().catch(() => {});
     await this.tasks.stop();
-    await this.notifications.drain().catch(() => {});
     await this.turns.stop();
     await this.scheduledJobs.stop();
+    await this.notifications.drain().catch(() => {});
     this.logger.info("project runtime stopped", { projectId: this.project.id });
   }
 

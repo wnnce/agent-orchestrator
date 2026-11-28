@@ -263,7 +263,7 @@ class ProjectRuntime {
 两个周期任务（空闲回收 60s、定时 job 轮询默认 30s）的定时器由 `ProjectRuntime` 持有，各部分只提供一次性的 `sweepIdle()` / `poll()`。
 
 - `start()`：`sessions.reconcile()` → 启动两个定时器 → 加载项目工具和 `hooks.load()`（非全局项目）→ `tasks.reload()` → `pipelines.start()`（非全局项目）。
-- `stop()`：清定时器 → `turns.stopAccepting()` → `pipelines.stop()` → `tasks.stop()` → `notifications.drain()` → `turns.stop()` → `scheduledJobs.stop()`。正在跑的 turn 可以在任务和 pipeline 收尾期间跑完；之后 runtime 被停掉，仍在跑的 turn 判为 failed，等待它们的定时 job 随之结束。
+- `stop()`：清定时器 → `turns.stopAccepting()` → `pipelines.stop()` → `tasks.stop()` → `turns.stop()` → `scheduledJobs.stop()` → `notifications.drain()`。正在跑的 turn 可以在任务和 pipeline 收尾期间跑完。之后 runtime 停止，将仍在跑的 turn 判为 failed 并将完成通知入队（如果开启）。等待这些 turn 的定时 job 随之结束，最后排空通知。
 
 ### 3.9 调用方迁移
 
