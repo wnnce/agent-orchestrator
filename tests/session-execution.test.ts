@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 import { ProjectRuntime } from "../src/project/runtime.ts";
@@ -9,6 +9,8 @@ import { ArtifactStore } from "../src/artifacts/store.ts";
 import { Logger } from "../src/observability/logger.ts";
 import type { ProjectConfig } from "../src/domain/types.ts";
 import { createGlobalProjectConfig } from "../src/project/global.ts";
+import { MemoryEventHub } from "../src/events/hub.ts";
+import { SessionEvents } from "../src/session/events.ts";
 
 class ControlledRuntime extends FakeRuntime {
   starts: Array<{ context: RuntimeContext; session: string; id: string; input: string }> = [];
@@ -90,12 +92,14 @@ describe("global project", () => {
 describe("session execution and control", () => {
   let root: string;
   let store: MemoryStore;
+  let hub: MemoryEventHub;
   let agent: ControlledRuntime;
   let runtime: ProjectRuntime;
   let sessionId: string;
   beforeEach(async () => {
     root = await mkdtemp("/tmp/session-execution-");
     store = new MemoryStore();
+    hub = new MemoryEventHub(store);
     agent = new ControlledRuntime();
     const project: ProjectConfig = {
       id: "execution",
@@ -109,6 +113,7 @@ describe("session execution and control", () => {
     runtime = new ProjectRuntime({
       project,
       store,
+      eventHub: hub,
       agentRuntime: agent,
       workspaces: new WorkspaceManager(path.join(root, "workspaces")),
       artifacts: new ArtifactStore(path.join(root, "artifacts"), store),
@@ -370,7 +375,13 @@ describe("session execution and control", () => {
     const entity = runtime.sessionManager.get(sessionId)!;
     entity.touch(new Date(Date.now() - 1500).toISOString());
     await runtime.sessionManager.save(sessionId);
-    await runtime.sessions.sweepIdle();
+    const forget = spyOn(SessionEvents.prototype, "forget");
+    try {
+      await runtime.sessions.sweepIdle();
+      expect(forget).not.toHaveBeenCalled();
+    } finally {
+      forget.mockRestore();
+    }
     expect(entity.status).toBe("suspended");
     expect(agent.released).toHaveLength(1);
     const turn = await runtime.turns.submit(sessionId, "resume");
@@ -380,6 +391,41 @@ describe("session execution and control", () => {
     expect(entity.status).toBe("active");
     expect((await store.getTurn(turn.id))?.status).toBe("completed");
   });
+  test.each(["explicit", "idle"] as const)(
+    "%s archive forgets event caches after publishing the archived event",
+    async (mode) => {
+      const steps: string[] = [];
+      const unsubscribe = hub.subscribeSession(sessionId, (event) => {
+        if (event.type === "session.archived") steps.push(event.type);
+      });
+      const originalForget = SessionEvents.prototype.forget;
+      const forget = spyOn(SessionEvents.prototype, "forget").mockImplementation(function (
+        this: SessionEvents,
+        id,
+      ) {
+        steps.push("forget");
+        originalForget.call(this, id);
+      });
+      try {
+        if (mode === "explicit") {
+          await runtime.sessions.archive(sessionId, "test");
+        } else {
+          runtime.sessionManager.get(sessionId)!.touch(new Date(Date.now() - 3000).toISOString());
+          await runtime.sessionManager.save(sessionId);
+          await runtime.sessions.sweepIdle();
+        }
+        expect(steps).toEqual(["session.archived", "forget"]);
+        expect(forget).toHaveBeenCalledWith(sessionId);
+        expect((await runtime.sessions.events(sessionId)).map((event) => event.type)).toEqual([
+          "session.started",
+          "session.archived",
+        ]);
+      } finally {
+        forget.mockRestore();
+        unsubscribe();
+      }
+    },
+  );
   test("active work cannot be archived and completing work refreshes idle time", async () => {
     await runtime.turns.submit(sessionId, "long");
     await agent.started(1);

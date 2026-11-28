@@ -197,7 +197,7 @@ class SessionLifecycle {
 }
 ```
 
-- `close` 和 `archive` 都先 `turns.quiesce()`，再各自处理 runtime 释放、worktree、状态和事件。`close` 最后 `events.forget()`、`sessions.remove()`。
+- `close` 和 `archive` 都先 `turns.quiesce()`，再各自处理 runtime 释放、worktree、状态和事件。`close` 最后 `events.forget()`、`sessions.remove()`。显式归档和空闲归档在发布 `session.archived` 后调用 `events.forget()` 清除事件缓存。空闲挂起保留缓存。
 - `title` 是显式参数；`metadata.title` 仍会写入，兼容读取 metadata 的地方。
 - `deleteFromStore: false` 的双重否定改为 `retain: true`。
 - `sweepIdle` 对每个 session 用 `turns.maintain()` 包住，代替原来散落的忙碌判断。
