@@ -136,6 +136,17 @@ describe("session execution and control", () => {
     await runtime.turns.waitForIdle(sessionId);
     expect((await store.getTurn(second.id))?.status).toBe("completed");
   });
+  test("a session is busy while a turn runs and idle once its turns are done", async () => {
+    expect(runtime.turns.isBusy(sessionId)).toBe(false);
+    await runtime.turns.submit(sessionId, "work");
+    await agent.started(1);
+    expect(runtime.turns.isBusy(sessionId)).toBe(true);
+    expect(runtime.turns.activeTurn(sessionId)).toBeDefined();
+    await agent.finish(0);
+    await runtime.turns.waitForIdle(sessionId);
+    expect(runtime.turns.isBusy(sessionId)).toBe(false);
+    expect(runtime.turns.activeTurn(sessionId)).toBeUndefined();
+  });
   test("compaction is rejected while a turn is running", async () => {
     await runtime.turns.submit(sessionId, "long");
     await agent.started(1);
