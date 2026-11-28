@@ -204,6 +204,7 @@ export class SessionLifecycle {
     await entity.transitionTo("archived");
     await entity.flush(store);
     await events.emit(entity.toRoute(), "session.archived", "gateway", { reason });
+    events.forget(sessionId);
   }
 
   /**
@@ -272,6 +273,7 @@ export class SessionLifecycle {
       "gateway",
       { idleDurationMs: idle },
     );
+    if (archive) this.deps.events.forget(sessionId);
   }
 
   private async runClose(sessionId: string, retain: boolean): Promise<void> {

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 import { ProjectRuntime } from "../src/project/runtime.ts";
@@ -9,6 +9,9 @@ import { ArtifactStore } from "../src/artifacts/store.ts";
 import { Logger } from "../src/observability/logger.ts";
 import type { ProjectConfig } from "../src/domain/types.ts";
 import { createGlobalProjectConfig } from "../src/project/global.ts";
+import { MemoryEventHub } from "../src/events/hub.ts";
+import { SessionEvents } from "../src/session/events.ts";
+import { NotificationHub, NotificationOutbox } from "../src/notifications/index.ts";
 
 class ControlledRuntime extends FakeRuntime {
   starts: Array<{ context: RuntimeContext; session: string; id: string; input: string }> = [];
@@ -90,12 +93,19 @@ describe("global project", () => {
 describe("session execution and control", () => {
   let root: string;
   let store: MemoryStore;
+  let hub: MemoryEventHub;
+  let notificationHub: NotificationHub;
+  let notifications: NotificationOutbox;
   let agent: ControlledRuntime;
   let runtime: ProjectRuntime;
   let sessionId: string;
   beforeEach(async () => {
     root = await mkdtemp("/tmp/session-execution-");
     store = new MemoryStore();
+    hub = new MemoryEventHub(store);
+    const logger = new Logger({ sink: () => {} });
+    notificationHub = new NotificationHub(logger);
+    notifications = new NotificationOutbox(store, notificationHub, logger);
     agent = new ControlledRuntime();
     const project: ProjectConfig = {
       id: "execution",
@@ -109,10 +119,12 @@ describe("session execution and control", () => {
     runtime = new ProjectRuntime({
       project,
       store,
+      eventHub: hub,
+      notifications,
       agentRuntime: agent,
       workspaces: new WorkspaceManager(path.join(root, "workspaces")),
       artifacts: new ArtifactStore(path.join(root, "artifacts"), store),
-      logger: new Logger({ sink: () => {} }),
+      logger,
       controlTimeoutMs: 30,
       queueLimit: 2,
     });
@@ -205,6 +217,90 @@ describe("session execution and control", () => {
     expect(types).toContain("turn.completed");
     expect(types).not.toContain("notification.queued");
     expect(await store.listNotificationDeliveries()).toHaveLength(0);
+  });
+  test("shutdown drains the failed turn notification after scheduled jobs stop", async () => {
+    runtime.project.notifyOnTurnCompleted = true;
+    runtime.project.notifications = [{ type: "log", name: "completion" }];
+    const turn = await runtime.turns.submit(sessionId, "keep running until shutdown");
+    await agent.started(1);
+
+    let jobsStopped = false;
+    const stopJobs = runtime.scheduledJobs.stop.bind(runtime.scheduledJobs);
+    const stop = spyOn(runtime.scheduledJobs, "stop").mockImplementation(async () => {
+      await stopJobs();
+      jobsStopped = true;
+    });
+    const drainEntries: Array<{ jobsStopped: boolean; notificationQueued: boolean }> = [];
+    const drainOutbox = notifications.drain.bind(notifications);
+    const drain = spyOn(notifications, "drain").mockImplementation(async () => {
+      const jobsStoppedAtEntry = jobsStopped;
+      const events = await store.listEvents(sessionId);
+      drainEntries.push({
+        jobsStopped: jobsStoppedAtEntry,
+        notificationQueued: events.some(
+          (event) => event.type === "notification.queued" && event.turnId === turn.id,
+        ),
+      });
+      await drainOutbox();
+    });
+    try {
+      await runtime.stop();
+      expect(drainEntries).toEqual([{ jobsStopped: true, notificationQueued: true }]);
+      expect((await store.getTurn(turn.id))?.status).toBe("failed");
+      expect(await store.listNotificationDeliveries()).toMatchObject([
+        { status: "sent", message: { metadata: { turnId: turn.id } } },
+      ]);
+    } finally {
+      drain.mockRestore();
+      stop.mockRestore();
+    }
+  });
+  test("shutdown waits for pending notifications before returning a turn settlement error", async () => {
+    const delivery = Promise.withResolvers<void>();
+    notificationHub.register({ type: "log", send: () => delivery.promise });
+    runtime.project.notifyOnTurnCompleted = true;
+    runtime.project.notifications = [{ type: "log", name: "completion" }];
+    const completed = await runtime.turns.submit(sessionId, "finish before shutdown");
+    await agent.started(1);
+    await agent.finish(0);
+    await runtime.turns.waitForIdle(sessionId);
+    await runtime.turns.submit(sessionId, "keep running until shutdown");
+    await agent.started(2);
+
+    const settlementError = new Error("failed to persist turn settlement");
+    const updateTurn = store.updateTurn.bind(store);
+    const update = spyOn(store, "updateTurn").mockImplementation(async (id, patch) => {
+      if (patch.status === "failed") throw settlementError;
+      await updateTurn(id, patch);
+    });
+    const draining = Promise.withResolvers<void>();
+    const drainOutbox = notifications.drain.bind(notifications);
+    const drain = spyOn(notifications, "drain").mockImplementation(() => {
+      draining.resolve();
+      return drainOutbox();
+    });
+    const shutdown = runtime.stop().catch(async (error: unknown) => ({
+      error,
+      deliveries: await store.listNotificationDeliveries(),
+    }));
+    try {
+      const first = await Promise.race([
+        draining.promise.then(() => "draining"),
+        shutdown.then(() => "stopped"),
+      ]);
+      expect(first).toBe("draining");
+      delivery.resolve();
+      const result = await shutdown;
+      expect(result?.error).toBe(settlementError);
+      expect(result?.deliveries).toMatchObject([
+        { status: "sent", message: { metadata: { turnId: completed.id } } },
+      ]);
+    } finally {
+      delivery.resolve();
+      await shutdown;
+      drain.mockRestore();
+      update.mockRestore();
+    }
   });
   test("a turn the runtime reports as failed keeps the runtime's reason", async () => {
     const turn = await runtime.turns.submit(sessionId, "fail please");
@@ -370,7 +466,13 @@ describe("session execution and control", () => {
     const entity = runtime.sessionManager.get(sessionId)!;
     entity.touch(new Date(Date.now() - 1500).toISOString());
     await runtime.sessionManager.save(sessionId);
-    await runtime.sessions.sweepIdle();
+    const forget = spyOn(SessionEvents.prototype, "forget");
+    try {
+      await runtime.sessions.sweepIdle();
+      expect(forget).not.toHaveBeenCalled();
+    } finally {
+      forget.mockRestore();
+    }
     expect(entity.status).toBe("suspended");
     expect(agent.released).toHaveLength(1);
     const turn = await runtime.turns.submit(sessionId, "resume");
@@ -380,6 +482,41 @@ describe("session execution and control", () => {
     expect(entity.status).toBe("active");
     expect((await store.getTurn(turn.id))?.status).toBe("completed");
   });
+  test.each(["explicit", "idle"] as const)(
+    "%s archive forgets event caches after publishing the archived event",
+    async (mode) => {
+      const steps: string[] = [];
+      const unsubscribe = hub.subscribeSession(sessionId, (event) => {
+        if (event.type === "session.archived") steps.push(event.type);
+      });
+      const originalForget = SessionEvents.prototype.forget;
+      const forget = spyOn(SessionEvents.prototype, "forget").mockImplementation(function (
+        this: SessionEvents,
+        id,
+      ) {
+        steps.push("forget");
+        originalForget.call(this, id);
+      });
+      try {
+        if (mode === "explicit") {
+          await runtime.sessions.archive(sessionId, "test");
+        } else {
+          runtime.sessionManager.get(sessionId)!.touch(new Date(Date.now() - 3000).toISOString());
+          await runtime.sessionManager.save(sessionId);
+          await runtime.sessions.sweepIdle();
+        }
+        expect(steps).toEqual(["session.archived", "forget"]);
+        expect(forget).toHaveBeenCalledWith(sessionId);
+        expect((await runtime.sessions.events(sessionId)).map((event) => event.type)).toEqual([
+          "session.started",
+          "session.archived",
+        ]);
+      } finally {
+        forget.mockRestore();
+        unsubscribe();
+      }
+    },
+  );
   test("active work cannot be archived and completing work refreshes idle time", async () => {
     await runtime.turns.submit(sessionId, "long");
     await agent.started(1);

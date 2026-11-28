@@ -197,7 +197,7 @@ class SessionLifecycle {
 }
 ```
 
-- `close` 和 `archive` 都先 `turns.quiesce()`，再各自处理 runtime 释放、worktree、状态和事件。`close` 最后 `events.forget()`、`sessions.remove()`。
+- `close` 和 `archive` 都先 `turns.quiesce()`，再各自处理 runtime 释放、worktree、状态和事件。`close` 最后 `events.forget()`、`sessions.remove()`。显式归档和空闲归档在发布 `session.archived` 后调用 `events.forget()` 清除事件缓存。空闲挂起保留缓存。
 - `title` 是显式参数；`metadata.title` 仍会写入，兼容读取 metadata 的地方。
 - `deleteFromStore: false` 的双重否定改为 `retain: true`。
 - `sweepIdle` 对每个 session 用 `turns.maintain()` 包住，代替原来散落的忙碌判断。
@@ -263,7 +263,7 @@ class ProjectRuntime {
 两个周期任务（空闲回收 60s、定时 job 轮询默认 30s）的定时器由 `ProjectRuntime` 持有，各部分只提供一次性的 `sweepIdle()` / `poll()`。
 
 - `start()`：`sessions.reconcile()` → 启动两个定时器 → 加载项目工具和 `hooks.load()`（非全局项目）→ `tasks.reload()` → `pipelines.start()`（非全局项目）。
-- `stop()`：清定时器 → `turns.stopAccepting()` → `pipelines.stop()` → `tasks.stop()` → `notifications.drain()` → `turns.stop()` → `scheduledJobs.stop()`。正在跑的 turn 可以在任务和 pipeline 收尾期间跑完；之后 runtime 被停掉，仍在跑的 turn 判为 failed，等待它们的定时 job 随之结束。
+- `stop()`：清定时器 → `turns.stopAccepting()` → `pipelines.stop()` → `tasks.stop()` → `turns.stop()` → `scheduledJobs.stop()` → `notifications.drain()`。正在跑的 turn 可以在任务和 pipeline 收尾期间跑完。之后 runtime 停止，将仍在跑的 turn 判为 failed 并将完成通知入队（如果开启）。等待这些 turn 的定时 job 随之结束，最后排空通知。停止 turn 或定时 job 失败时，仍会等待通知排空，再向调用方抛出原停止错误。
 
 ### 3.9 调用方迁移
 
